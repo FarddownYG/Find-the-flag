@@ -7,9 +7,15 @@
  * binary data 4 digits), and the digit groups are scattered between the visible words.
  */
 import { ToolError } from '../../core/errors';
+import { toolT } from '../../i18n/tool-text';
 import { plaintextScore } from '../../lib/english';
 import { utf8Decode, utf8Encode } from '../../lib/bytes';
 import { morseToText } from '../audio/_morse';
+
+const T = toolT('zero-width');
+/** The parts of a reading's detail, listed ("ZWSP=0 ZWNJ=1, 8 digits per byte"). */
+const listParts = (...parts: (string | false)[]): string =>
+  parts.filter((p): p is string => !!p).join(T('text.listSep'));
 
 export type CharKind = 'invisible' | 'space' | 'control';
 
@@ -204,7 +210,7 @@ export function classify(cp: number, includeSpaces = true): SpecialChar | null {
     if (cp >= 0xe0020 && cp <= 0xe007e) {
       return { kind: 'invisible', name: `TAG CHARACTER "${ch}"`, abbr: `TAG:${ch}` };
     }
-    return { kind: 'invisible', name: 'TAG (unassigned)', abbr: `TAG${hex(cp - 0xe0000)}` };
+    return { kind: 'invisible', name: T('value.tagUnassigned'), abbr: `TAG${hex(cp - 0xe0000)}` };
   }
   if (cp < 0x20 && cp !== 9 && cp !== 10 && cp !== 13) {
     return { kind: 'control', name: C0[cp]!, abbr: C0_ABBR[cp]! };
@@ -226,7 +232,11 @@ export const codePointsOf = (text: string): number[] =>
 
 // ---------- decoding ----------
 
+/** Which family of readings a candidate comes from (what `scheme` names). */
+export type SchemeId = '330k' | 'tags' | 'variation' | 'base-k' | 'groups' | 'morse' | 'spaces';
+
 export interface Candidate {
+  id: SchemeId;
   /** Scheme family, e.g. "330k unicode steganography". */
   scheme: string;
   /** Character-to-digit mapping and framing, e.g. "ZWSP=0 ZWNJ=1, 8 bits per byte, MSB first". */
@@ -277,7 +287,7 @@ export function readability(value: string): number {
 }
 
 function makeCandidate(
-  scheme: string,
+  [id, scheme]: [SchemeId, string],
   detail: string,
   text: string,
   bytes?: Uint8Array,
@@ -285,7 +295,14 @@ function makeCandidate(
   leftover = 0,
 ): Candidate {
   const b = bytes ?? utf8Encode(text);
-  return { scheme, detail, bytes: b, text, score: readability(text) * (leftover > 0 ? 0.85 : 1) };
+  return {
+    id,
+    scheme,
+    detail,
+    bytes: b,
+    text,
+    score: readability(text) * (leftover > 0 ? 0.85 : 1),
+  };
 }
 
 /** Smallest m with k^m >= limit (digits needed per value). */
@@ -326,13 +343,24 @@ function describeMapping(chars: number[]): string {
 }
 
 /** Decode a stream of symbols as base-k digits under every character order and framing. */
-function decodeBaseK(stream: number[], chars: number[], family: string, out: Candidate[]) {
+function decodeBaseK(
+  stream: number[],
+  chars: number[],
+  family: [SchemeId, string],
+  out: Candidate[],
+) {
   const k = chars.length;
   const frames: { label: string; limit: number; kind: 'byte' | 'u16' | 'ascii7' }[] = [
-    { label: `${digitsNeeded(k, 256)} digits per byte`, limit: 256, kind: 'byte' },
-    { label: `${digitsNeeded(k, 65536)} digits per 16-bit character`, limit: 65536, kind: 'u16' },
+    { label: T('detail.digitsPerByte', { n: digitsNeeded(k, 256) }), limit: 256, kind: 'byte' },
+    {
+      label: T('detail.digitsPerChar16', { n: digitsNeeded(k, 65536) }),
+      limit: 65536,
+      kind: 'u16',
+    },
   ];
-  if (k === 2) frames.push({ label: '7 bits per ASCII character', limit: 128, kind: 'ascii7' });
+  if (k === 2) frames.push({ label: T('detail.ascii7'), limit: 128, kind: 'ascii7' });
+  const msb = T('detail.msbFirst');
+  const lsb = T('detail.lsbFirst');
   for (const order of permutations(chars)) {
     const index = new Map(order.map((cp, i) => [cp, i]));
     const digits = stream.map((cp) => index.get(cp)!);
@@ -346,7 +374,12 @@ function decodeBaseK(stream: number[], chars: number[], family: string, out: Can
         for (const little of [false, true]) {
           const values = groupDigits(digits.slice(offset), k, m, little, frame.limit);
           if (!values || !values.length) continue;
-          const detail = `${describeMapping(order)}, ${frame.label}, ${little ? 'least' : 'most'} significant first${offset ? ', skipping the first ' + offset : ''}`;
+          const detail = listParts(
+            describeMapping(order),
+            frame.label,
+            little ? lsb : msb,
+            offset > 0 && T('detail.skipFirst', { n: offset }),
+          );
           if (frame.kind === 'u16') {
             out.push(makeCandidate(family, detail, fromUnits(values), undefined, rest));
           } else {
@@ -410,16 +443,16 @@ export function decodeAll(text: string): Candidate[] {
   const c330 = hidden.filter((cp) => CODE_330K.includes(cp)).map((cp) => CODE_330K.indexOf(cp));
   if (c330.length >= 4) {
     const from = out.length;
-    const family = '330k unicode steganography';
+    const family: [SchemeId, string] = ['330k', T('scheme.k330')];
     const detail = describeMapping(CODE_330K);
     for (const offset of [0, c330.length % 8].filter((o, i, all) => all.indexOf(o) === i)) {
       const wide = groupDigits(c330.slice(offset), 4, 8, false, 65536);
       if (wide?.length) {
-        const skip = offset ? `, skipping the first ${offset}` : '';
+        const skip = offset > 0 && T('detail.skipFirst', { n: offset });
         out.push(
           makeCandidate(
             family,
-            `${detail}, text mode (8 digits per character)${skip}`,
+            listParts(detail, T('detail.textMode'), skip),
             fromUnits(wide),
             undefined,
             c330.length % 8,
@@ -431,11 +464,11 @@ export function decodeAll(text: string): Candidate[] {
       const narrow = groupDigits(c330.slice(offset), 4, 4, false, 256);
       if (narrow?.length) {
         const bytes = Uint8Array.from(narrow);
-        const skip = offset ? `, skipping the first ${offset}` : '';
+        const skip = offset > 0 && T('detail.skipFirst', { n: offset });
         out.push(
           makeCandidate(
             family,
-            `${detail}, binary mode (4 digits per byte)${skip}`,
+            listParts(detail, T('detail.binaryMode'), skip),
             utf8Decode(bytes),
             bytes,
             c330.length % 4,
@@ -452,13 +485,7 @@ export function decodeAll(text: string): Candidate[] {
     const ascii = tags.filter((cp) => cp >= 0xe0020 && cp <= 0xe007e).map((cp) => cp - 0xe0000);
     if (ascii.length) {
       const from = out.length;
-      out.push(
-        makeCandidate(
-          'Unicode tag characters',
-          'U+E0020..E007E, subtract U+E0000',
-          fromUnits(ascii),
-        ),
-      );
+      out.push(makeCandidate(['tags', T('scheme.tags')], T('detail.tags'), fromUnits(ascii)));
       weigh(out, from, tags.length, hidden.length);
     }
   }
@@ -472,7 +499,7 @@ export function decodeAll(text: string): Candidate[] {
     const from = out.length;
     out.push(
       makeCandidate(
-        'Variation selectors as bytes',
+        ['variation', T('scheme.variation')],
         'VS1..VS256 = 0..255',
         utf8Decode(bytes),
         bytes,
@@ -489,7 +516,7 @@ export function decodeAll(text: string): Candidate[] {
       // 5 symbols mean 120 orderings: only worth it while the stream is small.
       if (set.length === 5 && stream.length > 20000) continue;
       const from = out.length;
-      decodeBaseK(stream, set, `Invisible characters as base-${set.length} digits`, out);
+      decodeBaseK(stream, set, ['base-k', T('scheme.baseK', { k: set.length })], out);
       weigh(out, from, stream.length, hidden.length);
     }
   }
@@ -512,18 +539,24 @@ export function decodeAll(text: string): Candidate[] {
         }
         const used = groups.filter((g) => g.length);
         if (used.length < 2) continue;
-        const detail = `${classify(sep)?.abbr} separates, ${classify(zero)?.abbr}=0 ${classify(one)?.abbr}=1`;
+        const abbrs = {
+          sep: String(classify(sep)?.abbr),
+          zero: String(classify(zero)?.abbr),
+          one: String(classify(one)?.abbr),
+        };
         const chars = used.map((g) => g.reduce((a, b) => a * 2 + b, 0));
         if (chars.every((v) => v > 0 && v < 0x110000)) {
-          out.push(makeCandidate('Binary groups split by a separator', detail, fromPoints(chars)));
+          out.push(
+            makeCandidate(
+              ['groups', T('scheme.groups')],
+              T('detail.groups', abbrs),
+              fromPoints(chars),
+            ),
+          );
         }
         const morse = used.map((g) => g.map((b) => (b ? '-' : '.')).join('')).join(' ');
         out.push(
-          makeCandidate(
-            'Morse code (one symbol between letters)',
-            `${classify(sep)?.abbr} separates, ${classify(zero)?.abbr}=dot ${classify(one)?.abbr}=dash`,
-            morseToText(morse),
-          ),
+          makeCandidate(['morse', T('scheme.morse')], T('detail.morse', abbrs), morseToText(morse)),
         );
         // Unknown codes make a Morse reading unlikely, however readable the rest looks.
         const last = out[out.length - 1]!;
@@ -543,10 +576,11 @@ export function decodeAll(text: string): Candidate[] {
       .map(([cp]) => cp);
     const stream = spaces.filter((cp) => top.includes(cp));
     const before = out.length;
-    decodeBaseK(stream, top, 'Two kinds of space as bits', out);
+    decodeBaseK(stream, top, ['spaces', T('scheme.spaces')], out);
     weigh(out, before, stream.length, spaces.length);
+    const space = T('detail.space');
     for (let i = before; i < out.length; i++) {
-      out[i]!.detail = out[i]!.detail.replace(/U\+0020/g, 'space');
+      out[i]!.detail = out[i]!.detail.replace(/U\+0020/g, space);
     }
   }
 
@@ -598,9 +632,7 @@ export function encodePayload(
     for (const ch of secret) {
       const cp = ch.codePointAt(0)!;
       if (cp < 0x20 || cp > 0x7e) {
-        throw new ToolError(
-          `Tag characters can only carry printable ASCII ("${ch}" is not). Use the Binary or 330k scheme for other text.`,
-        );
+        throw new ToolError(T('error.tagsAscii', { char: ch }));
       }
       units.push(String.fromCodePoint(0xe0000 + cp));
     }

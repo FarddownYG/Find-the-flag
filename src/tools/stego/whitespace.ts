@@ -1,8 +1,14 @@
 import { defineTool, number, select, text, toggle } from '../../core/define';
 import { ToolError } from '../../core/errors';
 import type { Output } from '../../core/types';
+import { toolT } from '../../i18n/tool-text';
 import { utf8Decode, utf8Encode } from '../../lib/bytes';
 import { readability } from './_zerowidth';
+
+const T = toolT('whitespace');
+/** The parts of a reading's detail, listed ("space=0 tab=1, 8 bits per character"). */
+const listParts = (...parts: (string | false)[]): string =>
+  parts.filter((p): p is string => !!p).join(T('text.listSep'));
 
 /** Table rows and map lines shown before the output is cut off. */
 const MAX_SHOWN = 200;
@@ -14,7 +20,11 @@ export interface WsLine {
   ws: string;
 }
 
+/** Which family of readings a reading comes from (what `scheme` names). */
+export type WsSchemeId = 'snow' | 'trailing' | 'lines' | 'gaps';
+
 export interface Reading {
+  id: WsSchemeId;
   scheme: string;
   detail: string;
   bytes: Uint8Array;
@@ -46,14 +56,23 @@ function bitsToBytes(bits: number[], width: 7 | 8, msb: boolean, offset: number)
   return out;
 }
 
-function reading(scheme: string, detail: string, bytes: Uint8Array): Reading | null {
+function reading(
+  [id, scheme]: [WsSchemeId, string],
+  detail: string,
+  bytes: Uint8Array,
+): Reading | null {
   if (!bytes.length) return null;
   const text = utf8Decode(bytes);
-  return { scheme, detail, bytes, text, score: readability(text) };
+  return { id, scheme, detail, bytes, text, score: readability(text) };
 }
 
 /** Every way of packing a bit stream into bytes: 8 or 7 bits, either bit order, either end. */
-function framings(bits: number[], scheme: string, detail: string, preferred = false): Reading[] {
+function framings(
+  bits: number[],
+  scheme: [WsSchemeId, string],
+  detail: string,
+  preferred = false,
+): Reading[] {
   const out: Reading[] = [];
   for (const width of [8, 7] as const) {
     const rest = bits.length % width;
@@ -61,7 +80,12 @@ function framings(bits: number[], scheme: string, detail: string, preferred = fa
       for (const msb of [true, false]) {
         const r = reading(
           scheme,
-          `${detail}, ${width} bits per character, ${msb ? 'most' : 'least'} significant bit first${offset ? `, skipping the first ${offset}` : ''}`,
+          listParts(
+            detail,
+            T('detail.bitsPerChar', { n: width }),
+            msb ? T('detail.msbFirst') : T('detail.lsbFirst'),
+            offset > 0 && T('detail.skipFirst', { n: offset }),
+          ),
           bitsToBytes(bits, width, msb, offset),
         );
         if (r) {
@@ -110,8 +134,12 @@ export function decodeWhitespace(input: string): Reading[] {
       );
       for (const byteMsb of [true, false]) {
         const r = reading(
-          'stegsnow (spaces and tabs, 3 bits per group)',
-          `bits in a group ${groupMsb ? 'high' : 'low'} first, bits in a byte ${byteMsb ? 'high' : 'low'} first${tail ? ', spaces after the last tab count' : ''}`,
+          ['snow', T('scheme.snow')],
+          listParts(
+            groupMsb ? T('detail.groupHigh') : T('detail.groupLow'),
+            byteMsb ? T('detail.byteHigh') : T('detail.byteLow'),
+            tail && T('detail.tailSpaces'),
+          ),
           bitsToBytes(bits, 8, byteMsb, 0),
         );
         if (r) {
@@ -131,8 +159,8 @@ export function decodeWhitespace(input: string): Reading[] {
       found.push(
         ...framings(
           bits,
-          'Trailing whitespace as bits',
-          spaceIsZero ? 'space=0 tab=1' : 'space=1 tab=0',
+          ['trailing', T('scheme.trailing')],
+          spaceIsZero ? T('detail.space0') : T('detail.space1'),
           spaceIsZero,
         ),
       );
@@ -148,8 +176,11 @@ export function decodeWhitespace(input: string): Reading[] {
       found.push(
         ...framings(
           bits,
-          'One bit per line (trailing whitespace or not)',
-          `${marked ? 'with' : 'without'} trailing whitespace = 1${skipBlank ? ', blank lines skipped' : ''}`,
+          ['lines', T('scheme.lines')],
+          listParts(
+            marked ? T('detail.withWs') : T('detail.withoutWs'),
+            skipBlank && T('detail.blankSkipped'),
+          ),
         ),
       );
     }
@@ -163,8 +194,8 @@ export function decodeWhitespace(input: string): Reading[] {
       found.push(
         ...framings(
           bits,
-          'Single or double space between words',
-          doubleIsOne ? 'two spaces=1' : 'two spaces=0',
+          ['gaps', T('scheme.gaps')],
+          doubleIsOne ? T('detail.double1') : T('detail.double0'),
         ),
       );
     }
@@ -217,7 +248,12 @@ export function encodeSnow(cover: string, secret: string, lineLength = 80): stri
   const capacity = lines.reduce((a, l) => a + snowCapacity(l, lineLength), 0);
   if (capacity < groups.length) {
     throw new ToolError(
-      `The cover text is too short: its ${lines.length} lines can hold ${Math.floor((capacity * 3) / 8)} bytes at ${lineLength} columns, the secret needs ${bytes.length}. Add more lines, shorten the secret, or raise the line length.`,
+      T('error.snowRoom', {
+        lines: lines.length,
+        capacity: Math.floor((capacity * 3) / 8),
+        columns: lineLength,
+        needed: bytes.length,
+      }),
     );
   }
   let next = 0;
@@ -238,9 +274,7 @@ export function encodeBinary(cover: string, secret: string): string {
   const bytes = utf8Encode(secret);
   const lines = splitLines(cover).map((l) => l.text);
   if (lines.length < bytes.length) {
-    throw new ToolError(
-      `The cover text has ${lines.length} lines but the secret needs ${bytes.length} (one byte per line). Add lines or shorten the secret.`,
-    );
+    throw new ToolError(T('error.binaryRoom', { lines: lines.length, needed: bytes.length }));
   }
   const out = lines.map((line, i) => {
     const byte = bytes[i];
@@ -283,9 +317,7 @@ function decode(input: string): Output[] {
   const withWs = lines.filter((l) => l.ws);
   const onlyWhitespace = /^[ \t\r\n]+$/.test(input) && input.length >= 20;
   if (!withWs.length) {
-    throw new ToolError(
-      'No line ends in spaces or tabs. If the text came through a website or chat, the trailing whitespace may have been stripped: open the original file instead.',
-    );
+    throw new ToolError(T('error.noTrailing'));
   }
   const spaces = withWs.reduce((a, l) => a + [...l.ws].filter((c) => c === ' ').length, 0);
   const tabs = withWs.reduce((a, l) => a + [...l.ws].filter((c) => c === '\t').length, 0);
@@ -293,7 +325,7 @@ function decode(input: string): Output[] {
   const out: Output[] = [];
   const best = readings[0];
   if (best) {
-    const label = `Best reading · ${best.scheme}`;
+    const label = T('label.best', { scheme: best.scheme });
     out.push(
       looksTextual(best.text)
         ? { type: 'text', label, value: best.text }
@@ -303,13 +335,13 @@ function decode(input: string): Output[] {
       out.push({
         type: 'note',
         level: 'warn',
-        text: 'No reading looks like plain text. If the message was hidden with stegsnow using -C (compression) or -p (a password), the bits are compressed or encrypted: run stegsnow itself with the same options to read them.',
+        text: T('text.notPlain'),
       });
     }
     out.push({
       type: 'table',
-      label: 'Every reading, most readable first',
-      columns: ['Rank', 'Scheme', 'Detail', 'Score', 'Result'],
+      label: T('label.readings'),
+      columns: [T('col.rank'), T('col.scheme'), T('col.detail'), T('col.score'), T('col.result')],
       rows: readings
         .slice(0, 12)
         .map((r, i) => [i + 1, r.scheme, r.detail, r.score.toFixed(1), preview(r.text)]),
@@ -319,32 +351,29 @@ function decode(input: string): Output[] {
     out.push({
       type: 'note',
       level: 'warn',
-      text: 'There is trailing whitespace but not enough of it to read anything (try the whitespace map below).',
+      text: T('text.tooLittle'),
     });
   }
   out.push({
     type: 'kv',
-    label: 'Whitespace found',
+    label: T('label.found'),
     entries: [
-      ['Lines', String(lines.length)],
-      ['Lines ending in spaces or tabs', `${withWs.length} of ${lines.length}`],
-      ['Trailing spaces', String(spaces)],
-      ['Trailing tabs', String(tabs)],
+      [T('kv.lines'), String(lines.length)],
+      [T('kv.linesWithWs'), T('value.of', { n: withWs.length, total: lines.length })],
+      [T('kv.spaces'), String(spaces)],
+      [T('kv.tabs'), String(tabs)],
     ],
   });
   out.push({
     type: 'text',
-    label:
-      lines.length > MAX_SHOWN
-        ? `Trailing whitespace made visible (first ${MAX_SHOWN} lines; · = space, → = tab)`
-        : 'Trailing whitespace made visible (· = space, → = tab)',
+    label: lines.length > MAX_SHOWN ? T('label.mapCut', { max: MAX_SHOWN }) : T('label.map'),
     value: visibleMap(lines),
   });
   if (onlyWhitespace) {
     out.push({
       type: 'note',
       level: 'info',
-      text: 'The whole text is spaces, tabs and line feeds: that can be a program in the Whitespace esoteric language. Run it in a Whitespace interpreter; this tool does not execute programs.',
+      text: T('text.whitespaceLanguage'),
     });
   }
   return out;
@@ -356,8 +385,8 @@ function encode(
   scheme: 'snow' | 'binary',
   lineLength: number,
 ): Output[] {
-  if (!secret) throw new ToolError('Type the message to hide in the "Secret message" option.');
-  if (!cover.trim()) throw new ToolError('Type the cover text (several lines) in the input box.');
+  if (!secret) throw new ToolError(T('error.noSecret'));
+  if (!cover.trim()) throw new ToolError(T('error.noCover'));
   const result =
     scheme === 'snow' ? encodeSnow(cover, secret, lineLength) : encodeBinary(cover, secret);
   const back = decodeWhitespace(result)[0];
@@ -367,25 +396,17 @@ function encode(
     {
       type: 'note',
       level: 'success',
-      text: `Hidden ${utf8Encode(secret).length} bytes in the trailing whitespace of ${used} lines. Copy the text below with its spaces and tabs intact.`,
+      text: T('text.hidden', { count: utf8Encode(secret).length, lines: used }),
     },
-    { type: 'text', label: 'Text with hidden whitespace (copy all of it)', value: result },
+    { type: 'text', label: T('label.stego'), value: result },
     {
       type: 'text',
-      label: 'Whitespace made visible (· = space, → = tab)',
+      label: T('label.visibleMap'),
       value: visibleMap(splitLines(result)),
     },
     ok
-      ? {
-          type: 'note',
-          level: 'success',
-          text: 'Round-trip check passed: decoding returns the secret.',
-        }
-      : {
-          type: 'note',
-          level: 'warn',
-          text: 'Round-trip check failed: the cover text already has odd whitespace. Remove trailing spaces and tabs from it first.',
-        },
+      ? { type: 'note', level: 'success', text: T('text.roundTripOk') }
+      : { type: 'note', level: 'warn', text: T('text.roundTripFail') },
   ];
 }
 
@@ -473,7 +494,7 @@ export default defineTool({
     if (/^[ \t\r\n]+$/.test(t) && t.length >= 20) {
       return {
         score: 0.5,
-        reason: 'Only spaces, tabs and line feeds (maybe a Whitespace program)',
+        reason: T('detect.program'),
       };
     }
     const lines = splitLines(t).filter((l) => l.text.trim() !== '');
@@ -485,7 +506,7 @@ export default defineTool({
       return {
         score: 0.85,
         options: { mode: 'decode' },
-        reason: `${marked.length} of ${lines.length} lines end in spaces or tabs`,
+        reason: T('detect.tabs', { count: lines.length, marked: marked.length }),
       };
     }
     // Spaces only: needs many lines, and two trailing spaces everywhere is just Markdown.
@@ -494,7 +515,7 @@ export default defineTool({
     return {
       score: 0.6,
       options: { mode: 'decode' },
-      reason: `${marked.length} of ${lines.length} lines end in spaces`,
+      reason: T('detect.spaces', { count: lines.length, marked: marked.length }),
     };
   },
   run(input, { mode, scheme, secret, lineLength }) {

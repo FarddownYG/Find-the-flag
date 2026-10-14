@@ -5,12 +5,15 @@
  * Decoding reuses the zero-width and whitespace tools; this module only adds the homoglyph,
  * case and combining-mark readings.
  */
+import { toolT } from '../../i18n/tool-text';
 import { utf8Decode } from '../../lib/bytes';
 import { baconDecodeBits, type BaconVariant } from '../crypto/bacon';
 import { binaryDecode } from '../encoding/binary';
 import { classify, codePointsOf, decodeAll } from './_zerowidth';
-import { decodeWhitespace, splitLines } from './whitespace';
-import { pickBest, type Pass, type Scorer } from './_text-analyzer-core';
+import { decodeWhitespace, splitLines, type WsSchemeId } from './whitespace';
+import { joinNotes, pickBest, type Pass, type Scorer } from './_text-analyzer-core';
+
+const T = toolT('text-analyzer');
 
 // ---------------------------------------------------------------------------------------------
 // Homoglyphs
@@ -256,8 +259,14 @@ function bitReadings(bits: number[], what: string): Option[] {
       if (b.length < width * 2) continue;
       const part = messagePart(packBits(b, width), false);
       if (part) {
-        const rest = part.cut ? ', the rest of the carriers unused' : '';
-        out.push({ text: part.text, note: `${polarity}, ${width} bits per character${rest}` });
+        out.push({
+          text: part.text,
+          note: joinNotes(
+            polarity,
+            T('note.bitsPerChar', { n: width }),
+            part.cut && T('note.carriersUnused'),
+          ),
+        });
       }
     }
     if (b.length >= 10) {
@@ -267,7 +276,7 @@ function bitReadings(bits: number[], what: string): Option[] {
         if (!part) continue;
         out.push({
           text: part.text,
-          note: `${polarity}, Bacon ${variant}-letter (5 bits per letter)`,
+          note: joinNotes(polarity, T('note.baconBits', { variant })),
           bacon: true,
         });
       }
@@ -376,8 +385,6 @@ function typographic(chars: string[], i: number): boolean {
   );
 }
 
-const SPACE_SCHEME = 'Two kinds of space as bits';
-
 function zeroWidthPasses(raw: string, scorer: Scorer): Pass[] {
   const chars = Array.from(raw);
   const cps = codePointsOf(raw);
@@ -404,61 +411,62 @@ function zeroWidthPasses(raw: string, scorer: Scorer): Pass[] {
   // decodeAll() orders its readings with the zero-width tool's own quick scorer; the 40 best
   // are rescored here with the French + English readability.
   const candidates = invisible.length || spaces.length ? decodeAll(raw) : [];
-  const pick = (wanted: (scheme: string) => boolean) =>
+  // The spaces reading shows its detail alone: the label already names the scheme.
+  const pick = (spaceScheme: boolean) =>
     bestOf(
       candidates
-        .filter((c) => wanted(c.scheme) && printableShare(c.text) >= 0.9)
+        .filter((c) => (c.id === 'spaces') === spaceScheme && printableShare(c.text) >= 0.9)
         .slice(0, 40)
-        .map((c) => ({ text: c.text, note: `${c.scheme}: ${c.detail}` })),
+        .map((c) => ({ text: c.text, note: spaceScheme ? c.detail : `${c.scheme}: ${c.detail}` })),
       scorer,
     );
   const out: Pass[] = [];
-  const zwLabel = 'Zero-width and invisible characters';
-  if (!invisible.length) out.push(hidden(zwLabel, null, 'No invisible characters'));
+  const zwLabel = T('pass.zeroWidth');
+  if (!invisible.length) out.push(hidden(zwLabel, null, T('note.noInvisible')));
   else if (allInPlace) {
     out.push(
       hidden(
         zwLabel,
         null,
-        `${invisible.length} found (${abbrList(invisible)}), all where they belong: emoji sequences, joiners inside Arabic or Indic words, a byte-order mark at the start`,
+        T('note.invisibleInPlace', { count: invisible.length, list: abbrList(invisible) }),
       ),
     );
   } else {
-    const best = pick((s) => s !== SPACE_SCHEME);
-    const found = `${invisible.length} found (${abbrList(invisible)})`;
+    const best = pick(false);
+    const found = T('note.invisibleFound', { count: invisible.length, list: abbrList(invisible) });
     out.push(
       best
-        ? decoded(zwLabel, best.text, `${found}; ${best.note}`)
-        : hidden(zwLabel, null, `${found}, but no reading decodes to text`),
+        ? decoded(zwLabel, best.text, T('note.withReading', { found, reading: best.note }))
+        : hidden(zwLabel, null, T('note.noReading', { found })),
     );
   }
-  const spLabel = 'Unusual spaces as bits (NBSP, thin, em…)';
-  if (!spaces.length) out.push(hidden(spLabel, null, 'Only ordinary spaces'));
+  const spLabel = T('pass.unusualSpaces');
+  if (!spaces.length) out.push(hidden(spLabel, null, T('note.ordinarySpaces')));
   else if (allTypographic) {
     out.push(
       hidden(
         spLabel,
         null,
-        `${spaces.length} unusual spaces (${abbrList(spaces)}), all where French typography puts them: before : ; ! ?, inside « », in numbers and units`,
+        T('note.spacesTypographic', { count: spaces.length, list: abbrList(spaces) }),
       ),
     );
   } else {
-    const best = pick((s) => s === SPACE_SCHEME);
-    const found = `${spaces.length} unusual spaces (${abbrList(spaces)})`;
+    const best = pick(true);
+    const found = T('note.spacesFound', { count: spaces.length, list: abbrList(spaces) });
     out.push(
       best
-        ? decoded(spLabel, best.text, `${found}; ${best.note.replace(`${SPACE_SCHEME}: `, '')}`)
-        : hidden(spLabel, null, `${found}, too few to carry bits`),
+        ? decoded(spLabel, best.text, T('note.withReading', { found, reading: best.note }))
+        : hidden(spLabel, null, T('note.tooFewSpaces', { found })),
     );
   }
   return out;
 }
 
-const WS_SCHEMES: [string, string][] = [
-  ['stegsnow', 'Trailing whitespace: stegsnow'],
-  ['Trailing whitespace as bits', 'Trailing spaces / tabs as bits'],
-  ['One bit per line', 'Lines ending in whitespace or not, as bits'],
-  ['Single or double space', 'Single / double spaces between words, as bits'],
+const WS_SCHEMES: [WsSchemeId, () => string][] = [
+  ['snow', () => T('pass.wsSnow')],
+  ['trailing', () => T('pass.wsTrailing')],
+  ['lines', () => T('pass.wsLines')],
+  ['gaps', () => T('pass.wsGaps')],
 ];
 
 function whitespacePasses(raw: string, scorer: Scorer): Pass[] {
@@ -466,39 +474,36 @@ function whitespacePasses(raw: string, scorer: Scorer): Pass[] {
   const trailing = lines.reduce((n, l) => n + l.ws.length, 0);
   const doubles = raw.match(/\S {2}(?=\S)/g)?.length ?? 0;
   const readings = trailing || doubles ? decodeWhitespace(raw) : [];
-  return WS_SCHEMES.map(([prefix, label]) => {
-    const mine = readings.filter(
-      (r) => r.scheme.startsWith(prefix) && printableShare(r.text) >= 0.9,
-    );
+  return WS_SCHEMES.map(([id, labelOf]) => {
+    const label = labelOf();
+    const mine = readings.filter((r) => r.id === id && printableShare(r.text) >= 0.9);
     const best = bestOf(
       mine.slice(0, 24).map((r) => ({ text: r.text, note: r.detail })),
       scorer,
     );
     if (best) return decoded(label, best.text, best.note);
-    if (prefix === 'Single or double space') {
+    if (id === 'gaps') {
       return hidden(
         label,
         null,
-        doubles ? `${doubles} double spaces, nothing decodes` : 'No double spaces',
+        doubles ? T('note.doublesNothing', { count: doubles }) : T('note.noDoubles'),
       );
     }
     return hidden(
       label,
       null,
-      trailing
-        ? `${trailing} trailing spaces / tabs, nothing decodes`
-        : 'No trailing spaces or tabs',
+      trailing ? T('note.trailingNothing', { count: trailing }) : T('note.noTrailing'),
     );
   });
 }
 
 function homoglyphPasses(found: Homoglyph[], text: string, scorer: Scorer): Pass[] {
-  const lettersLabel = 'Homoglyphs: the letters they imitate';
-  const bitsLabel = 'Homoglyphs as bits (lookalike letter = 1)';
+  const lettersLabel = T('pass.homoglyphLetters');
+  const bitsLabel = T('pass.homoglyphBits');
   if (!found.length) {
     return [
-      hidden(lettersLabel, null, 'No Cyrillic, Greek or fullwidth lookalikes in Latin text'),
-      hidden(bitsLabel, null, 'No homoglyphs'),
+      hidden(lettersLabel, null, T('note.noLookalikes')),
+      hidden(bitsLabel, null, T('note.noHomoglyphs')),
     ];
   }
   const at = new Set(found.map((h) => h.index));
@@ -529,6 +534,7 @@ function homoglyphPasses(found: Homoglyph[], text: string, scorer: Scorer): Pass
     ...CARRIER_SETS.filter((set) => [...imitated].every((c) => set.includes(c))),
   ];
   const carrierOptions: Option[] = [];
+  const bitLookalike = T('value.bitLookalike');
   for (const set of new Set(sets)) {
     for (const upper of [false, true]) {
       const bits: number[] = [];
@@ -538,21 +544,24 @@ function homoglyphPasses(found: Homoglyph[], text: string, scorer: Scorer): Pass
         if (!upper && letter !== letter.toLowerCase()) return;
         bits.push(look.has(i) ? 1 : 0);
       });
-      const which = `${[...set].join('/')}${upper ? ' (capitals too)' : ''}`;
-      for (const o of bitReadings(bits, 'lookalike')) {
-        carrierOptions.push({ ...o, note: `one bit per ${which} letter, ${o.note}` });
+      const letters = [...set].join('/');
+      const per = upper
+        ? T('note.perCarrierUpper', { letters })
+        : T('note.perCarrier', { letters });
+      for (const o of bitReadings(bits, bitLookalike)) {
+        carrierOptions.push({ ...o, note: joinNotes(per, o.note) });
       }
     }
   }
   const options = [
     ...carrierOptions,
-    ...bitReadings(letterBits, 'lookalike letter').map((o) => ({
+    ...bitReadings(letterBits, T('value.bitLookalikeLetter')).map((o) => ({
       ...o,
-      note: `one bit per letter, ${o.note}`,
+      note: joinNotes(T('note.perLetter'), o.note),
     })),
-    ...bitReadings(wordBits, 'word with a lookalike').map((o) => ({
+    ...bitReadings(wordBits, T('value.bitLookalikeWord')).map((o) => ({
       ...o,
-      note: `one bit per word, ${o.note}`,
+      note: joinNotes(T('note.perWord'), o.note),
     })),
   ];
   const best = bestOf(options, scorer);
@@ -561,11 +570,11 @@ function homoglyphPasses(found: Homoglyph[], text: string, scorer: Scorer): Pass
     hidden(
       lettersLabel,
       found.map((h) => h.looksLike).join(''),
-      `${found.length} lookalikes (${[...scripts].join(', ')})`,
+      T('note.lookalikes', { count: found.length, list: [...scripts].join(', ') }),
     ),
     best
       ? decoded(bitsLabel, best.text, best.note, triesOf(best, options))
-      : hidden(bitsLabel, null, 'Too few letters for bits'),
+      : hidden(bitsLabel, null, T('note.tooFewLetters')),
   ];
 }
 
@@ -576,8 +585,8 @@ const UPPER = /\p{Lu}/u;
 const LOWER = /\p{Ll}/u;
 
 function casePasses(text: string, scorer: Scorer): Pass[] {
-  const oddLabel = 'Letters in unexpected case';
-  const bitsLabel = 'Letter case as bits (capital = 1)';
+  const oddLabel = T('pass.oddCase');
+  const bitsLabel = T('pass.caseBits');
   const odd: string[] = [];
   for (const word of text.match(/[\p{L}\p{M}]+/gu) ?? []) {
     const letters = Array.from(word).filter((c) => UPPER.test(c) || LOWER.test(c));
@@ -593,29 +602,30 @@ function casePasses(text: string, scorer: Scorer): Pass[] {
   const out: Pass[] = [
     odd.length >= 2
       ? {
-          ...hidden(oddLabel, odd.join(''), `${odd.length} capitals inside words`),
+          ...hidden(oddLabel, odd.join(''), T('note.innerCapitals', { count: odd.length })),
           pick: 'letters',
         }
-      : hidden(oddLabel, null, 'No capitals inside words'),
+      : hidden(oddLabel, null, T('note.noInnerCapitals')),
   ];
   if (!abnormal) {
-    out.push(hidden(bitsLabel, null, `Case looks normal (${Math.round(share * 100)}% capitals)`));
+    out.push(hidden(bitsLabel, null, T('note.caseNormal', { pct: Math.round(share * 100) })));
     return out;
   }
+  const capital = T('value.bitCapital');
   // Every letter carries a bit, or only the unaccented ones (encoders that skip é, à…).
   const ascii = cased.filter((c) => /[A-Za-z]/.test(c));
   const options = [
     ...bitReadings(
       cased.map((c) => (UPPER.test(c) ? 1 : 0)),
-      'capital',
-    ).map((o) => ({ ...o, note: `${cased.length} letters, ${o.note}` })),
+      capital,
+    ).map((o) => ({ ...o, note: joinNotes(T('note.letters', { count: cased.length }), o.note) })),
     ...(ascii.length < cased.length
       ? bitReadings(
           ascii.map((c) => (UPPER.test(c) ? 1 : 0)),
-          'capital',
+          capital,
         ).map((o) => ({
           ...o,
-          note: `${ascii.length} letters a-z (accented ones skipped), ${o.note}`,
+          note: joinNotes(T('note.asciiLetters', { count: ascii.length }), o.note),
         }))
       : []),
   ];
@@ -623,13 +633,13 @@ function casePasses(text: string, scorer: Scorer): Pass[] {
   out.push(
     best
       ? decoded(bitsLabel, best.text, best.note, triesOf(best, options))
-      : hidden(bitsLabel, null, 'Too few letters for bits'),
+      : hidden(bitsLabel, null, T('note.tooFewLetters')),
   );
   return out;
 }
 
 function combiningPass(raw: string): Pass {
-  const label = 'Letters carrying a stray combining mark';
+  const label = T('pass.combining');
   const nfc = raw.normalize('NFC');
   const marked: string[] = [];
   const chars = Array.from(nfc);
@@ -642,12 +652,8 @@ function combiningPass(raw: string): Pass {
     }
   });
   return marked.length >= 2
-    ? hidden(
-        label,
-        marked.join(''),
-        `${marked.length} letters with a mark that does not combine into one character`,
-      )
-    : hidden(label, null, 'No stray combining marks');
+    ? hidden(label, marked.join(''), T('note.strayMarks', { count: marked.length }))
+    : hidden(label, null, T('note.noStrayMarks'));
 }
 
 /**

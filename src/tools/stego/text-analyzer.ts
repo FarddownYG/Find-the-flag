@@ -1,11 +1,13 @@
 import { defineTool } from '../../core/define';
 import { ToolError } from '../../core/errors';
 import type { Output } from '../../core/types';
+import { getLocale } from '../../i18n/index';
+import { toolT } from '../../i18n/tool-text';
 import { chainedPasses, chainSources, cipherPasses } from './_text-analyzer-ciphers';
 import {
   baselineOf,
   foldKey,
-  LANG_NAMES,
+  langName,
   makeScorer,
   nearInput,
   oneLine,
@@ -36,6 +38,8 @@ import {
 } from './_zerowidth';
 import { splitLines } from './whitespace';
 
+const T = toolT('text-analyzer');
+
 const TOP = 15;
 /** A best result under this score is not promoted to its own block when nothing stands out. */
 const WEAK_BLOCK = 25;
@@ -47,24 +51,25 @@ const MIN_WHITESPACE_PAYLOAD = 16;
 /** Line and word passes read this much of a very long text (the scores need far less). */
 const READ_MAX = 100_000;
 
-const FAMILY_TITLES: Record<Family, string> = {
-  acrostic: 'Acrostics and regular picks',
-  structure: 'Structured reading (line order, reversals, diagonals, columns)',
-  invisible: 'Invisible characters and marks',
-  encoding: 'Encodings',
-  cipher: 'Classical ciphers',
+const FAMILY_TITLES: Record<Family, () => string> = {
+  acrostic: () => T('family.acrostic'),
+  structure: () => T('family.structure'),
+  invisible: () => T('family.invisible'),
+  encoding: () => T('family.encoding'),
+  cipher: () => T('family.cipher'),
 };
 const FAMILIES: Family[] = ['acrostic', 'structure', 'invisible', 'encoding', 'cipher'];
 
-/** Letter picks worth running the ciphers on (an acrostic may itself be ROT13'd). */
-const CHAIN_PICKS = new Set([
-  'First letter of each line',
-  'Last letter of each line',
-  'First letter of each word',
-  'First letter of each sentence',
-  'First letter of each paragraph',
-  'Capital letters',
-]);
+/** Labels of the letter picks worth running the ciphers on (an acrostic may itself be ROT13'd). */
+const chainPicks = () =>
+  new Set([
+    T('pass.firstLetterOfLine'),
+    T('pass.lastLetterOfLine'),
+    T('pass.firstLetterOfWord'),
+    T('pass.firstLetterOfSentence'),
+    T('pass.firstLetterOfParagraph'),
+    T('pass.capitals'),
+  ]);
 
 export interface Analysis {
   passes: Pass[];
@@ -96,11 +101,13 @@ export function analyze(input: string): Analysis {
   const invisible = invisiblePasses(raw, stripped, homoglyphs, scorer);
   const encodings = encodingPasses(visible, scorer);
   const ciphers = cipherPasses(visible, base.score, scorer);
+  const rewrites = new Set([T('pass.leet'), T('pass.layout')]);
+  const picks = chainPicks();
   const sources = chainSources([
     ...invisible,
     // Leet and keyboard swaps rewrite the visible text, which the ciphers already read.
-    ...encodings.filter((p) => !/^(?:Leet|Keyboard)/.test(p.label)),
-    ...acrostics.filter((p) => CHAIN_PICKS.has(p.label)),
+    ...encodings.filter((p) => !rewrites.has(p.label)),
+    ...acrostics.filter((p) => picks.has(p.label)),
   ]);
   const passes = [
     ...acrostics,
@@ -134,16 +141,16 @@ function familyTable(family: Family, a: Analysis): Output {
     if (s && s.score >= STRONG) highlight.push(i);
     const same = p.result !== null && foldKey(p.result) === a.inputKey;
     const note = same
-      ? 'same as the input'
+      ? T('note.sameAsInput')
       : nearInput(p, a.visible)
-        ? `nearly the input (most letters unchanged); ${oneLine(p.note, 120)}`
+        ? T('note.nearlyInput', { note: oneLine(p.note, 120) })
         : oneLine(p.note, 160) || '—';
     return [p.label, resultCell(s, p), s ? s.score.toFixed(1) : '—', note];
   });
   return {
     type: 'table',
-    label: FAMILY_TITLES[family],
-    columns: ['Pass', 'Result', 'Score', 'Details'],
+    label: FAMILY_TITLES[family](),
+    columns: [T('col.pass'), T('col.result'), T('col.score'), T('col.details')],
     rows,
     highlight,
   };
@@ -158,36 +165,41 @@ function render(a: Analysis, raw: string): Output[] {
     out.push({
       type: 'note',
       level: 'success',
-      text: `Most readable: ${best.pass.label} → ${shown}`,
+      text: T('text.mostReadable', { pass: best.pass.label, result: shown }),
     });
   } else {
-    out.push({
-      type: 'note',
-      level: 'info',
-      text: 'Nothing stands out; every pass is listed below',
-    });
+    out.push({ type: 'note', level: 'info', text: T('text.nothingStandsOut') });
   }
   // A weak best result is still offered as a block (copy, Send to…), unless it is next to
   // nothing: then the tables say it all.
   if (best && (strong.length || best.score >= WEAK_BLOCK)) {
-    const reads = best.reading ? ` · reads “${oneLine(best.reading, 80)}”` : '';
+    const pass = best.pass.label;
+    const reading = best.reading ? oneLine(best.reading, 80) : null;
+    const weak = !strong.length;
     out.push({
       type: 'text',
-      label: `${best.pass.label}${reads}${strong.length ? '' : ' (weak)'}`,
+      label:
+        reading === null
+          ? weak
+            ? T('label.bestWeak', { pass })
+            : pass
+          : weak
+            ? T('label.bestReadsWeak', { pass, reading })
+            : T('label.bestReads', { pass, reading }),
       value: best.result,
     });
   }
   out.push({
     type: 'table',
-    label: `Most readable results (French / English readability; ${STRONG}+ is highlighted)`,
-    columns: ['Score', 'Pass', 'Result', 'Language'],
+    label: T('label.ranked', { strong: STRONG }),
+    columns: [T('col.score'), T('col.pass'), T('col.result'), T('col.language')],
     rows: a.ranked
       .slice(0, TOP)
       .map((s) => [
         s.score.toFixed(1),
         s.pass.note ? `${s.pass.label} · ${oneLine(s.pass.note, 70)}` : s.pass.label,
         resultCell(s, s.pass),
-        s.lang ? LANG_NAMES[s.lang] : '—',
+        s.lang ? langName(s.lang) : '—',
       ]),
     highlight: a.ranked.slice(0, TOP).flatMap((s, i) => (s.score >= STRONG ? [i] : [])),
   });
@@ -195,7 +207,7 @@ function render(a: Analysis, raw: string): Output[] {
     out.push({
       type: 'note',
       level: 'info',
-      text: `Long text: acrostics and structured readings use its first ${READ_MAX.toLocaleString('en')} characters.`,
+      text: T('text.truncated', { max: READ_MAX.toLocaleString(getLocale()) }),
     });
   }
   for (const family of FAMILIES) {
@@ -203,8 +215,14 @@ function render(a: Analysis, raw: string): Output[] {
     if (family === 'invisible' && a.homoglyphs.length) {
       out.push({
         type: 'table',
-        label: 'Homoglyphs (positions in the text without invisible characters)',
-        columns: ['Character', 'Looks like', 'Code point', 'Name', 'Position'],
+        label: T('label.homoglyphs'),
+        columns: [
+          T('col.character'),
+          T('col.looksLike'),
+          T('col.codePoint'),
+          T('col.name'),
+          T('col.position'),
+        ],
         rows: a.homoglyphs
           .slice(0, MAX_HOMOGLYPH_ROWS)
           .map((h) => [
@@ -212,7 +230,7 @@ function render(a: Analysis, raw: string): Output[] {
             h.looksLike,
             codePointLabel(h.cp),
             h.name,
-            `line ${h.line}, col ${h.column}`,
+            T('value.position', { line: h.line, column: h.column }),
           ]),
       });
       const more = a.homoglyphs.length - MAX_HOMOGLYPH_ROWS;
@@ -220,27 +238,37 @@ function render(a: Analysis, raw: string): Output[] {
         out.push({
           type: 'note',
           level: 'info',
-          text: `${more.toLocaleString('en')} more lookalike letters not listed (the first ${MAX_HOMOGLYPH_ROWS} are).`,
+          text: T('text.moreHomoglyphs', {
+            count: more,
+            more: more.toLocaleString(getLocale()),
+            max: MAX_HOMOGLYPH_ROWS,
+          }),
         });
       }
     }
   }
 
   const scorer = makeScorer();
-  out.push({ type: 'kv', label: 'Statistics', entries: metaEntries(raw, scorer) });
+  out.push({ type: 'kv', label: T('label.statistics'), entries: metaEntries(raw, scorer) });
   const nonAscii = nonAsciiRows(raw);
   if (nonAscii.rows.length) {
     out.push({
       type: 'table',
-      label: 'Non-ASCII characters (most frequent first)',
-      columns: ['Character', 'Code point', 'Name', 'Count', 'First seen'],
+      label: T('label.nonAscii'),
+      columns: [
+        T('col.character'),
+        T('col.codePoint'),
+        T('col.name'),
+        T('col.count'),
+        T('col.firstSeen'),
+      ],
       rows: nonAscii.rows,
     });
     if (nonAscii.more) {
       out.push({
         type: 'note',
         level: 'info',
-        text: `${nonAscii.more} more non-ASCII characters not listed.`,
+        text: T('text.moreNonAscii', { count: nonAscii.more }),
       });
     }
   }
@@ -249,8 +277,8 @@ function render(a: Analysis, raw: string): Output[] {
     reps.length
       ? {
           type: 'table',
-          label: 'Repeated substrings (spacing = GCD of the distances, a key-length hint)',
-          columns: ['Pattern', 'Times', 'Positions', 'Spacing'],
+          label: T('label.repeats'),
+          columns: [T('col.pattern'), T('col.times'), T('col.positions'), T('col.spacing')],
           rows: reps.map((r) => [
             `“${r.text}”`,
             String(r.positions.length),
@@ -258,7 +286,7 @@ function render(a: Analysis, raw: string): Output[] {
             String(spacing(r.positions)),
           ]),
         }
-      : { type: 'note', level: 'info', text: 'No substring of 3+ characters repeats.' },
+      : { type: 'note', level: 'info', text: T('text.noRepeats') },
   );
   return out;
 }
@@ -281,20 +309,21 @@ const ZERO_WIDTH = embedPayload(
 const BASE64_INLINE =
   'Thanks for the report. The token is ZmxhZ3t0aGVfYmxvYl93YXNfaW5zaWRlfQ== and it expires tonight.';
 
-/** Cheap look at the start of a pasted text (detect() runs for every tool on every paste). */
+/**
+ * Cheap look at the start of a pasted text (detect() runs for every tool on every paste): the
+ * detect() reason when something is hidden there.
+ */
 const INVISIBLE_HINT = (whole: string): string | null => {
   const text = whole.slice(0, DETECT_SCAN);
   const chars = Array.from(text);
   for (let i = 0; i < chars.length; i++) {
     if (classify(chars[i]!.codePointAt(0)!, false) && !emojiPart(chars, i)) {
-      return 'Invisible characters inside';
+      return T('detect.invisible');
     }
   }
   // Two trailing spaces are a Markdown line break, not a hidden payload.
-  if (splitLines(text).some((l) => l.ws && l.ws !== '  ')) {
-    return 'Trailing spaces or tabs on some lines';
-  }
-  if (findHomoglyphs(text).length) return 'Lookalike letters from another script';
+  if (splitLines(text).some((l) => l.ws && l.ws !== '  ')) return T('detect.trailing');
+  if (findHomoglyphs(text).length) return T('detect.homoglyphs');
   return null;
 };
 
@@ -347,18 +376,16 @@ export default defineTool({
   detect({ text }) {
     if (!text || !text.trim()) return null;
     const hint = INVISIBLE_HINT(text);
-    if (hint) return { score: 0.6, reason: `${hint}: run every hidden-text check` };
-    if (text.trim().includes('\n')) return { score: 0.3, reason: 'Run every hidden-text check' };
+    if (hint) return { score: 0.6, reason: hint };
+    if (text.trim().includes('\n')) return { score: 0.3, reason: T('detect.multiline') };
     return null;
   },
   run(text) {
-    if (!text) throw new ToolError('Paste a text to analyse (a poem, a message, a file…).');
+    if (!text) throw new ToolError(T('error.empty'));
     // Spaces and tabs alone can be a payload (stegsnow without its cover text); a few blank
     // lines cannot. Other invisible characters (NBSP, BOM, zero-width) are always analysed.
     if (!/[^ \t\r\n]/.test(text) && (text.match(/[ \t]/g)?.length ?? 0) < MIN_WHITESPACE_PAYLOAD) {
-      throw new ToolError(
-        'The text is only a few spaces and line breaks: paste a text to analyse (a poem, a message, a file…).',
-      );
+      throw new ToolError(T('error.onlySpaces'));
     }
     return render(analyze(text), text.replace(/\r\n?/g, '\n'));
   },

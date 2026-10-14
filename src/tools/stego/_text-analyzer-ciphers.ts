@@ -4,6 +4,7 @@
  * cipher is the one of the matching crypto tool; this module brute-forces the keys and lets
  * the French + English readability score pick the best one.
  */
+import { toolT } from '../../i18n/tool-text';
 import { indexOfCoincidence } from '../../lib/english';
 import { affineDecrypt, VALID_A } from '../crypto/affine';
 import { atbash } from '../crypto/atbash';
@@ -21,7 +22,16 @@ import { railFenceDecrypt } from '../crypto/rail-fence';
 import { autoSolve } from '../crypto/substitution';
 import { crackVigenere, vigenereTransform } from '../crypto/vigenere';
 import { letterFrequencies, type Lang } from '../../lib/readability';
-import { foldKey, pickBest, type Pass, type Scorer } from './_text-analyzer-core';
+import {
+  cutNote,
+  foldKey,
+  joinNotes,
+  pickBest,
+  type Pass,
+  type Scorer,
+} from './_text-analyzer-core';
+
+const T = toolT('text-analyzer');
 
 /** Ciphers run on this many characters of the text (scores need no more). */
 const CIPHER_SAMPLE = 4000;
@@ -50,7 +60,7 @@ const cipher = (label: string, result: string | null, note: string, prior?: numb
 });
 
 const shiftNote = (n: number) =>
-  n === 13 ? 'shift 13 (ROT13)' : `shift ${n} (undoes a key of ${26 - n})`;
+  n === 13 ? T('note.shiftRot13') : T('note.shift', { n, key: 26 - n });
 
 /**
  * Caesar shifts worth scoring: all 25 for short texts, else the few whose letter counts look
@@ -99,11 +109,15 @@ function affineOptions(text: string, keep: number): Option[] {
   }));
 }
 
-function railOptions(text: string, maxRails: number): Option[] {
+function railOptions(text: string, maxRails: number): (Option & { rails: number })[] {
   const n = Array.from(text).length;
-  const out: Option[] = [];
+  const out: (Option & { rails: number })[] = [];
   for (let rails = 2; rails <= Math.min(maxRails, n - 1); rails++) {
-    out.push({ text: railFenceDecrypt(text, rails), note: `${rails} rails` });
+    out.push({
+      text: railFenceDecrypt(text, rails),
+      note: T('note.rails', { count: rails }),
+      rails,
+    });
   }
   return out;
 }
@@ -186,7 +200,11 @@ function vigenereOptions(
         variant === 'vigenere' && plainA >= o.key.length - 2 && plainA * 2 >= o.key.length;
       if (seen.has(name) || nearlyNone) continue;
       seen.add(name);
-      out.push({ key: o.key, text: o.text, note: `key ${name} (length ${o.key.length})` });
+      out.push({
+        key: o.key,
+        text: o.text,
+        note: T('note.key', { key: name, length: o.key.length }),
+      });
     }
   }
   return out;
@@ -196,24 +214,29 @@ function vigenereOptions(
 export function cipherPasses(text: string, inputScore: number, scorer: Scorer): Pass[] {
   const chars = Array.from(text);
   const sample = chars.length > CIPHER_SAMPLE ? chars.slice(0, CIPHER_SAMPLE).join('') : text;
-  const cut = chars.length > CIPHER_SAMPLE ? `, first ${CIPHER_SAMPLE} characters` : '';
+  const cut = chars.length > CIPHER_SAMPLE ? cutNote(CIPHER_SAMPLE) : '';
   const letters = lettersOnly(sample).length;
   const out: Pass[] = [];
+  const caesarLabel = T('pass.caesar');
+  const rot47Label = T('pass.rot47');
+  const rot47Note = T('note.rot47') + cut;
+  const affineLabel = T('pass.affine');
+  const railLabel = T('pass.railFence');
   if (!letters) {
-    const none = 'No letters A-Z';
+    const none = T('note.noLetters');
     return [
-      'Caesar (best of 25 shifts)',
-      'ROT13',
-      'ROT47',
-      'Atbash',
-      'Affine (best of 312 keys)',
-      'Vigenère (key cracked)',
-      'Beaufort (key cracked)',
-      'Substitution (solved, English)',
-      'Rail fence (2-10 rails)',
+      caesarLabel,
+      T('pass.rot13'),
+      rot47Label,
+      T('pass.atbash'),
+      affineLabel,
+      T('pass.vigenere'),
+      T('pass.beaufort'),
+      T('pass.substitution'),
+      railLabel,
     ].map((label) =>
-      label === 'ROT47'
-        ? cipher(label, rotate(sample, 47, 'rot47'), `printable ASCII shifted by 47${cut}`)
+      label === rot47Label
+        ? cipher(label, rotate(sample, 47, 'rot47'), rot47Note)
         : cipher(label, null, none),
     );
   }
@@ -228,17 +251,13 @@ export function cipherPasses(text: string, inputScore: number, scorer: Scorer): 
   out.push(
     shift
       ? {
-          ...cipher(
-            'Caesar (best of 25 shifts)',
-            rotate(sample, shift, 'letters'),
-            shiftNote(shift) + cut,
-          ),
+          ...cipher(caesarLabel, rotate(sample, shift, 'letters'), shiftNote(shift) + cut),
           margin: caesar!.margin,
         }
-      : cipher('Caesar (best of 25 shifts)', null, 'No shift reads better'),
-    cipher('ROT13', rotate(sample, 13, 'letters'), `letters shifted by 13${cut}`),
-    cipher('ROT47', rotate(sample, 47, 'rot47'), `printable ASCII shifted by 47${cut}`),
-    cipher('Atbash', atbash(sample), `A↔Z, B↔Y…${cut}`),
+      : cipher(caesarLabel, null, T('note.noShift')),
+    cipher(T('pass.rot13'), rotate(sample, 13, 'letters'), T('note.rot13') + cut),
+    cipher(rot47Label, rotate(sample, 47, 'rot47'), rot47Note),
+    cipher(T('pass.atbash'), atbash(sample), `A↔Z, B↔Y…${cut}`),
   );
   const affine = pickBest(
     affineKeys(probe).map((k) => ({ text: affineDecrypt(probe, k.a, k.b), note: `${k.a},${k.b}` })),
@@ -248,25 +267,21 @@ export function cipherPasses(text: string, inputScore: number, scorer: Scorer): 
   if (affine) {
     const [a, b] = affine.best.note.split(',').map(Number) as [number, number];
     out.push({
-      ...cipher(
-        'Affine (best of 312 keys)',
-        affineDecrypt(sample, a, b),
-        `a = ${a}, b = ${b}${cut}`,
-      ),
+      ...cipher(affineLabel, affineDecrypt(sample, a, b), `a = ${a}, b = ${b}${cut}`),
       margin: affine.margin,
     });
-  } else out.push(cipher('Affine (best of 312 keys)', null, 'No key reads better'));
+  } else out.push(cipher(affineLabel, null, T('note.noKey')));
 
   for (const [variant, label] of [
-    ['vigenere', 'Vigenère (key cracked)'],
-    ['beaufort', 'Beaufort (key cracked)'],
+    ['vigenere', T('pass.vigenere')],
+    ['beaufort', T('pass.beaufort')],
   ] as const) {
     if (letters < 30) {
-      out.push(cipher(label, null, 'Needs at least 30 letters'));
+      out.push(cipher(label, null, T('note.needsLetters', { n: 30 })));
       continue;
     }
     if (inputScore >= 50) {
-      out.push(cipher(label, null, 'Skipped: the text is already readable'));
+      out.push(cipher(label, null, T('note.alreadyReadable')));
       continue;
     }
     // Keys are found and compared on the probe, the best one is applied to the whole sample.
@@ -276,43 +291,33 @@ export function cipherPasses(text: string, inputScore: number, scorer: Scorer): 
         ? cipher(
             label,
             vigenereTransform(sample, best.best.key, variant, true),
-            `${best.best.note}, key letters chosen by English or French frequencies${cut}`,
+            joinNotes(best.best.note, T('note.keyByFrequency')) + cut,
           )
-        : cipher(label, null, 'Every key found leaves the text unchanged'),
+        : cipher(label, null, T('note.keysUnchanged')),
     );
   }
 
-  const subLabel = 'Substitution (solved, English)';
+  const subLabel = T('pass.substitution');
   const ioc = indexOfCoincidence(sample);
-  if (letters < 60) out.push(cipher(subLabel, null, 'Needs at least 60 letters'));
+  if (letters < 60) out.push(cipher(subLabel, null, T('note.needsLetters', { n: 60 })));
   else if (inputScore >= 40) {
-    out.push(cipher(subLabel, null, 'Skipped: the text is already readable'));
+    out.push(cipher(subLabel, null, T('note.alreadyReadable')));
   } else if (ioc < 0.055) {
-    out.push(
-      cipher(
-        subLabel,
-        null,
-        `Skipped: index of coincidence ${ioc.toFixed(3)} is too flat for a one-alphabet substitution`,
-      ),
-    );
+    out.push(cipher(subLabel, null, T('note.iocFlat', { ioc: ioc.toFixed(3) })));
   } else {
     const solved = autoSolve(sample);
-    out.push(cipher(subLabel, solved.text, `quadgram hill climbing, IoC ${ioc.toFixed(3)}${cut}`));
+    out.push(cipher(subLabel, solved.text, T('note.hillClimb', { ioc: ioc.toFixed(3) }) + cut));
   }
 
   const rail = pickBest(railOptions(probe, 10), scorer, probeKey);
-  const rails = rail ? Number.parseInt(rail.best.note, 10) : 0;
+  const rails = rail ? rail.best.rails : 0;
   out.push(
     rails
       ? {
-          ...cipher(
-            'Rail fence (2-10 rails)',
-            railFenceDecrypt(sample, rails),
-            rail!.best.note + cut,
-          ),
+          ...cipher(railLabel, railFenceDecrypt(sample, rails), rail!.best.note + cut),
           margin: rail!.margin,
         }
-      : cipher('Rail fence (2-10 rails)', null, 'Text too short'),
+      : cipher(railLabel, null, T('note.textTooShort')),
   );
   return out;
 }
@@ -344,29 +349,29 @@ export function chainedPasses(sources: Pass[], scorer: Scorer): Pass[] {
     // Letters only: digits and symbols in a short pick are layout (list numbers), not cipher.
     if (letters < MIN_SOURCE_LETTERS || letters < 0.9 * text.replace(/\s/g, '').length) continue;
     const options: Option[] = [
-      ...caesarOptions(text).map((o) => ({ ...o, note: `Caesar ${o.note}` })),
-      { text: atbash(text), note: 'Atbash' },
-      ...affineOptions(text, 3).map((o) => ({ ...o, note: `Affine ${o.note}` })),
-      { text: Array.from(text).reverse().join(''), note: 'read backwards' },
-      ...railOptions(text, 6).map((o) => ({ ...o, note: `Rail fence ${o.note}` })),
+      ...caesarOptions(text).map((o) => ({ ...o, note: T('note.viaCaesar', { note: o.note }) })),
+      { text: atbash(text), note: T('note.viaAtbash') },
+      ...affineOptions(text, 3).map((o) => ({ ...o, note: T('note.viaAffine', { note: o.note }) })),
+      { text: Array.from(text).reverse().join(''), note: T('note.backwards') },
+      ...railOptions(text, 6).map((o) => ({ ...o, note: T('note.viaRail', { note: o.note }) })),
     ];
     if (letters >= 30) {
       options.push(
         ...vigenereOptions(text, 'vigenere')
           .slice(0, 2)
-          .map((o) => ({ ...o, note: `Vigenère ${o.note}` })),
+          .map((o) => ({ ...o, note: T('note.viaVigenere', { note: o.note }) })),
       );
     }
     const picked = pickBest(options, scorer, foldKey(text));
     if (!picked) continue;
     const { best } = picked;
-    const label = `Ciphers on “${src.label}”`;
+    const label = T('pass.chained', { source: src.label });
     const before = scorer.reading(text).r.score;
     // Shuffling letters that already read well finds other words by chance: only a clear
     // improvement over the source counts.
     if (picked.score < before + GAIN) {
       out.push({
-        ...cipher(label, null, `No cipher reads better than the source (best: ${best.note})`),
+        ...cipher(label, null, T('note.noCipherBetter', { best: best.note })),
         mode: src.mode,
       });
       continue;

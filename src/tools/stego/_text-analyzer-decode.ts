@@ -5,6 +5,7 @@
  * plus the multi-layer auto-decoder. Every decoder is the one of the matching encoding tool.
  */
 import { ToolError } from '../../core/errors';
+import { toolT } from '../../i18n/tool-text';
 import { fromBase64, toHex, utf8Encode } from '../../lib/bytes';
 import { baconDecodeBits, extractSymbols } from '../crypto/bacon';
 import { polybiusDecode } from '../crypto/polybius';
@@ -20,9 +21,11 @@ import { morseDecode } from '../encoding/morse';
 import { hasUnicodeEscape, unicodeUnescape } from '../encoding/unicode-escape';
 import { urlDecode } from '../encoding/url';
 import {
+  cutNote,
   deleet,
   foldKey,
   hasLeet,
+  joinNotes,
   leetPhrases,
   oneLine,
   pickBest,
@@ -30,6 +33,8 @@ import {
   type Scorer,
 } from './_text-analyzer-core';
 import { printableShare } from './_text-analyzer-hidden';
+
+const T = toolT('text-analyzer');
 
 /** The whole-text auto-decoder runs on inputs up to this size. */
 const AUTO_MAX = 8000;
@@ -45,10 +50,10 @@ const strict = new TextDecoder('utf-8', { fatal: true });
 
 /** Bytes as text when they are readable UTF-8, else a short description. */
 function asText(bytes: Uint8Array): { text: string | null; why: string } {
-  if (!bytes.length) return { text: null, why: 'Decodes to nothing' };
+  if (!bytes.length) return { text: null, why: T('note.decodesToNothing') };
   const binary = {
     text: null,
-    why: `Decodes to ${bytes.length} bytes of binary data (${toHex(bytes.subarray(0, 8), ' ')}…): open it in Auto-decode or File type`,
+    why: T('note.binaryData', { count: bytes.length, hex: toHex(bytes.subarray(0, 8), ' ') }),
   };
   let text: string;
   try {
@@ -72,12 +77,12 @@ function attempt(fn: () => Decoded): { text: string | null; why: string } {
   } catch (e) {
     if (e instanceof ToolError) return { text: null, why: oneLine(e.message, 140) };
     if (e instanceof RangeError || e instanceof URIError) {
-      return { text: null, why: 'Does not decode' };
+      return { text: null, why: T('note.doesNotDecode') };
     }
     throw e;
   }
   if (typeof out === 'string') {
-    return out.trim() ? { text: out, why: '' } : { text: null, why: 'Decodes to nothing' };
+    return out.trim() ? { text: out, why: '' } : { text: null, why: T('note.decodesToNothing') };
   }
   return asText(out);
 }
@@ -156,7 +161,7 @@ export function a1z26Decode(text: string): string {
     for (const n of numbers) {
       const v = Number(n);
       if (!/^\d{1,2}$/.test(n) || v < 1 || v > 26) {
-        throw new ToolError(`"${oneLine(n, 12)}" is not a letter number (1-26).`);
+        throw new ToolError(T('error.notLetterNumber', { value: oneLine(n, 12) }));
       }
       word += String.fromCharCode(96 + v);
     }
@@ -191,7 +196,7 @@ export function multitapDecode(text: string): string {
     const key = group[0]!;
     const letters = KEYPAD[key];
     if (!letters || !/^(\d)\1*$/.test(group) || group.length > letters.length) {
-      throw new ToolError(`"${oneLine(group, 12)}" is not one key pressed 1 to 4 times.`);
+      throw new ToolError(T('error.notMultitap', { value: oneLine(group, 12) }));
     }
     out += letters[group.length - 1]!;
   }
@@ -209,7 +214,7 @@ function isOctalList(t: string): boolean {
 function baconOptions(text: string): { text: string; note: string }[] {
   const { stream, symbols } = extractSymbols(text);
   if (symbols.length !== 2 || stream.length < 10) {
-    throw new ToolError('Bacon needs two different symbols and at least 10 of them.');
+    throw new ToolError(T('error.baconSymbols'));
   }
   const out: { text: string; note: string }[] = [];
   for (const [zero, one] of [symbols, [...symbols].reverse()] as string[][]) {
@@ -217,7 +222,7 @@ function baconOptions(text: string): { text: string; note: string }[] {
     for (const variant of ['24', '26'] as const) {
       out.push({
         text: baconDecodeBits(bits, variant),
-        note: `A=${zero} B=${one}, ${variant}-letter alphabet`,
+        note: T('note.baconAlphabet', { zero: zero!, one: one!, variant }),
       });
     }
   }
@@ -228,56 +233,58 @@ function baconOptions(text: string): { text: string; note: string }[] {
 // Whole text
 
 interface Whole {
-  label: string;
+  label: () => string;
   /** null when the decoder applies, else why it does not. */
   check: (t: string) => string | null;
   decode: (t: string) => Decoded;
+  /** Rewrites only part of the text (escapes): the rest is the input, inherited. */
+  partial?: true;
 }
 
 const compact = (t: string) => t.replace(/\s+/g, '');
-const not = (what: string) => `Not ${what}: the text has other characters`;
+const not = (what: string) => T('note.notEncoding', { what });
 
 const WHOLE: Whole[] = [
   {
-    label: 'Hex (base16)',
+    label: () => T('pass.hex'),
     check: (t) =>
       !/^(?:0x|\\x)?[0-9a-fA-F]{2}(?:[\s:,;-]*(?:0x|\\x)?[0-9a-fA-F]{2})*$/.test(t)
         ? not('hex')
         : compact(t).length < 8
-          ? 'Too short for hex'
+          ? T('note.tooShortFor', { what: 'hex' })
           : null,
     decode: hexDecode,
   },
   {
-    label: 'Base32',
+    label: () => T('pass.base32'),
     check: (t) => {
       const s = compact(t);
       if (!/^(?:[A-Z2-7]+|[a-z2-7]+)={0,6}$/.test(s)) return not('Base32');
-      return s.length < 8 ? 'Too short for Base32' : null;
+      return s.length < 8 ? T('note.tooShortFor', { what: 'Base32' }) : null;
     },
     decode: (t) => base32Decode(compact(t)),
   },
   {
-    label: 'Base58',
+    label: () => T('pass.base58'),
     check: (t) => {
       const s = compact(t);
       if (!/^[1-9A-HJ-NP-Za-km-z]{6,}$/.test(s)) return not('Base58');
-      return s.length > BASE58_MAX ? `Longer than ${BASE58_MAX} characters: not Base58` : null;
+      return s.length > BASE58_MAX ? T('note.base58Long', { max: BASE58_MAX }) : null;
     },
     decode: (t) => base58Decode(compact(t)),
   },
   {
-    label: 'Base64',
+    label: () => T('pass.base64'),
     check: (t) => {
       const s = compact(t);
       if (!/^[A-Za-z0-9+/_-]+={0,2}$/.test(s)) return not('Base64');
       const n = s.replace(/=+$/, '').length;
-      return n < 4 || n % 4 === 1 ? 'Wrong length for Base64' : null;
+      return n < 4 || n % 4 === 1 ? T('note.base64Length') : null;
     },
     decode: (t) => fromBase64(compact(t)),
   },
   {
-    label: 'Base85 (Ascii85)',
+    label: () => T('pass.base85'),
     check: (t) => {
       const s = compact(t);
       return (s.startsWith('<~') && s.endsWith('~>')) || /^[!-u]{5,}$/.test(s)
@@ -287,94 +294,97 @@ const WHOLE: Whole[] = [
     decode: (t) => base85Decode(t, 'ascii85'),
   },
   {
-    label: 'Binary',
+    label: () => T('pass.binary'),
     check: (t) =>
       !/^(?:0b)?[01](?:[\s,;|]*(?:0b)?[01])*$/.test(t)
-        ? not('binary')
+        ? T('note.notBinary')
         : t.replace(/[^01]/g, '').length < 8
-          ? 'Fewer than 8 bits'
+          ? T('note.fewerBits', { n: 8 })
           : null,
     decode: (t) => binaryDecode(t),
   },
   {
-    label: 'Decimal character codes',
-    check: (t) => (/^\d{1,7}(?:[\s,;]+\d{1,7})+$/.test(t) ? null : 'Not a list of numbers'),
+    label: () => T('pass.decimalCodes'),
+    check: (t) => (/^\d{1,7}(?:[\s,;]+\d{1,7})+$/.test(t) ? null : T('note.notNumbers')),
     decode: (t) => charcodeDecodeBytes(t, 'dec', 'codepoint'),
   },
   {
-    label: 'Octal character codes',
-    check: (t) => (isOctalList(t) ? null : 'Not a list of octal numbers'),
+    label: () => T('pass.octalCodes'),
+    check: (t) => (isOctalList(t) ? null : T('note.notOctal')),
     decode: (t) => charcodeDecodeBytes(t.replace(/\\/g, ' '), 'oct', 'codepoint'),
   },
   {
-    label: 'Letter numbers (A1Z26)',
+    label: () => T('pass.a1z26'),
     check: (t) =>
       /^\d{1,2}(?:[\s,;./|-]+\d{1,2})+$/.test(t) && t.match(/\d+/g)!.length >= 3
         ? null
-        : 'Not a list of numbers 1-26',
+        : T('note.notA1z26'),
     decode: a1z26Decode,
   },
   {
-    label: 'Morse',
+    label: () => T('pass.morse'),
     check: (t) =>
       /^[.\-•·∙−–—_\s/]+$/.test(t) && /[.•·∙]/.test(t) && /[-−–—_]/.test(t)
         ? null
-        : 'Not only dots, dashes and separators',
+        : T('note.notMorse'),
     decode: (t) => {
       const { text, unknown } = morseDecode(t);
-      if (unknown > text.length / 4) throw new ToolError('Too many unknown Morse codes.');
+      if (unknown > text.length / 4) throw new ToolError(T('error.morseUnknown'));
       return text;
     },
   },
   {
-    label: 'URL escapes (%xx)',
-    check: (t) => (/%[0-9a-fA-F]{2}/.test(t) ? null : 'No %xx escape'),
+    label: () => T('pass.url'),
+    check: (t) => (/%[0-9a-fA-F]{2}/.test(t) ? null : T('note.noUrlEscape')),
     decode: (t) => urlDecode(t, false, true).bytes,
+    partial: true,
   },
   {
-    label: 'HTML entities',
+    label: () => T('pass.html'),
     check: (t) =>
-      /&(?:#\d+|#[xX][0-9a-fA-F]+|[A-Za-z][A-Za-z0-9]*);/.test(t) ? null : 'No &…; entity',
+      /&(?:#\d+|#[xX][0-9a-fA-F]+|[A-Za-z][A-Za-z0-9]*);/.test(t) ? null : T('note.noEntity'),
     decode: htmlDecode,
+    partial: true,
   },
   {
-    label: 'Unicode escapes (\\u, \\x, U+)',
-    check: (t) => (hasUnicodeEscape(t) ? null : 'No \\uXXXX, \\xHH or U+XXXX escape'),
+    label: () => T('pass.unicodeEscapes'),
+    check: (t) => (hasUnicodeEscape(t) ? null : T('note.noUnicodeEscape')),
     decode: (t) => unicodeUnescape(t),
+    partial: true,
   },
   {
-    label: 'Braille',
-    check: (t) => (/[\u2801-\u28ff]/.test(t) ? null : 'No Braille cells'),
+    label: () => T('pass.braille'),
+    check: (t) => (/[\u2801-\u28ff]/.test(t) ? null : T('note.noBraille')),
     decode: brailleDecode,
   },
   {
-    label: 'Phone keypad (multi-tap: 44 = h)',
+    label: () => T('pass.multitap'),
     check: (t) => {
       const groups = t.split(/[\s,]+/).filter(Boolean);
       return /^[0-9\s,/]+$/.test(t) &&
         groups.length >= 3 &&
         groups.every((g) => g === '/' || /^(\d)\1*$/.test(g))
         ? null
-        : 'Not groups of one repeated key (44 33 555…)';
+        : T('note.notMultitap');
     },
     decode: multitapDecode,
   },
   {
-    label: 'Polybius square (digit pairs 11-55)',
+    label: () => T('pass.polybius'),
     check: (t) => {
       const digits = compact(t);
       return /^[1-5]+$/.test(digits) && digits.length >= 4 && digits.length % 2 === 0
         ? null
-        : 'Not pairs of digits 1-5';
+        : T('note.notPolybius');
     },
     decode: (t) => polybiusDecode(t, 'polybius', ''),
   },
   {
-    label: 'Tap code (groups of dots)',
+    label: () => T('pass.tapCode'),
     check: (t) =>
       /^[.•·*\s/|]+$/.test(t) && (t.match(/[.•·*]+/g)?.length ?? 0) >= 4
         ? null
-        : 'Not groups of dots',
+        : T('note.notTapCode'),
     decode: (t) => polybiusDecode(t, 'tap', ''),
   },
 ];
@@ -382,18 +392,18 @@ const WHOLE: Whole[] = [
 function wholeTextPasses(text: string, scorer: Scorer): Pass[] {
   const t = text.trim();
   const out: Pass[] = WHOLE.map((d) => {
-    const why = t ? d.check(t) : 'Empty text';
-    if (why) return encoding(d.label, null, why);
+    const why = t ? d.check(t) : T('note.emptyText');
+    if (why) return encoding(d.label(), null, why, d.partial);
     const r = attempt(() => d.decode(t));
-    return encoding(d.label, r.text, r.text ? '' : r.why);
+    return encoding(d.label(), r.text, r.text ? '' : r.why, d.partial);
   });
 
   out.push(leetPass(t, scorer));
 
-  const baconLabel = 'Bacon (text made of two symbols)';
+  const baconLabel = T('pass.bacon');
   const letters = t.replace(/[^\p{L}\p{N}]/gu, '');
   if (new Set(letters.toLowerCase()).size !== 2 || letters.length < 10) {
-    out.push(encoding(baconLabel, null, 'Not made of exactly two symbols'));
+    out.push(encoding(baconLabel, null, T('note.notTwoSymbols')));
   } else {
     let options: { text: string; note: string }[] = [];
     let why = '';
@@ -409,16 +419,16 @@ function wholeTextPasses(text: string, scorer: Scorer): Pass[] {
 
   out.push(layoutPass(t, scorer));
 
-  const autoLabel = 'Auto-decode (several layers)';
-  if (!t) out.push(encoding(autoLabel, null, 'Empty text'));
+  const autoLabel = T('pass.autoDecode');
+  if (!t) out.push(encoding(autoLabel, null, T('note.emptyText')));
   else if (t.length > AUTO_MAX) {
-    out.push(encoding(autoLabel, null, `Skipped above ${AUTO_MAX} characters: open Auto-decode`));
+    out.push(encoding(autoLabel, null, T('note.autoSkipped', { max: AUTO_MAX })));
   } else {
     const best = chain(t);
     out.push(
       best
         ? encoding(autoLabel, best.text, best.note)
-        : encoding(autoLabel, null, 'No layer of encoding decodes to readable text'),
+        : encoding(autoLabel, null, T('note.noLayer')),
     );
   }
   return out;
@@ -461,15 +471,15 @@ const LAYOUT_PAIRS: [Layout, Layout][] = [
  * swaps; like a cipher on the whole text, it must read better than the text as written.
  */
 function layoutPass(text: string, scorer: Scorer): Pass {
-  const label = 'Keyboard layout swapped (AZERTY, Dvorak ↔ QWERTY)';
+  const label = T('pass.layout');
   const sample = text.slice(0, LEET_MAX);
-  if (!/[a-z]/i.test(sample)) return encoding(label, null, 'No letters');
+  if (!/[a-z]/i.test(sample)) return encoding(label, null, T('note.noLettersAtAll'));
   const options = LAYOUT_PAIRS.map(([typed, meant]) => ({
     text: relayout(sample, typed, meant),
-    note: `typed on ${meant} keys with a ${typed} layout`,
+    note: T('note.typedOn', { meant, typed }),
   }));
   const top = pickBest(options, scorer, foldKey(sample));
-  if (!top) return encoding(label, null, 'No swap changes the text');
+  if (!top) return encoding(label, null, T('note.noSwap'));
   const before = scorer.reading(sample).r.score;
   return {
     ...encoding(label, top.best.text, top.best.note),
@@ -484,17 +494,21 @@ function layoutPass(text: string, scorer: Scorer): Pass {
  * way it must read better than the leet as written.
  */
 function leetPass(t: string, scorer: Scorer): Pass {
-  const label = 'Leet speak (1337 → leet)';
+  const label = T('pass.leet');
   const text = t.length > LEET_MAX ? t.slice(0, LEET_MAX) : t;
-  const cut = text.length < t.length ? `, first ${LEET_MAX} characters` : '';
-  if (!hasLeet(text)) return encoding(label, null, 'No word mixes letters and digits');
+  const cut = text.length < t.length ? cutNote(LEET_MAX) : '';
+  if (!hasLeet(text)) return encoding(label, null, T('note.noLeet'));
   const options = (['i', 'l'] as const).map((one) => {
     const { phrases, share } = leetPhrases(text, one);
     const whole = share >= 0.6 || !phrases.length;
     return {
       text: whole ? deleet(text, one) : phrases.join(' … '),
       written: whole ? text : null,
-      note: `digits read as letters (1 = ${one}, 3 = e, 4 = a, 7 = t…)${whole ? '' : `, ${phrases.length} leet phrase${phrases.length > 1 ? 's' : ''} in the text`}${cut}`,
+      note:
+        joinNotes(
+          T('note.leetDigits', { one }),
+          !whole && T('note.leetPhrases', { count: phrases.length }),
+        ) + cut,
     };
   });
   const best = pickBest(options, scorer)!.best;
@@ -504,7 +518,7 @@ function leetPass(t: string, scorer: Scorer): Pass {
   const single = best.written === null && !best.text.includes(' ');
   const gain = Math.max(0, Math.min(1, (scorer.reading(best.text).r.score - before - 10) / 30));
   return {
-    ...encoding(label, best.text, single ? `${best.note}; a single leet word` : best.note),
+    ...encoding(label, best.text, single ? T('note.singleLeet', { note: best.note }) : best.note),
     mode: 'payload',
     evidence: single ? gain * 0.3 : gain,
   };
@@ -518,12 +532,10 @@ function chain(t: string): { text: string; note: string } | null {
   return { text: best.text, note: recipeName(best) };
 }
 
-/** Decoders that rewrite only part of a text (the rest is the input, inherited). */
-const PARTIAL = /^(?:URL|HTML|Unicode escapes|Leet)/;
-
-const encoding = (label: string, result: string | null, note: string): Pass => ({
+/** `partial`: the decoder rewrites only part of a text (the rest is the input, inherited). */
+const encoding = (label: string, result: string | null, note: string, partial?: boolean): Pass => ({
   family: 'encoding',
-  mode: PARTIAL.test(label) ? 'transform' : 'payload',
+  mode: partial ? 'transform' : 'payload',
   label,
   result,
   note,
@@ -533,7 +545,8 @@ const encoding = (label: string, result: string | null, note: string): Pass => (
 // Tokens inside prose
 
 interface TokenKind {
-  name: string;
+  id: string;
+  name: () => string;
   /** Global regex of the tokens, or a test on whitespace-delimited words (see `words`). */
   re: RegExp;
   /**
@@ -543,11 +556,14 @@ interface TokenKind {
   words?: true;
   ok: (token: string) => boolean;
   decode: (token: string) => Decoded;
+  /** Rewrites only part of the token's word (escapes glued to other characters). */
+  partial?: true;
 }
 
 const TOKEN_KINDS: TokenKind[] = [
   {
-    name: 'Base64',
+    id: 'base64',
+    name: () => T('token.base64'),
     re: /(?<![A-Za-z0-9+/=_-])[A-Za-z0-9+/_-]{12,}={0,2}(?![A-Za-z0-9+/=_-])/g,
     ok: (s) => {
       const n = s.replace(/=+$/, '').length;
@@ -558,70 +574,83 @@ const TOKEN_KINDS: TokenKind[] = [
     decode: fromBase64,
   },
   {
-    name: 'Hex',
+    id: 'hex',
+    name: () => T('token.hex'),
     re: /(?<![0-9A-Za-z])(?:0x)?(?:[0-9a-fA-F]{2}){6,}(?![0-9A-Za-z])/g,
     ok: (s) => /[0-9]/.test(s) && /[a-fA-F]/.test(s),
     decode: hexDecode,
   },
   {
-    name: 'Hex bytes',
+    id: 'hex-bytes',
+    name: () => T('token.hexBytes'),
     re: /(?<![0-9A-Za-z])(?:[0-9a-fA-F]{2}[ :]){5,}[0-9a-fA-F]{2}(?![0-9A-Za-z])/g,
     ok: (s) => /[0-9]/.test(s),
     decode: hexDecode,
   },
   {
-    name: 'Binary',
+    id: 'binary',
+    name: () => T('token.binary'),
     re: /(?<![01])(?:[01]{7,8}[ ,]?){3,}(?![01])/g,
     ok: () => true,
     decode: (s) => binaryDecode(s.trim()),
   },
   {
-    name: 'Decimal codes',
+    id: 'decimal',
+    name: () => T('token.decimal'),
     re: /(?<![\d.])(?:\d{2,3}[ ,]+){3,}\d{2,3}(?![\d.])/g,
     ok: (s) => (s.match(/\d+/g) ?? []).every((n) => +n >= 32 && +n <= 126),
     decode: (s) => charcodeDecodeBytes(s, 'dec', 'codepoint'),
   },
   {
-    name: 'Base32',
+    id: 'base32',
+    name: () => T('token.base32'),
     re: /(?<![A-Za-z2-7])[A-Z2-7]{16,}={0,6}(?![A-Za-z2-7=])/g,
     ok: (s) => /[2-7]/.test(s) && /[A-Z]/.test(s),
     decode: (s) => base32Decode(s),
   },
   {
-    name: 'Morse',
+    id: 'morse',
+    name: () => T('token.morse'),
     re: /(?:[.-]{1,6}(?: \/ | {1,3}|\/)){3,}[.-]{1,6}/g,
     ok: (s) => s.includes('.') && s.includes('-'),
     decode: (s) => {
       const { text, unknown } = morseDecode(s);
-      if (unknown > text.length / 4) throw new ToolError('Too many unknown Morse codes.');
+      if (unknown > text.length / 4) throw new ToolError(T('error.morseUnknown'));
       return text;
     },
   },
   {
-    name: 'Letter numbers',
+    id: 'a1z26',
+    name: () => T('token.a1z26'),
     re: /(?<![\d.,])(?:\d{1,2}[ ,-]){3,}\d{1,2}(?![\d.,]?\d)/g,
     ok: (s) => (s.match(/\d+/g) ?? []).every((n) => +n >= 1 && +n <= 26),
     decode: a1z26Decode,
   },
   {
-    name: 'URL escapes',
+    id: 'url',
+    name: () => T('token.url'),
     re: /(?:%[0-9A-Fa-f]{2}){2}/,
     words: true,
     ok: () => true,
     decode: (s) => urlDecode(s, false, true).bytes,
+    partial: true,
   },
   {
-    name: 'HTML entities',
+    id: 'html',
+    name: () => T('token.html'),
     re: /(?:&(?:#\d{2,7}|#[xX][0-9A-Fa-f]{2,6}|[A-Za-z]{2,8});){2}/,
     words: true,
     ok: () => true,
     decode: htmlDecode,
+    partial: true,
   },
   {
-    name: 'Unicode escapes',
+    id: 'unicode',
+    name: () => T('token.unicode'),
     re: /(?:\\u\{?[0-9A-Fa-f]{2,6}\}?|\\x[0-9A-Fa-f]{2}|\\U[0-9A-Fa-f]{8}){2,}/g,
     ok: () => true,
     decode: (s) => unicodeUnescape(s),
+    partial: true,
   },
 ];
 
@@ -645,7 +674,7 @@ function tokenPasses(text: string, scorer: Scorer): Pass[] {
   for (const kind of TOKEN_KINDS) {
     if (kind.words) {
       // Escapes start with % or &: no need to look at the words when the text has none.
-      if (!text.includes(kind.name === 'URL escapes' ? '%' : '&')) continue;
+      if (!text.includes(kind.id === 'url' ? '%' : '&')) continue;
       for (const m of words) if (kind.re.test(m[0])) add(kind, m[0], m.index);
     } else {
       for (const m of text.matchAll(kind.re)) add(kind, m[0], m.index);
@@ -654,38 +683,33 @@ function tokenPasses(text: string, scorer: Scorer): Pass[] {
   const tokens = [...found.entries()].sort((a, b) => a[1].index - b[1].index);
   const out: Pass[] = [];
   for (const [token, { kinds, index }] of tokens.slice(0, MAX_TOKENS)) {
-    const options: { text: string; note: string; kind: string }[] = [];
+    const options: { text: string; note: string; kind: TokenKind }[] = [];
     for (const kind of kinds) {
       const r = attempt(() => kind.decode(token));
-      if (r.text) options.push({ text: r.text, note: kind.name, kind: kind.name });
+      if (r.text) options.push({ text: r.text, note: kind.name(), kind });
     }
     const layered = token.length <= AUTO_TOKEN_MAX ? chain(token) : null;
     if (layered && layered.note.includes('→')) {
-      options.push({ ...layered, kind: kinds[0]!.name });
+      options.push({ ...layered, kind: kinds[0]! });
     }
     const best = pickBest(options, scorer)?.best;
-    const label = `${best?.kind ?? kinds[0]!.name} inside the text: “${oneLine(token, 24)}”`;
-    const where = `line ${lineOf(text, index)}`;
+    const kind = best?.kind ?? kinds[0]!;
+    const label = T('pass.token', { kind: kind.name(), token: oneLine(token, 24) });
+    const where = T('note.line', { n: lineOf(text, index) });
     out.push(
       best
-        ? encoding(label, best.text, `${where}, ${best.note}`)
-        : encoding(label, null, `${where}, does not decode to text`),
+        ? encoding(label, best.text, joinNotes(where, best.note), kind.partial)
+        : encoding(label, null, joinNotes(where, T('note.notText')), kind.partial),
     );
   }
   if (!out.length) {
-    out.push(
-      encoding(
-        'Encoded strings inside the text',
-        null,
-        'No base64, hex, binary, char-code, Morse or escape sequence found among the words',
-      ),
-    );
+    out.push(encoding(T('pass.tokens'), null, T('note.noTokens')));
   } else if (tokens.length > MAX_TOKENS) {
     out.push(
       encoding(
-        'Encoded strings inside the text',
+        T('pass.tokens'),
         null,
-        `${tokens.length - MAX_TOKENS} more tokens not decoded (first ${MAX_TOKENS} only)`,
+        T('note.moreTokens', { count: tokens.length - MAX_TOKENS, max: MAX_TOKENS }),
       ),
     );
   }

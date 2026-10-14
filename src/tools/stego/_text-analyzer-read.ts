@@ -3,11 +3,14 @@
  * letter / word of each line, every Nth letter…) and structured readings (odd lines, reversed
  * text, diagonals, columns, boustrophedon).
  */
+import { toolT } from '../../i18n/tool-text';
 import { foldAccents, isFunctionWord, orderFit, type OrderFit } from '../../lib/readability';
 import {
   isLetterOrDigit,
+  joinNotes,
+  cutNote,
   lettersOf,
-  ordinal,
+  nthLabel,
   pickBest,
   wordPickFactor,
   wordsOf,
@@ -16,6 +19,8 @@ import {
   type Pass,
   type Scorer,
 } from './_text-analyzer-core';
+
+const T = toolT('text-analyzer');
 
 /** The visible text, prepared once for every reading pass. */
 export interface ReadInput {
@@ -111,7 +116,10 @@ export function rhymeShare(lines: string[]): number {
  * there anyway, and hard-wrapped prose (lowercase line starts, no rhyme) puts whatever word
  * the wrap fell on. Capitals prove nothing in Title Case; doubled words ("And And") are salad.
  */
-function firstWordEvidence(input: ReadInput, words: string[]): { prior: number; note: string } {
+function firstWordEvidence(
+  input: ReadInput,
+  words: string[],
+): { prior: number; note: string; wrapped: boolean } {
   const { afterBlank } = input;
   const lines = input.bodies;
   const rhymes = rhymeShare(lines) >= 0.5;
@@ -150,16 +158,14 @@ function firstWordEvidence(input: ReadInput, words: string[]): { prior: number; 
     if (picked[i] === picked[i - 1] && !DOUBLE_OK.has(picked[i]!)) doubled++;
   }
   prior *= 0.85 ** doubled;
-  const notes = [`${picked.length} lines`];
-  if (rhymes) notes.push('they rhyme');
-  if (wrapped) notes.push('lowercase line starts: wrapped prose?');
-  else if (starts) {
-    notes.push(`${starts} ${starts === 1 ? 'begins' : 'begin'} a new sentence anyway`);
-  }
-  if (titleCase) notes.push('every word is capitalised');
-  if (keywords) notes.push('keywords in capitals');
-  if (doubled) notes.push(`${doubled} doubled word${doubled > 1 ? 's' : ''}`);
-  return { prior, note: notes.join(', ') };
+  const notes = [T('note.lines', { count: picked.length })];
+  if (rhymes) notes.push(T('note.rhyme'));
+  if (wrapped) notes.push(T('note.wrapped'));
+  else if (starts) notes.push(T('note.sentenceStarts', { count: starts }));
+  if (titleCase) notes.push(T('note.titleCase'));
+  if (keywords) notes.push(T('note.keywords'));
+  if (doubled) notes.push(T('note.doubled', { count: doubled }));
+  return { prior, note: joinNotes(...notes), wrapped };
 }
 
 const reverse = (s: string) => Array.from(s).reverse().join('');
@@ -193,11 +199,14 @@ function perLine(
     ...pass('acrostic', 'select', label, null, why),
     pick: kind,
   });
-  if (lines.length < 2) return none('Needs at least 2 lines');
+  if (lines.length < 2) return none(T('note.needsLines', { n: 2 }));
   const picked = collect(lines.map(pick), 2);
-  if (!picked) return none('Lines are too short');
+  if (!picked) return none(T('note.linesTooShort'));
   const missing = lines.length - picked.length;
-  const note = `${picked.length} lines${missing ? `, ${missing} too short skipped` : ''}`;
+  const note = joinNotes(
+    T('note.lines', { count: picked.length }),
+    missing > 0 && T('note.tooShortSkipped', { count: missing }),
+  );
   const result = picked.join(kind === 'words' ? ' ' : '');
   return {
     ...pass('acrostic', 'select', label, result, note, prior),
@@ -209,7 +218,7 @@ function perLine(
 
 /** The classic acrostic of poems (Sand to Musset), weighed by how free the line starts are. */
 function firstWords(input: ReadInput): Pass {
-  const label = 'First word of each line';
+  const label = T('pass.firstWordOfLine');
   const base = perLine(input, label, (l) => wordsOf(l)[0], 'words');
   if (base.result === null) return base;
   const words = input.bodies.map((l) => wordsOf(l)[0] ?? '');
@@ -223,7 +232,7 @@ function firstWords(input: ReadInput): Pass {
  * the layout is read as for the first words.
  */
 function lastWords(input: ReadInput): Pass {
-  const label = 'Last word of each line';
+  const label = T('pass.lastWordOfLine');
   const base = perLine(input, label, (l) => wordsOf(l).at(-1), 'words');
   if (base.result === null) return base;
   const firsts = input.bodies.map((l) => wordsOf(l)[0] ?? '');
@@ -231,13 +240,13 @@ function lastWords(input: ReadInput): Pass {
   // Lines that end on "la", "de", "the": the wrap fell mid-phrase (no poem or message does it).
   const lasts = input.bodies.map((l) => wordsOf(l).at(-1) ?? '').filter(Boolean);
   const dangling = lasts.filter((w) => isFunctionWord(w)).length / Math.max(1, lasts.length);
-  const wrapped = layout.note.includes('wrapped prose') || dangling >= 0.4;
+  const wrapped = layout.wrapped || dangling >= 0.4;
   const rhymes = rhymeShare(input.bodies) >= 0.5;
   const prior = wrapped ? 0.5 : rhymes ? 0.7 : 0.8;
-  const notes = [`${base.result.split(' ').length} lines`];
-  if (wrapped) notes.push('lowercase line starts: wrapped prose?');
-  else if (rhymes) notes.push('they rhyme');
-  return { ...base, prior, note: notes.join(', ') };
+  const notes = [T('note.lines', { count: base.result.split(' ').length })];
+  if (wrapped) notes.push(T('note.wrapped'));
+  else if (rhymes) notes.push(T('note.rhyme'));
+  return { ...base, prior, note: joinNotes(...notes) };
 }
 
 /** Readability of a word pick, as scorePass() will weigh it (for choosing among offsets). */
@@ -252,9 +261,9 @@ function everyNth(text: string, scorer: Scorer): Pass[] {
   const chars = all.filter((c) => c !== '\n' && c !== '\r');
   const letters = chars.filter(isLetterOrDigit);
   const out: Pass[] = [];
-  const truncated = text.length > MAX_STEP_CHARS ? `, first ${MAX_STEP_CHARS} characters` : '';
+  const truncated = text.length > MAX_STEP_CHARS ? cutNote(MAX_STEP_CHARS) : '';
   for (let n = 2; n <= MAX_STEP; n++) {
-    const label = `Every ${ordinal(n)} character`;
+    const label = nthLabel('pass.everyNthChar', n);
     const options: { text: string; note: string }[] = [];
     for (const [source, what] of [
       [letters, 'letter'],
@@ -266,7 +275,7 @@ function everyNth(text: string, scorer: Scorer): Pass[] {
         for (let i = offset; i < source.length; i += n) picked += source[i]!;
         options.push({
           text: picked.trim(),
-          note: `${what === 'letter' ? 'letters only' : 'all characters'}, from ${what} ${offset + 1}${truncated}`,
+          note: `${what === 'letter' ? T('note.fromLetter', { n: offset + 1 }) : T('note.fromChar', { n: offset + 1 })}${truncated}`,
         });
       }
     }
@@ -288,7 +297,7 @@ function everyNth(text: string, scorer: Scorer): Pass[] {
             // 2·N offsets for this step, and the step itself is one of a few natural ones.
             tries: 8 * n,
           }
-        : pass('acrostic', 'select', label, null, `Text too short for a step of ${n}`),
+        : pass('acrostic', 'select', label, null, T('note.tooShortForStep', { n })),
     );
   }
   return out;
@@ -298,9 +307,9 @@ function everyNthWord(words: string[], scorer: Scorer): Pass[] {
   const used = words.slice(0, MAX_STEP_WORDS);
   const out: Pass[] = [];
   for (let n = 2; n <= MAX_WORD_STEP; n++) {
-    const label = `Every ${ordinal(n)} word`;
+    const label = nthLabel('pass.everyNthWord', n);
     if (used.length < n * 2) {
-      out.push(pass('acrostic', 'select', label, null, `Fewer than ${n * 2} words`));
+      out.push(pass('acrostic', 'select', label, null, T('note.fewerWords', { n: n * 2 })));
       continue;
     }
     const options: { text: string; note: string }[] = [];
@@ -309,7 +318,7 @@ function everyNthWord(words: string[], scorer: Scorer): Pass[] {
       for (let i = offset; i < used.length; i += n) picked.push(used[i]!);
       options.push({
         text: picked.join(' '),
-        note: `from word ${offset + 1}; picked words always look readable, check by eye`,
+        note: T('note.fromWord', { n: offset + 1 }),
       });
     }
     const top = pickBest(options, scorer, '', wordPickRate(scorer))!;
@@ -340,13 +349,14 @@ function a1z26(numbers: number[]): string | null {
  * digits (a word of ten letters or more for 0, as in pi mnemonics) or as A1Z26 letters.
  */
 function wordLengthPasses(words: string[]): Pass[] {
-  const digitsLabel = 'Word lengths as digits';
-  const lettersLabel = 'Word lengths as letters (A1Z26)';
+  const digitsLabel = T('pass.wordLengthDigits');
+  const lettersLabel = T('pass.wordLengthLetters');
   const lengths = words.map((w) => lettersOf(w).length).filter((n) => n > 0);
   if (lengths.length < 4) {
+    const why = T('note.fewerWords', { n: 4 });
     return [
-      pass('acrostic', 'select', digitsLabel, null, 'Fewer than 4 words'),
-      pass('acrostic', 'select', lettersLabel, null, 'Fewer than 4 words'),
+      pass('acrostic', 'select', digitsLabel, null, why),
+      pass('acrostic', 'select', lettersLabel, null, why),
     ];
   }
   const used = lengths.slice(0, MAX_STEP_WORDS);
@@ -357,14 +367,21 @@ function wordLengthPasses(words: string[]): Pass[] {
       'select',
       digitsLabel,
       used.map((n) => n % 10).join(''),
-      `${used.length} words; read it as a number`,
+      T('note.wordsAsNumber', { count: used.length }),
     ),
     letters
       ? {
-          ...pass('acrostic', 'select', lettersLabel, letters, `${used.length} words`, 0.8),
+          ...pass(
+            'acrostic',
+            'select',
+            lettersLabel,
+            letters,
+            T('note.words', { count: used.length }),
+            0.8,
+          ),
           pick: 'letters',
         }
-      : pass('acrostic', 'select', lettersLabel, null, 'A word has more than 26 letters'),
+      : pass('acrostic', 'select', lettersLabel, null, T('note.wordOver26')),
   ];
 }
 
@@ -373,11 +390,11 @@ function wordLengthPasses(words: string[]): Pass[] {
  * acrostic of letters and e-mails, where the lines inside a paragraph are wrapped anyhow.
  */
 function paragraphPasses(input: ReadInput): Pass[] {
-  const letterLabel = 'First letter of each paragraph';
-  const wordLabel = 'First word of each paragraph';
+  const letterLabel = T('pass.firstLetterOfParagraph');
+  const wordLabel = T('pass.firstWordOfParagraph');
   const starts = input.bodies.filter((_, i) => i === 0 || input.afterBlank[i]);
   if (starts.length < 3) {
-    const why = starts.length < 2 ? 'No blank line between paragraphs' : 'Fewer than 3 paragraphs';
+    const why = starts.length < 2 ? T('note.noBlankLine') : T('note.fewerParagraphs', { n: 3 });
     return [
       pass('acrostic', 'select', letterLabel, null, why),
       pass('acrostic', 'select', wordLabel, null, why),
@@ -385,7 +402,7 @@ function paragraphPasses(input: ReadInput): Pass[] {
   }
   // One line per paragraph: the same reading as the lines, already listed there.
   if (starts.length === input.bodies.length) {
-    const why = 'Every paragraph is one line: see the line acrostics';
+    const why = T('note.oneLineParagraphs');
     return [
       pass('acrostic', 'select', letterLabel, null, why),
       pass('acrostic', 'select', wordLabel, null, why),
@@ -396,18 +413,18 @@ function paragraphPasses(input: ReadInput): Pass[] {
     starts.map((l) => wordsOf(l)[0]),
     3,
   );
-  const note = `${starts.length} paragraphs`;
+  const note = T('note.paragraphs', { count: starts.length });
   return [
     letters
       ? { ...pass('acrostic', 'select', letterLabel, letters.join(''), note), pick: 'letters' }
-      : pass('acrostic', 'select', letterLabel, null, 'Paragraphs start without a letter'),
+      : pass('acrostic', 'select', letterLabel, null, T('note.paragraphNoLetter')),
     words
       ? {
           ...pass('acrostic', 'select', wordLabel, words.join(' '), note),
           pick: 'words',
           share: words.length / Math.max(1, input.wordCount),
         }
-      : pass('acrostic', 'select', wordLabel, null, 'Paragraphs start without a word'),
+      : pass('acrostic', 'select', wordLabel, null, T('note.paragraphNoWord')),
   ];
 }
 
@@ -419,7 +436,7 @@ const ALL_CAPS_WORD = /^\p{Lu}{2,}$/u;
  * sentence ("DO NOT LEAVE YOUR BAGS") is read by anyone, it is not a hidden message.
  */
 function capitalsPass(text: string): Pass {
-  const label = 'Capital letters';
+  const label = T('pass.capitals');
   const none = (why: string) => pass('acrostic', 'select', label, null, why);
   const picked: string[] = [];
   let total = 0;
@@ -431,22 +448,20 @@ function capitalsPass(text: string): Pass {
     else picked.push(...caps);
   }
   if (total >= 2 && total === lettersOf(text).filter((c) => /\p{L}/u.test(c)).length) {
-    return none('Every letter is a capital');
+    return none(T('note.allCapitals'));
   }
-  if (shouted && shouted >= 0.7 * total) {
-    return none(
-      `${shouted} of ${total} capitals belong to words written in capitals: visible text`,
-    );
-  }
-  if (picked.length < 2) return none('Fewer than 2 capital letters');
-  const skipped = shouted ? `, ${shouted} in words written in capitals left out` : '';
+  if (shouted && shouted >= 0.7 * total) return none(T('note.shouted', { count: total, shouted }));
+  if (picked.length < 2) return none(T('note.fewerCapitals', { n: 2 }));
   return {
     ...pass(
       'acrostic',
       'select',
       label,
       picked.join(''),
-      `${picked.length} capitals${skipped}`,
+      joinNotes(
+        T('note.capitals', { count: picked.length }),
+        shouted > 0 && T('note.shoutedSkipped', { count: shouted }),
+      ),
       0.9,
     ),
     pick: 'letters',
@@ -459,8 +474,8 @@ export function acrosticPasses(input: ReadInput, scorer: Scorer): Pass[] {
   const words = wordsOf(text);
   const out: Pass[] = [
     // The two classic acrostics (initials, telestich) get the benefit of the doubt.
-    perLine(input, 'First letter of each line', firstLetter, 'letters', 1.1, 1),
-    perLine(input, 'Last letter of each line', lastLetter, 'letters', 1, 2),
+    perLine(input, T('pass.firstLetterOfLine'), firstLetter, 'letters', 1.1, 1),
+    perLine(input, T('pass.lastLetterOfLine'), lastLetter, 'letters', 1, 2),
     firstWords(input),
     // Word picks always read as words: the first and last words of the lines are the classic
     // places, the others are trusted less.
@@ -468,14 +483,14 @@ export function acrosticPasses(input: ReadInput, scorer: Scorer): Pass[] {
   ];
   for (const n of [2, 3]) {
     out.push(
-      perLine(input, `${ordinal(n)} word of each line`, (l) => wordsOf(l)[n - 1], 'words', 0.4),
+      perLine(input, nthLabel('pass.nthWordOfLine', n), (l) => wordsOf(l)[n - 1], 'words', 0.4),
     );
   }
   for (const n of [2, 3, 4, 5]) {
     out.push(
       perLine(
         input,
-        `${ordinal(n)} letter of each line`,
+        nthLabel('pass.nthLetterOfLine', n),
         (l) => lettersOf(l)[n - 1],
         'letters',
         0.8,
@@ -486,7 +501,7 @@ export function acrosticPasses(input: ReadInput, scorer: Scorer): Pass[] {
   out.push(
     perLine(
       input,
-      'Middle letter of each line',
+      T('pass.middleLetterOfLine'),
       (l) => {
         const letters = lettersOf(l);
         return letters.length >= 3 ? letters[Math.floor((letters.length - 1) / 2)] : undefined;
@@ -497,40 +512,55 @@ export function acrosticPasses(input: ReadInput, scorer: Scorer): Pass[] {
     ),
   );
 
-  const byWord = (label: string, pick: (w: string) => string | undefined, prior: number): Pass => {
-    if (words.length < 3) return pass('acrostic', 'select', label, null, 'Fewer than 3 words');
+  const byWord = (
+    label: string,
+    pick: (w: string) => string | undefined,
+    prior: number,
+    tries: number,
+  ): Pass => {
+    if (words.length < 3) {
+      return pass('acrostic', 'select', label, null, T('note.fewerWords', { n: 3 }));
+    }
     const picked = collect(words.map(pick), 3);
     return picked
       ? {
-          ...pass('acrostic', 'select', label, picked.join(''), `${picked.length} words`, prior),
+          ...pass(
+            'acrostic',
+            'select',
+            label,
+            picked.join(''),
+            T('note.words', { count: picked.length }),
+            prior,
+          ),
           pick: 'letters',
-          // The first letter of each word is the classic null cipher; the others are rarer.
-          tries: label.startsWith('First') ? 2 : 4,
+          tries,
         }
-      : pass('acrostic', 'select', label, null, 'Words are too short');
+      : pass('acrostic', 'select', label, null, T('note.wordsTooShort'));
   };
+  // The first letter of each word is the classic null cipher; the others are rarer (more tries).
   out.push(
-    byWord('First letter of each word', (w) => lettersOf(w)[0], 0.9),
-    byWord('Second letter of each word', (w) => lettersOf(w)[1], 0.8),
-    byWord('Third letter of each word', (w) => lettersOf(w)[2], 0.7),
-    byWord('Last letter of each word', (w) => lettersOf(w).at(-1), 0.8),
+    byWord(T('pass.firstLetterOfWord'), (w) => lettersOf(w)[0], 0.9, 2),
+    byWord(T('pass.secondLetterOfWord'), (w) => lettersOf(w)[1], 0.8, 4),
+    byWord(T('pass.thirdLetterOfWord'), (w) => lettersOf(w)[2], 0.7, 4),
+    byWord(T('pass.lastLetterOfWord'), (w) => lettersOf(w).at(-1), 0.8, 4),
   );
 
   const sents = sentences(text);
+  const sentenceLabel = T('pass.firstLetterOfSentence');
   out.push(
     sents.length >= 2
       ? {
           ...pass(
             'acrostic',
             'select',
-            'First letter of each sentence',
+            sentenceLabel,
             sents.map((s) => lettersOf(s)[0]!).join(''),
-            `${sents.length} sentences`,
+            T('note.sentences', { count: sents.length }),
             0.9,
           ),
           pick: 'letters',
         }
-      : pass('acrostic', 'select', 'First letter of each sentence', null, 'Fewer than 2 sentences'),
+      : pass('acrostic', 'select', sentenceLabel, null, T('note.fewerSentences', { n: 2 })),
   );
   out.push(...paragraphPasses(input));
 
@@ -564,7 +594,7 @@ function alternateLines(picked: string[], others: string[], scorer: Scorer) {
   const mine = count(picked);
   const theirs = count(others);
   if (mine.length < 3 || theirs.length < 2) {
-    return { evidence: 0, note: `${picked.length} lines: too few to stand apart` };
+    return { evidence: 0, note: T('note.tooFewLines', { count: picked.length }) };
   }
   const ratio = median(theirs) / Math.max(1, median(mine));
   // Shorter line by line, not only on average: a greeting and a signature are short too, but
@@ -580,11 +610,11 @@ function alternateLines(picked: string[], others: string[], scorer: Scorer) {
   const evidence = Math.max(shorter, junk) * (0.4 + 0.6 * flow);
   const why =
     junk >= shorter && junk > 0
-      ? 'the other lines do not read'
+      ? T('note.othersUnreadable')
       : shorter > 0
-        ? `${ratio.toFixed(1)}× shorter than the other lines`
-        : 'like the other lines: no sign of a message';
-  return { evidence, note: `${picked.length} lines, ${why}` };
+        ? T('note.shorter', { ratio: ratio.toFixed(1) })
+        : T('note.likeOthers');
+  return { evidence, note: joinNotes(T('note.lines', { count: picked.length }), why) };
 }
 
 /**
@@ -624,11 +654,12 @@ export function structurePasses(input: ReadInput, scorer: Scorer): Pass[] {
     evidence,
   });
   const multi = lines.length >= 3;
-  const needLines = 'Needs at least 3 lines';
+  const needLines = T('note.needsLines', { n: 3 });
+  const needTwoLines = T('note.needsLines', { n: 2 });
 
   for (const [label, parity] of [
-    ['Odd lines (1st, 3rd…)', 0],
-    ['Even lines (2nd, 4th…)', 1],
+    [T('pass.oddLines'), 0],
+    [T('pass.evenLines'), 1],
   ] as const) {
     if (!multi) {
       out.push(s('reorder', label, null, needLines));
@@ -654,15 +685,13 @@ export function structurePasses(input: ReadInput, scorer: Scorer): Pass[] {
     out.push(
       s(
         'reorder',
-        'Lines in reverse order',
+        T('pass.linesReversed'),
         reversed.join('\n'),
-        evidence > 0.2
-          ? 'the lines join better upside down'
-          : 'joins no better than the lines as written',
+        evidence > 0.2 ? T('note.joinsBetter') : T('note.joinsNoBetter'),
         evidence,
       ),
     );
-  } else out.push(s('reorder', 'Lines in reverse order', null, 'Needs at least 2 lines'));
+  } else out.push(s('reorder', T('pass.linesReversed'), null, needTwoLines));
 
   const words = wordsOf(text);
   const wordsBack = [...words].reverse();
@@ -670,14 +699,14 @@ export function structurePasses(input: ReadInput, scorer: Scorer): Pass[] {
   out.push(
     s(
       'transform',
-      'Whole text reversed',
+      T('pass.textReversed'),
       reverse(text.trim()),
-      'last character first',
+      T('note.lastCharFirst'),
       readsBetter(reverse(text.trim()), text, scorer),
     ),
     s(
       'reorder',
-      'Words in reverse order',
+      T('pass.wordsReversed'),
       wordsBack.join(' '),
       '',
       betterOrder(orderFit(head(wordsBack)), orderFit(head(words)), proseShare(lines)),
@@ -688,24 +717,22 @@ export function structurePasses(input: ReadInput, scorer: Scorer): Pass[] {
     out.push(
       s(
         'transform',
-        'Each line reversed',
+        T('pass.eachLineReversed'),
         each,
-        'line order kept',
+        T('note.lineOrderKept'),
         readsBetter(each, text, scorer),
       ),
     );
   } else {
-    out.push(
-      s('transform', 'Each line reversed', null, 'Single line: same as the whole text reversed'),
-    );
+    out.push(s('transform', T('pass.eachLineReversed'), null, T('note.singleLine')));
   }
   const eachWord = text.replace(/[\p{L}\p{N}\p{M}]+/gu, (w) => reverse(w));
   out.push(
     s(
       'transform',
-      'Each word reversed',
+      T('pass.eachWordReversed'),
       eachWord,
-      'word order kept',
+      T('note.wordOrderKept'),
       readsBetter(eachWord, text, scorer),
     ),
   );
@@ -714,17 +741,15 @@ export function structurePasses(input: ReadInput, scorer: Scorer): Pass[] {
     out.push(
       s(
         'transform',
-        'Boustrophedon (every 2nd line reversed)',
+        T('pass.boustrophedon'),
         lines.map((l, i) => (i % 2 ? reverse(l) : l)).join('\n'),
-        'lines 2, 4… read right to left',
+        T('note.boustrophedon'),
         // Only the reversed lines change: they must read better that way.
         readsBetter(even.map(reverse).join('\n'), even.join('\n'), scorer),
       ),
     );
   } else {
-    out.push(
-      s('transform', 'Boustrophedon (every 2nd line reversed)', null, 'Needs at least 2 lines'),
-    );
+    out.push(s('transform', T('pass.boustrophedon'), null, needTwoLines));
   }
 
   const grid = lines.map((l) => Array.from(l));
@@ -742,32 +767,37 @@ export function structurePasses(input: ReadInput, scorer: Scorer): Pass[] {
     letters(
       s(
         'select',
-        'Diagonal ↘ (character i of line i)',
+        T('pass.diagonalDown'),
         down ? down.join('') : null,
-        down ? `${down.length} lines` : multi ? 'Lines are too short' : needLines,
+        down
+          ? T('note.lines', { count: down.length })
+          : multi
+            ? T('note.linesTooShort')
+            : needLines,
       ),
       2,
     ),
     letters(
       s(
         'select',
-        'Diagonal ↙ (character i from the end of line i)',
+        T('pass.diagonalUp'),
         up ? up.join('') : null,
-        up ? `${up.length} lines` : multi ? 'Lines are too short' : needLines,
+        up ? T('note.lines', { count: up.length }) : multi ? T('note.linesTooShort') : needLines,
       ),
       2,
     ),
   );
 
   const width = Math.max(0, ...grid.map((r) => r.length));
+  const columnLabel = T('pass.bestColumn');
   if (multi && width >= 2) {
-    const columns: { text: string; note: string }[] = [];
+    const columns: { text: string; column: number }[] = [];
     for (let j = 1; j < Math.min(width, MAX_COLUMNS); j++) {
       const col = collect(
         grid.map((row) => row[j]),
         3,
       );
-      if (col) columns.push({ text: col.join('').trim(), note: `column ${j + 1}` });
+      if (col) columns.push({ text: col.join('').trim(), column: j + 1 });
     }
     const top = pickBest(columns, scorer);
     out.push(
@@ -775,19 +805,21 @@ export function structurePasses(input: ReadInput, scorer: Scorer): Pass[] {
         ? {
             ...s(
               'select',
-              'Best column (character j of every line)',
+              columnLabel,
               top.best.text,
-              `${top.best.note} of ${width}${width > MAX_COLUMNS ? ` (first ${MAX_COLUMNS} read)` : ''}`,
+              width > MAX_COLUMNS
+                ? T('note.columnCut', { n: top.best.column, width, max: MAX_COLUMNS })
+                : T('note.column', { n: top.best.column, width }),
             ),
             prior: 0.8,
             pick: 'letters',
             margin: top.margin,
             tries: columns.length,
           }
-        : s('select', 'Best column (character j of every line)', null, 'Lines are too short'),
+        : s('select', columnLabel, null, T('note.linesTooShort')),
     );
   } else {
-    out.push(s('select', 'Best column (character j of every line)', null, needLines));
+    out.push(s('select', columnLabel, null, needLines));
   }
 
   const lengths = grid.map((r) => r.length);
@@ -799,23 +831,11 @@ export function structurePasses(input: ReadInput, scorer: Scorer): Pass[] {
       for (const row of grid) if (row[j] !== undefined) read += row[j];
     out.push(
       letters(
-        s(
-          'select',
-          'Read by columns (grid transposed)',
-          read,
-          `${grid.length} lines × ${width} columns`,
-        ),
+        s('select', T('pass.byColumns'), read, T('note.grid', { lines: grid.length, width })),
       ),
     );
   } else {
-    out.push(
-      s(
-        'select',
-        'Read by columns (grid transposed)',
-        null,
-        multi ? 'Lines have very different lengths' : needLines,
-      ),
-    );
+    out.push(s('select', T('pass.byColumns'), null, multi ? T('note.unevenLines') : needLines));
   }
   return out;
 }

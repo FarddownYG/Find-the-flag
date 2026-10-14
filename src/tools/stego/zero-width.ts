@@ -1,6 +1,7 @@
 import { bool, defineTool, select, text, toggle } from '../../core/define';
 import { ToolError } from '../../core/errors';
 import type { Output } from '../../core/types';
+import { toolT } from '../../i18n/tool-text';
 import {
   classify,
   codePointLabel,
@@ -16,6 +17,8 @@ import {
   type Placement,
   type SpecialChar,
 } from './_zerowidth';
+
+const T = toolT('zero-width');
 
 /** Rows of the per-occurrence table before it is cut off. */
 const MAX_ROWS = 400;
@@ -66,7 +69,7 @@ function withMarkers(cps: number[], found: Occurrence[]): string {
       const tally = new Map<string, number>();
       for (const o of run) tally.set(o.info.abbr, (tally.get(o.info.abbr) ?? 0) + 1);
       const parts = [...tally.entries()].map(([abbr, n]) => `${abbr}×${n}`).join(' ');
-      out += `⟦${run.length} hidden: ${parts}⟧`;
+      out += T('text.hiddenRun', { count: run.length, parts });
     }
     i = j - 1;
   }
@@ -82,26 +85,19 @@ function hints(found: Occurrence[]): string[] {
     (o) => o.info.kind === 'invisible' && !isTagChar(o.cp) && !isVariationSelector(o.cp),
   );
   const distinct = new Set(found.filter((o) => o.info.kind === 'invisible').map((o) => o.cp)).size;
-  if (tags)
-    out.push('Unicode tag characters: ASCII text hidden as invisible tags (Decode reads it).');
+  if (tags) out.push(T('hint.tags'));
   if (vs >= 2 && vs !== found.filter((o) => o.cp === 0xfe0f).length) {
-    out.push('Variation selectors: possibly bytes smuggled after a character (Decode tries it).');
+    out.push(T('hint.variation'));
   }
-  if (zw >= 8 && distinct >= 2)
-    out.push('A run of zero-width characters: a binary or base-4 payload (Decode tries it).');
+  if (zw >= 8 && distinct >= 2) out.push(T('hint.zeroWidth'));
   if (found.length === 1 && found[0]!.index === 0 && found[0]!.cp === 0xfeff) {
-    out.push('Only a byte order mark at the start: harmless.');
+    out.push(T('hint.bom'));
   }
   if (found.some((o) => (o.cp >= 0x202a && o.cp <= 0x202e) || (o.cp >= 0x2066 && o.cp <= 0x2069))) {
-    out.push(
-      'Bidirectional controls: the text may display in a different order than it is stored.',
-    );
+    out.push(T('hint.bidi'));
   }
-  if (found.some((o) => o.info.kind === 'space')) {
-    out.push('Unusual spaces: ordinary vs no-break/thin spaces can encode bits.');
-  }
-  if (found.some((o) => o.info.kind === 'control'))
-    out.push('Control characters hide in the text.');
+  if (found.some((o) => o.info.kind === 'space')) out.push(T('hint.spaces'));
+  if (found.some((o) => o.info.kind === 'control')) out.push(T('hint.control'));
   return out;
 }
 
@@ -136,7 +132,7 @@ function reveal(input: string, includeSpaces: boolean): Output[] {
       {
         type: 'note',
         level: 'success',
-        text: `No invisible or unusual characters in these ${cps.length} characters. If you expected some, the app you copied from may have stripped them: try downloading the file instead.`,
+        text: T('text.none', { count: cps.length }),
       },
     ];
   }
@@ -159,35 +155,47 @@ function reveal(input: string, includeSpaces: boolean): Output[] {
   }
   const entries: [string, string][] = [
     [
-      'Characters',
-      `${cps.length} (${cps.length - found.length} ordinary, ${found.length} invisible or unusual)`,
+      T('kv.characters'),
+      T('value.characters', {
+        n: cps.length,
+        ordinary: cps.length - found.length,
+        unusual: found.length,
+      }),
     ],
-    ['Different kinds', String(types.size)],
-    ['Runs', `${runs} (longest ${longest} in a row)`],
+    [T('kv.kinds'), String(types.size)],
+    [T('kv.runs'), T('value.runs', { runs, longest })],
   ];
   const note = hints(found);
-  if (note.length) entries.push(['Looks like', note.join(' ')]);
+  if (note.length) entries.push([T('kv.looksLike'), note.join(' ')]);
+  const kinds: Record<SpecialChar['kind'], string> = {
+    invisible: T('value.kind.invisible'),
+    space: T('value.kind.space'),
+    control: T('value.kind.control'),
+  };
 
   const out: Output[] = [
-    { type: 'kv', label: 'Summary', entries },
+    { type: 'kv', label: T('label.summary'), entries },
     {
       type: 'text',
-      label: 'Text with the invisible characters marked',
+      label: T('label.marked'),
       value: withMarkers(cps, found),
     },
-    { type: 'text', label: 'Visible text only', value: stripInvisible(input, includeSpaces) },
+    { type: 'text', label: T('label.visible'), value: stripInvisible(input, includeSpaces) },
     {
       type: 'table',
-      label: 'What is in there',
-      columns: ['Code point', 'Name', 'Count', 'Kind'],
+      label: T('label.inventory'),
+      columns: [T('col.codePoint'), T('col.name'), T('col.count'), T('col.kind')],
       rows: [...types.entries()]
         .sort((a, b) => b[1].count - a[1].count || a[0] - b[0])
-        .map(([cp, t]) => [codePointLabel(cp), t.info.name, t.count, t.info.kind]),
+        .map(([cp, t]) => [codePointLabel(cp), t.info.name, t.count, kinds[t.info.kind]]),
     },
     {
       type: 'table',
-      label: found.length > MAX_ROWS ? `Where (first ${MAX_ROWS} of ${found.length})` : 'Where',
-      columns: ['Position', 'Line:column', 'Code point', 'Name'],
+      label:
+        found.length > MAX_ROWS
+          ? T('label.whereCut', { max: MAX_ROWS, total: found.length })
+          : T('label.where'),
+      columns: [T('col.position'), T('col.lineColumn'), T('col.codePoint'), T('col.name')],
       rows: found
         .slice(0, MAX_ROWS)
         .map((o) => [o.index, `${o.line}:${o.column}`, codePointLabel(o.cp), o.info.name]),
@@ -199,9 +207,7 @@ function reveal(input: string, includeSpaces: boolean): Output[] {
 function decode(input: string): Output[] {
   const { found } = scan(input, true);
   if (!found.length) {
-    throw new ToolError(
-      'No invisible characters found in the text. Paste it with the hidden characters included (some apps strip them when copying), or switch to Reveal to inspect the text.',
-    );
+    throw new ToolError(T('error.noInvisible'));
   }
   const candidates: Candidate[] = decodeAll(input);
   const visible = stripInvisible(input, true);
@@ -210,14 +216,14 @@ function decode(input: string): Output[] {
       {
         type: 'note',
         level: 'warn',
-        text: 'Invisible characters are present but no known scheme produced text. Switch to Reveal to see which characters they are.',
+        text: T('text.noScheme'),
       },
-      { type: 'text', label: 'Visible text only', value: visible },
+      { type: 'text', label: T('label.visible'), value: visible },
     ];
   }
   const best = candidates[0]!;
   const out: Output[] = [];
-  const label = `Best reading · ${best.scheme}`;
+  const label = T('label.best', { scheme: best.scheme });
   out.push(
     looksTextual(best.text)
       ? { type: 'text', label, value: best.text }
@@ -227,13 +233,13 @@ function decode(input: string): Output[] {
     out.push({
       type: 'note',
       level: 'warn',
-      text: 'None of the readings looks like plain text. The payload may be encrypted or compressed, or use a scheme not covered here: check the other readings below.',
+      text: T('text.notPlain'),
     });
   }
   out.push({
     type: 'table',
-    label: 'Every reading, most readable first',
-    columns: ['Rank', 'Scheme', 'Mapping', 'Score', 'Result'],
+    label: T('label.readings'),
+    columns: [T('col.rank'), T('col.scheme'), T('col.mapping'), T('col.score'), T('col.result')],
     rows: candidates
       .slice(0, 12)
       .map((c, i) => [i + 1, c.scheme, c.detail, c.score.toFixed(1), preview(c.text)]),
@@ -241,7 +247,7 @@ function decode(input: string): Output[] {
   });
   out.push({
     type: 'text',
-    label: 'Visible text with the invisible characters removed',
+    label: T('label.visibleRemoved'),
     value: visible,
   });
   return out;
@@ -260,9 +266,8 @@ function encode(
   scheme: EncodeScheme,
   placement: Placement,
 ): Output[] {
-  if (!secret) throw new ToolError('Type the message to hide in the "Secret message" option.');
-  if (!cover.trim())
-    throw new ToolError('Type the cover text (the visible sentence) in the input box.');
+  if (!secret) throw new ToolError(T('error.noSecret'));
+  if (!cover.trim()) throw new ToolError(T('error.noCover'));
   const { units, chars } = encodePayload(secret, scheme);
   const result = embedPayload(cover, units, placement);
   const back = decodeAll(result)[0];
@@ -271,20 +276,12 @@ function encode(
     {
       type: 'note',
       level: 'success',
-      text: `Hidden ${[...secret].length} characters using ${chars} invisible characters. Copy the text below: it looks like the cover text.`,
+      text: T('text.hidden', { count: [...secret].length, chars }),
     },
-    { type: 'text', label: 'Stego text (copy all of it)', value: result },
+    { type: 'text', label: T('label.stego'), value: result },
     ok
-      ? {
-          type: 'note',
-          level: 'success',
-          text: 'Round-trip check passed: decoding returns the secret.',
-        }
-      : {
-          type: 'note',
-          level: 'warn',
-          text: 'Round-trip check failed: the cover text already contains invisible characters that confuse the decoder. Use Reveal to clean it first.',
-        },
+      ? { type: 'note', level: 'success', text: T('text.roundTripOk') }
+      : { type: 'note', level: 'warn', text: T('text.roundTripFail') },
   ];
 }
 
@@ -394,7 +391,7 @@ export default defineTool({
     return {
       score: payload ? 0.9 : 0.5,
       options: { mode: payload ? 'decode' : 'reveal' },
-      reason: `${invisible.length} invisible character${invisible.length === 1 ? '' : 's'} in the text`,
+      reason: T('detect.invisible', { count: invisible.length }),
     };
   },
   run(input, { mode, spaces, scheme, placement, secret }) {

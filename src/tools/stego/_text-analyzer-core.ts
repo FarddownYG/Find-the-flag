@@ -8,6 +8,7 @@
  * outputs must score higher to count.
  */
 import { DEFAULT_FLAG_PATTERN } from '../../core/flags';
+import { toolT } from '../../i18n/tool-text';
 import {
   foldAccents,
   phraseFit,
@@ -18,6 +19,8 @@ import {
   type Readability,
 } from '../../lib/readability';
 import { flagForm } from '../crypto/_classical';
+
+const T = toolT('text-analyzer');
 
 export type Family = 'acrostic' | 'structure' | 'invisible' | 'encoding' | 'cipher';
 
@@ -124,6 +127,19 @@ export function ordinal(n: number): string {
   if (mod100 >= 11 && mod100 <= 13) return `${n}th`;
   return `${n}${['th', 'st', 'nd', 'rd'][n % 10] ?? 'th'}`;
 }
+
+/**
+ * A pass label with an ordinal ("Every 3rd character"). English writes the ordinal ({nth});
+ * the other languages place the number themselves ({count}, plural forms).
+ */
+export const nthLabel = (key: string, n: number): string => T(key, { count: n, nth: ordinal(n) });
+
+/** The facts of one note, listed ("12 lines, they rhyme"); empty parts are left out. */
+export const joinNotes = (...parts: (string | false | null | undefined)[]): string =>
+  parts.filter((p): p is string => !!p).join(T('text.listSep'));
+
+/** The suffix of a note on a pass that reads only the start of the text (", first 4000 characters"). */
+export const cutNote = (max: number): string => T('text.listSep') + T('note.firstChars', { max });
 
 /** One line for a table cell: line breaks shown as " / ", cut after `max` characters. */
 export function oneLine(text: string, max = 160): string {
@@ -569,4 +585,8 @@ export function rankScored(list: Scored[], baseKey: string): Scored[] {
   return out;
 }
 
-export const LANG_NAMES: Record<Lang, string> = { en: 'English', fr: 'French' };
+const LANG_NAMES: Record<Lang, () => string> = {
+  en: () => T('value.lang.en'),
+  fr: () => T('value.lang.fr'),
+};
+export const langName = (lang: Lang): string => LANG_NAMES[lang]();

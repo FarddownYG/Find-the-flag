@@ -2,11 +2,14 @@
  * Text analyzer statistics: sizes, character classes, non-ASCII characters with their names,
  * repeated substrings (Kasiski-style spacing), index of coincidence and entropy.
  */
+import { toolT } from '../../i18n/tool-text';
 import { utf8Encode } from '../../lib/bytes';
 import { indexOfCoincidence } from '../../lib/english';
-import { LANG_NAMES, wordsOf, type Scorer } from './_text-analyzer-core';
+import { langName, wordsOf, type Scorer } from './_text-analyzer-core';
 import { lookalike } from './_text-analyzer-hidden';
 import { classify, codePointLabel } from './_zerowidth';
+
+const T = toolT('text-analyzer');
 
 const MAX_NON_ASCII_ROWS = 100;
 /** Repeats are searched in this many first characters. */
@@ -56,8 +59,20 @@ const PUNCTUATION: Record<number, string> = {
   0x2212: 'MINUS SIGN',
 };
 
-/** Unicode name of a character when this module knows it, else a script hint or ''. */
-export function charName(cp: number): string {
+/** Kinds of characters this module has no Unicode name for: [test, script word, label]. */
+const KINDS: [(ch: string, cp: number) => boolean, string, () => string][] = [
+  [(ch) => /\p{M}/u.test(ch), 'combining', () => T('value.kind.combining')],
+  [(ch) => /\p{Script=Cyrillic}/u.test(ch), 'Cyrillic', () => T('value.kind.cyrillic')],
+  [(ch) => /\p{Script=Greek}/u.test(ch), 'Greek', () => T('value.kind.greek')],
+  [(ch) => /\p{Script=Arabic}/u.test(ch), 'Arabic', () => T('value.kind.arabic')],
+  [(ch) => /\p{Script=Hebrew}/u.test(ch), 'Hebrew', () => T('value.kind.hebrew')],
+  [(ch) => /\p{Script=Han}/u.test(ch), 'CJK', () => T('value.kind.cjk')],
+  [(ch) => /\p{Extended_Pictographic}/u.test(ch), 'emoji', () => T('value.kind.emoji')],
+  [(_, cp) => cp >= 0x2800 && cp <= 0x28ff, 'Braille', () => T('value.kind.braille')],
+];
+
+/** Unicode name of a character when this module knows it (data, never translated), else ''. */
+function unicodeName(cp: number): string {
   const special = classify(cp);
   if (special) return special.name;
   const look = lookalike(cp);
@@ -74,16 +89,22 @@ export function charName(cp: number): string {
       return `LATIN ${size} LETTER ${base.toUpperCase()} WITH ${marks.join(' AND ')}`;
     }
   }
-  if (/\p{M}/u.test(ch)) return 'combining mark';
-  if (/\p{Script=Cyrillic}/u.test(ch)) return 'Cyrillic letter';
-  if (/\p{Script=Greek}/u.test(ch)) return 'Greek letter';
-  if (/\p{Script=Arabic}/u.test(ch)) return 'Arabic letter';
-  if (/\p{Script=Hebrew}/u.test(ch)) return 'Hebrew letter';
-  if (/\p{Script=Han}/u.test(ch)) return 'CJK ideograph';
-  if (/\p{Extended_Pictographic}/u.test(ch)) return 'emoji / pictograph';
-  if (cp >= 0x2800 && cp <= 0x28ff) return 'Braille pattern';
   return '';
 }
+
+const kindOf = (cp: number) => {
+  const ch = String.fromCodePoint(cp);
+  return KINDS.find(([test]) => test(ch, cp));
+};
+
+/** Unicode name of a character when this module knows it, else a script hint or ''. */
+export function charName(cp: number): string {
+  return unicodeName(cp) || (kindOf(cp)?.[2]() ?? '');
+}
+
+/** The script a letter counts under in the statistics: first word of its name (data). */
+const scriptOf = (cp: number): string =>
+  (unicodeName(cp) || (kindOf(cp)?.[1] ?? '')).split(' ')[0] || '';
 
 /** How a character is shown in a table: invisible ones by their abbreviation. */
 export function showChar(cp: number): string {
@@ -223,7 +244,7 @@ export function metaEntries(raw: string, scorer: Scorer): [string, string][] {
     if (/\s/.test(c)) spaces++;
     else if (cp >= 0xc0 && cp <= 0x24f && /\p{L}/u.test(c)) latinExtra++;
     else if (/\p{L}/u.test(c)) {
-      const name = charName(cp).split(' ')[0] || 'other';
+      const name = scriptOf(cp) || T('value.otherScript');
       scripts.set(name, (scripts.get(name) ?? 0) + 1);
     } else if (/\p{N}/u.test(c)) digits++;
     else if (/[\p{P}\p{S}]/u.test(c)) punctuation++;
@@ -234,33 +255,30 @@ export function metaEntries(raw: string, scorer: Scorer): [string, string][] {
   const ioc = indexOfCoincidence(raw);
   const read = scorer.read(raw);
   return [
-    ['Characters', `${n} (${utf8Encode(raw).length} bytes in UTF-8)`],
-    ['Lines', `${lines.length} (${nonBlank} with text)`],
-    ['Words', String(wordsOf(raw).length)],
-    ['Letters A-Z', pct(ascii, n)],
-    ['Accented Latin letters', pct(latinExtra, n)],
+    [T('kv.characters'), T('value.characters', { count: utf8Encode(raw).length, n })],
+    [T('kv.lines'), T('value.lines', { lines: lines.length, withText: nonBlank })],
+    [T('kv.words'), String(wordsOf(raw).length)],
+    [T('kv.lettersAZ'), pct(ascii, n)],
+    [T('kv.accented'), pct(latinExtra, n)],
     [
-      'Other letters',
+      T('kv.otherLetters'),
       otherLetters
         ? `${otherLetters} (${[...scripts.entries()].map(([k, v]) => `${k} ${v}`).join(', ')})`
         : '0',
     ],
-    ['Digits', pct(digits, n)],
-    ['Spaces, tabs, line breaks', pct(spaces, n)],
-    ['Punctuation and symbols', pct(punctuation, n)],
-    ['Invisible characters', String(invisible)],
-    ['Unusual spaces', String(unusualSpaces)],
-    ['Non-ASCII characters', String(nonAsciiCount)],
+    [T('kv.digits'), pct(digits, n)],
+    [T('kv.spaces'), pct(spaces, n)],
+    [T('kv.punctuation'), pct(punctuation, n)],
+    [T('kv.invisible'), String(invisible)],
+    [T('kv.unusualSpaces'), String(unusualSpaces)],
+    [T('kv.nonAscii'), String(nonAsciiCount)],
+    [T('kv.ioc'), ioc ? T('value.ioc', { ioc: ioc.toFixed(4) }) : T('value.noLetters')],
+    [T('kv.entropy'), T('value.entropy', { bits: entropy(raw).toFixed(2) })],
     [
-      'Index of coincidence',
-      ioc
-        ? `${ioc.toFixed(4)} (English ≈ 0.066, French ≈ 0.078, random letters ≈ 0.038)`
-        : 'no letters',
-    ],
-    ['Entropy', `${entropy(raw).toFixed(2)} bits per character`],
-    [
-      'Language guess',
-      read.lang ? `${LANG_NAMES[read.lang]} (readability ${read.score} / 100)` : 'none recognised',
+      T('kv.language'),
+      read.lang
+        ? T('value.language', { lang: langName(read.lang), score: read.score })
+        : T('value.noLanguage'),
     ],
   ];
 }
@@ -276,7 +294,7 @@ export function nonAsciiRows(raw: string): { rows: string[][]; more: number } {
         codePointLabel(c.cp),
         charName(c.cp) || '—',
         String(c.count),
-        `line ${c.line}, col ${c.column}`,
+        T('value.position', { line: c.line, column: c.column }),
       ]),
     more: Math.max(0, list.length - MAX_NON_ASCII_ROWS),
   };
