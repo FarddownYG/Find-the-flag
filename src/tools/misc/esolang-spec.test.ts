@@ -677,8 +677,8 @@ describe('Telling programs from ordinary text', () => {
   const EVERYDAY = [
     'From: bob@example.com\nSubject: invoice number 42, please pay v2 soon',
     'user@host:~$ ls > out.txt',
-    'Email: john@site.com -> reply soon',
-    'Contact: alice@mail.com, we have v2 now',
+    'Email: john@example.net -> reply soon',
+    'Contact: alice@example.org, we have v2 now',
     'Price @ 5 > 4',
   ];
 
