@@ -1,8 +1,11 @@
 import { bool, defineTool, number } from '../../core/define';
 import { ToolError } from '../../core/errors';
 import type { Output } from '../../core/types';
+import { toolT } from '../../i18n/tool-text';
 import { mixToMono, quantile } from './_dsp';
 import { hannWindow } from './_fft';
+
+const T = toolT('dtmf');
 
 const ROW_HZ = [697, 770, 852, 941] as const;
 const COL_HZ = [1209, 1336, 1477, 1633] as const;
@@ -227,35 +230,31 @@ export default defineTool({
   ],
   run(audio, { frameMs, silenceDb, strict }) {
     if (audio.sampleRate < 4000) {
-      throw new ToolError(
-        `Sample rate ${audio.sampleRate} Hz is too low for DTMF (the highest tone is 1633 Hz, so at least 4000 Hz is needed).`,
-      );
+      throw new ToolError(T('error.lowRate', { rate: audio.sampleRate }));
     }
     const mono = mixToMono(audio.channels);
     if (mono.length < (audio.sampleRate * frameMs) / 1000) {
-      throw new ToolError('The audio is shorter than one analysis frame. Use a longer file.');
+      throw new ToolError(T('error.short'));
     }
     const tones = detectDtmf(mono, audio.sampleRate, { frameMs, silenceDb, strict });
     if (!tones.length) {
-      throw new ToolError(
-        'No DTMF tones found. Lower the silence threshold, turn off "Strict checks", or check that the file really holds dial tones (try the Spectrogram: two bright lines at once).',
-      );
+      throw new ToolError(T('error.none'));
     }
     const digits = tones.map((t) => t.key).join('');
     const groups = splitByPauses(tones);
     const out: Output[] = [
-      { type: 'text', label: 'Keys pressed', value: digits },
+      { type: 'text', label: T('label.keys'), value: digits },
       {
         type: 'table',
-        label: 'Key presses',
+        label: T('label.presses'),
         columns: [
           '#',
-          'Key',
-          'Start (s)',
-          'Length (ms)',
-          'Pause before (ms)',
-          'Row Hz',
-          'Column Hz',
+          T('col.key'),
+          T('col.start'),
+          T('col.length'),
+          T('col.pause'),
+          T('col.row'),
+          T('col.column'),
         ],
         rows: tones.map((t, i) => [
           i + 1,
@@ -269,11 +268,11 @@ export default defineTool({
       },
     ];
     if (groups) {
-      out.push({ type: 'text', label: 'Keys grouped by pauses', value: groups.join(' ') });
+      out.push({ type: 'text', label: T('label.groups'), value: groups.join(' ') });
     }
     out.push({
       type: 'text',
-      label: 'Phone keypad reading (multi-tap: 2 = ABC, 22 = B …)',
+      label: T('label.multitap'),
       value: multiTapText(groups ?? [digits]),
     });
     return out;

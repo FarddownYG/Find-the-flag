@@ -1,9 +1,12 @@
 import { defineTool, number, select, toggle } from '../../core/define';
 import { ToolError } from '../../core/errors';
 import type { Output, RgbaImage } from '../../core/types';
+import { toolT } from '../../i18n/tool-text';
 import { buildColormap, type ColormapName } from './_colormap';
 import { mixToMono } from './_dsp';
 import { Fft, hannWindow } from './_fft';
+
+const T = toolT('spectrogram');
 
 /** Never render more columns than this; long files get a larger hop instead. */
 const MAX_COLUMNS = 2000;
@@ -61,9 +64,7 @@ export function computeSpectrogram(
   const fMax = Math.min(p.maxFreq > 0 ? p.maxFreq : nyquist, nyquist);
   const fMin = p.minFreq > 0 ? p.minFreq : p.scale === 'log' ? Math.max(20, binHz) : 0;
   if (fMax <= fMin) {
-    throw new ToolError(
-      `Max frequency (${fMax} Hz) must be above min frequency (${fMin} Hz). Raise "Max frequency" or lower "Min frequency".`,
-    );
+    throw new ToolError(T('error.freqRange', { max: fMax, min: fMin }));
   }
 
   // Time axis: honour the overlap, but never exceed MAX_COLUMNS columns.
@@ -304,37 +305,28 @@ export default defineTool({
   ],
   run(audio, o) {
     const first = audio.channels[0];
-    if (!first || first.length === 0) throw new ToolError('The audio file contains no samples.');
-    if (o.floor <= o.ceiling) {
-      throw new ToolError(
-        '"Floor" must be larger than "Ceiling". Raise the floor or lower the ceiling.',
-      );
-    }
+    if (!first || first.length === 0) throw new ToolError(T('error.noSamples'));
+    if (o.floor <= o.ceiling) throw new ToolError(T('error.floor'));
     const notes: Output[] = [];
     let samples: Float32Array;
     let analysed: string;
     const second = audio.channels[1];
     if (o.channel === 'left') {
       samples = first;
-      analysed = audio.channels.length > 1 ? 'left' : 'mono';
+      analysed = audio.channels.length > 1 ? T('value.left') : T('value.mono');
     } else if (o.channel === 'right') {
       samples = second ?? first;
-      analysed = second ? 'right' : 'mono';
-      if (!second)
-        notes.push({
-          type: 'note',
-          level: 'info',
-          text: 'Mono file: there is no right channel, showing the only one.',
-        });
+      analysed = second ? T('value.right') : T('value.mono');
+      if (!second) notes.push({ type: 'note', level: 'info', text: T('note.noRight') });
     } else if (o.channel === 'diff') {
       if (!second) {
-        throw new ToolError('"L − R" needs a stereo file. Choose Mix or Left for mono audio.');
+        throw new ToolError(T('error.diffMono'));
       }
       samples = Float32Array.from(first, (v, i) => v - (second[i] ?? 0));
-      analysed = 'left − right';
+      analysed = T('value.diff');
     } else {
       samples = mixToMono(audio.channels);
-      analysed = audio.channels.length > 1 ? 'mix of all channels' : 'mono';
+      analysed = audio.channels.length > 1 ? T('value.mix') : T('value.mono');
     }
 
     const sp = computeSpectrogram(samples, audio.sampleRate, {
@@ -350,32 +342,47 @@ export default defineTool({
     const nCh = audio.channels.length;
     const win = (sp.fftSize / audio.sampleRate) * 1000;
 
+    const layout = nCh === 1 ? T('value.mono') : nCh === 2 ? T('value.stereo') : T('value.multi');
     const kv: [string, string][] = [
-      ['Duration', fmtDuration(duration)],
-      ['Sample rate', `${audio.sampleRate} Hz`],
-      ['Channels', `${nCh} (${nCh === 1 ? 'mono' : nCh === 2 ? 'stereo' : 'multichannel'})`],
-      ['Analysed', analysed],
+      [T('kv.duration'), fmtDuration(duration)],
+      [T('kv.sampleRate'), `${audio.sampleRate} Hz`],
+      [T('kv.channels'), `${nCh} (${layout})`],
+      [T('kv.analysed'), analysed],
       [
         'FFT',
-        `${sp.fftSize} samples (${win.toFixed(0)} ms window), hop ${sp.hop}, ${sp.frames} columns`,
+        T('value.fft', {
+          size: sp.fftSize,
+          window: win.toFixed(0),
+          hop: sp.hop,
+          columns: sp.frames,
+        }),
       ],
-      ['Resolution', `${sp.binHz.toFixed(2)} Hz per bin`],
+      [T('kv.resolution'), T('value.resolution', { hz: sp.binHz.toFixed(2) })],
       [
-        'Axes',
-        `left to right 0–${duration.toFixed(2)} s; bottom to top ${sp.fMin.toFixed(0)}–${sp.fMax.toFixed(0)} Hz (${o.scale})`,
+        T('kv.axes'),
+        T('value.axes', {
+          duration: duration.toFixed(2),
+          min: sp.fMin.toFixed(0),
+          max: sp.fMax.toFixed(0),
+          scale: o.scale === 'log' ? T('value.log') : T('value.linear'),
+        }),
       ],
     ];
     if (!silent) {
       kv.push(
         [
-          'Peak frequency',
-          `${fmtHz(sp.peak.freq)} at ${sp.peak.time.toFixed(2)} s (${sp.peak.db.toFixed(1)} dBFS)`,
+          T('kv.peak'),
+          T('value.peak', {
+            freq: fmtHz(sp.peak.freq),
+            time: sp.peak.time.toFixed(2),
+            db: sp.peak.db.toFixed(1),
+          }),
         ],
-        ['Strongest on average', fmtHz(sp.dominant)],
+        [T('kv.strongest'), fmtHz(sp.dominant)],
       );
     }
     const out: Output[] = [
-      { type: 'image', label: 'Spectrogram', image, filename: 'spectrogram.png' },
+      { type: 'image', label: T('label.image'), image, filename: 'spectrogram.png' },
       { type: 'kv', entries: kv },
       ...notes,
     ];
@@ -383,7 +390,7 @@ export default defineTool({
       out.push({
         type: 'note',
         level: 'warn',
-        text: 'The audio is silent: there is nothing to draw.',
+        text: T('note.silent'),
       });
     }
     return out;

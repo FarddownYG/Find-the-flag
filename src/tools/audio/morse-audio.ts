@@ -1,9 +1,12 @@
 import { defineTool, number } from '../../core/define';
 import { ToolError } from '../../core/errors';
 import type { Output } from '../../core/types';
+import { toolT } from '../../i18n/tool-text';
 import { kmeans1d, median, mixToMono, round } from './_dsp';
 import { Fft, hannWindow } from './_fft';
 import { morseToText } from './_morse';
+
+const T = toolT('morse-audio');
 
 /** Two clusters count as separate (dot/dash, letter/word gap) when their centres differ by this much. */
 const SPLIT_RATIO = 1.8;
@@ -111,16 +114,13 @@ interface Run {
 function keyingRuns(env: Float64Array): Run[] {
   let max = 0;
   for (const v of env) if (v > max) max = v;
-  if (max <= 0 || env.length < 4)
-    throw new ToolError('The audio is silent, there is no Morse to decode.');
+  if (max <= 0 || env.length < 4) throw new ToolError(T('error.silent'));
   const floor = max * 0.01;
   const logs = Array.from(env, (v) => Math.log(Math.max(v, floor)));
   const km = kmeans1d(logs, 2);
   const [c0, c1] = km.centers;
   if (c1 === undefined || c0 === undefined || c1 - c0 < Math.log(3)) {
-    throw new ToolError(
-      'No clear on/off keying found. Set "Tone frequency" to the pitch of the beeps, or trim the file to the Morse part.',
-    );
+    throw new ToolError(T('error.noKeying'));
   }
   const low: number[] = [];
   const high: number[] = [];
@@ -191,13 +191,13 @@ export function analyseMorse(
     if (found && found.prominence >= 30) tone = found.freq;
   }
   if (tone !== null && tone >= sampleRate / 2) {
-    throw new ToolError(`Tone ${tone} Hz is above the Nyquist frequency (${sampleRate / 2} Hz).`);
+    throw new ToolError(T('error.nyquist', { tone, nyquist: sampleRate / 2 }));
   }
   const { env, rate } = envelope(x, sampleRate, tone);
   const runs = keyingRuns(env);
   const onD = runs.filter((r) => r.on).map((r) => r.n / rate);
   const offD = runs.filter((r) => !r.on).map((r) => r.n / rate);
-  if (!onD.length) throw new ToolError('No beeps found in the audio.');
+  if (!onD.length) throw new ToolError(T('error.noBeeps'));
 
   // Dot length (the "unit") and the dot/dash boundary.
   let unit: number;
@@ -300,22 +300,19 @@ export default defineTool({
   run(audio, { tone, wpm }) {
     const mono = mixToMono(audio.channels);
     if (mono.length < audio.sampleRate * 0.1) {
-      throw new ToolError('The audio is too short to contain Morse code (under 0.1 s).');
+      throw new ToolError(T('error.short'));
     }
     const r = analyseMorse(mono, audio.sampleRate, { tone, wpm });
     const out: Output[] = [
-      { type: 'text', label: 'Decoded text', value: r.text },
-      { type: 'text', label: 'Dots and dashes ( / = word break)', value: r.symbols },
+      { type: 'text', label: T('label.text'), value: r.text },
+      { type: 'text', label: T('label.symbols'), value: r.symbols },
       {
         type: 'kv',
         entries: [
-          [
-            'Tone',
-            r.tone === null ? 'none found, used the broadband level' : `${r.tone.toFixed(1)} Hz`,
-          ],
-          ['Speed', `${r.wpm} WPM (PARIS standard)`],
-          ['Dot length', `${(r.unit * 1000).toFixed(0)} ms`],
-          ['Beeps', `${r.dots} short, ${r.dashes} long`],
+          [T('kv.tone'), r.tone === null ? T('value.noTone') : `${r.tone.toFixed(1)} Hz`],
+          [T('kv.speed'), T('value.speed', { wpm: r.wpm })],
+          [T('kv.dot'), `${(r.unit * 1000).toFixed(0)} ms`],
+          [T('kv.beeps'), T('value.beeps', { dots: r.dots, dashes: r.dashes })],
         ],
       },
     ];
@@ -323,7 +320,7 @@ export default defineTool({
       out.push({
         type: 'note',
         level: 'warn',
-        text: 'Some letters are not valid Morse (shown as ?). Try setting the speed or the tone by hand.',
+        text: T('note.invalid'),
       });
     }
     return out;
