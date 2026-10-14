@@ -1,6 +1,7 @@
 // i18n maintenance. Usage:
 //   node scripts/i18n.mjs extract   copy tool/category English text from the code into en.json
 //   node scripts/i18n.mjs check     fail on any gap between locales (CI runs this)
+//   node scripts/i18n.mjs check --prefix=tool.base64.   only report keys under a prefix
 import { readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { createServer } from 'vite';
@@ -105,7 +106,7 @@ async function extract() {
   if (changed) console.log('Updated English text: re-check those keys in the other locales.');
 }
 
-async function check() {
+async function check(prefix) {
   const problems = [];
   const warnings = [];
   const en = read('en');
@@ -113,7 +114,8 @@ async function check() {
   const glossary = JSON.parse(readFileSync(join(ROOT, 'src/i18n/glossary.json'), 'utf8')).terms;
   const termRe = (term) =>
     new RegExp(
-      `(^|[^\\p{L}\\p{N}])${term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^\\p{L}\\p{N}])`,
+      // Whole word, case-insensitive; a plural "s" is fine ("flags").
+      `(^|[^\\p{L}\\p{N}])${term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}s?($|[^\\p{L}\\p{N}])`,
       'iu',
     );
 
@@ -182,6 +184,12 @@ async function check() {
         problems.push(`${l}: "${base}" does not exist in en.json (stale key)`);
     }
   }
+  if (prefix) {
+    // Scoped run (one tool while others are still being translated).
+    const keep = (p) => p.includes(`"${prefix}`) || p.includes(` ${prefix}`);
+    problems.splice(0, problems.length, ...problems.filter(keep));
+    warnings.splice(0, warnings.length, ...warnings.filter(keep));
+  }
   for (const w of warnings.slice(0, 20)) console.warn(`warning: ${w}`);
   if (warnings.length > 20) console.warn(`… ${warnings.length - 20} more warnings`);
   if (problems.length) {
@@ -194,7 +202,8 @@ async function check() {
 
 const cmd = process.argv[2];
 if (cmd === 'extract') await extract();
-else if (cmd === 'check') await check();
+else if (cmd === 'check')
+  await check(process.argv.find((a) => a.startsWith('--prefix='))?.slice(9));
 else {
   console.error('usage: node scripts/i18n.mjs extract|check');
   process.exit(2);

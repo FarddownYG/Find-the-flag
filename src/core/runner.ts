@@ -49,7 +49,7 @@ export class Runner {
       worker.postMessage({
         id,
         toolId,
-        input,
+        input: toWire(input),
         options,
         locale: getLocale(),
       } satisfies RunRequest);
@@ -65,4 +65,13 @@ async function runInline(toolId: string, input: unknown, options: Record<string,
   const tool = getTool(toolId);
   if (!tool) throw new ToolError(t('core.unknownTool', { id: toolId }));
   return tool.run(input as never, options as never);
+}
+
+/** Functions cannot cross postMessage: send a LazyFile as its Blob, the worker re-wraps it. */
+function toWire(input: unknown): unknown {
+  if (input && typeof input === 'object' && 'blob' in input && 'read' in input) {
+    const f = input as { blob: Blob; name?: string };
+    return { __lazyFile: true, blob: f.blob, name: f.name };
+  }
+  return input;
 }

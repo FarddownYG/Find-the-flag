@@ -1,6 +1,7 @@
 /// <reference lib="webworker" />
 import { getTool } from './registry';
 import { ToolError } from './errors';
+import { lazyFile } from './prepare';
 import { getLocale, isLocale, setLocale, t } from '../i18n';
 
 export interface RunRequest {
@@ -22,7 +23,9 @@ self.onmessage = async (ev: MessageEvent<RunRequest>) => {
   const tool = getTool(toolId);
   try {
     if (!tool) throw new ToolError(t('core.unknownTool', { id: toolId }));
-    const result = await tool.run(input as never, options as never);
+    const wire = input as { __lazyFile?: boolean; blob?: Blob; name?: string } | null;
+    const value = wire?.__lazyFile && wire.blob ? lazyFile(wire.blob, wire.name) : input;
+    const result = await tool.run(value as never, options as never);
     self.postMessage({ id, ok: true, result } satisfies RunResponse);
   } catch (e) {
     const err = e as Error;

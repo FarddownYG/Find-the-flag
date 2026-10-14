@@ -38,7 +38,19 @@ export interface AudioInput extends FileInput {
   channels: Float32Array[];
 }
 
-export type InputKind = 'text' | 'bytes' | 'image' | 'audio';
+/**
+ * A file read on demand: nothing is loaded up front, so multi-gigabyte disk images stay usable.
+ * The worker receives only the Blob handle; read() slices it.
+ */
+export interface LazyFile {
+  name?: string;
+  size: number;
+  blob: Blob;
+  /** Bytes [offset, offset + length), clamped to the file. */
+  read(offset: number, length: number): Promise<Uint8Array>;
+}
+
+export type InputKind = 'text' | 'bytes' | 'image' | 'audio' | 'file';
 
 export type InputValue<K extends InputKind> = K extends 'text'
   ? string
@@ -48,7 +60,9 @@ export type InputValue<K extends InputKind> = K extends 'text'
       ? ImageInput
       : K extends 'audio'
         ? AudioInput
-        : never;
+        : K extends 'file'
+          ? LazyFile
+          : never;
 
 // ---------- options ----------
 
@@ -125,7 +139,12 @@ export type Output =
     }
   | { type: 'kv'; label?: string; entries: [string, string][] }
   | { type: 'image'; label?: string; image: RgbaImage; filename?: string }
-  | { type: 'files'; label?: string; files: { name: string; data: Uint8Array; note?: string }[] }
+  | {
+      type: 'files';
+      label?: string;
+      /** For large results pass `blob` (and an empty `data`): it is downloaded as-is. */
+      files: { name: string; data: Uint8Array; blob?: Blob; note?: string }[];
+    }
   /** An encoded image shown as-is (JPEG thumbnail, embedded PNG...), with download and "Send to". */
   | { type: 'picture'; label?: string; data: Uint8Array; mime: string; filename?: string }
   /**

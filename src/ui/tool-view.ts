@@ -28,7 +28,8 @@ type PasteAs = 'text' | 'hex' | 'base64';
 interface ToolState {
   text: string;
   pasteAs: PasteAs;
-  file: { bytes: Uint8Array; name: string } | null;
+  /** bytes for tools that need the whole file; blob (a handle, nothing read) for input 'file'. */
+  file: { bytes?: Uint8Array; blob?: Blob; name: string; size: number } | null;
   values: Record<string, unknown>;
 }
 
@@ -68,13 +69,15 @@ export function renderTool(
   }
 
   const live = tool.live ?? tool.input === 'text';
-  const fileKind = tool.input === 'image' || tool.input === 'audio';
+  const fileKind = tool.input === 'image' || tool.input === 'audio' || tool.input === 'file';
   let prepared: { key: unknown; value: unknown } | null = null;
 
   function applyRaw(raw: RawInput) {
     state.file = null;
-    if (raw.bytes && (tool.input !== 'text' || raw.bytes.length > FILE_TEXT_LIMIT)) {
-      state.file = { bytes: raw.bytes, name: raw.name ?? 'input.bin' };
+    if (raw.file && (tool.input === 'file' || !raw.bytes)) {
+      state.file = { blob: raw.file, name: raw.name ?? 'input.bin', size: raw.file.size };
+    } else if (raw.bytes && (tool.input !== 'text' || raw.bytes.length > FILE_TEXT_LIMIT)) {
+      state.file = { bytes: raw.bytes, name: raw.name ?? 'input.bin', size: raw.bytes.length };
     } else if (raw.bytes) {
       state.text = new TextDecoder().decode(raw.bytes);
       state.pasteAs = 'text';
@@ -85,7 +88,8 @@ export function renderTool(
   }
 
   function currentRaw(): RawInput | null {
-    if (state.file) return { bytes: state.file.bytes, name: state.file.name };
+    if (state.file)
+      return { bytes: state.file.bytes, file: state.file.blob, name: state.file.name };
     if (!state.text) return null;
     if (tool.input === 'text' || state.pasteAs === 'text') return { text: state.text };
     return { bytes: state.pasteAs === 'hex' ? fromHex(state.text) : fromBase64(state.text) };
@@ -362,8 +366,9 @@ export function renderTool(
   });
 
   async function takeFile(f: File) {
-    const bytes = new Uint8Array(await f.arrayBuffer());
-    applyRaw({ bytes, name: f.name });
+    // Tools reading on demand get the handle only: a 4 GB disk image is never loaded whole.
+    if (tool.input === 'file') applyRaw({ file: f, name: f.name });
+    else applyRaw({ bytes: new Uint8Array(await f.arrayBuffer()), name: f.name });
     prepared = null;
     renderInput();
     run();
@@ -474,15 +479,31 @@ export function renderTool(
     );
   }
 
-  function fileCard(file: { bytes: Uint8Array; name: string }): HTMLElement {
-    const kind = identify(file.bytes)[0];
+  function fileCard(file: NonNullable<ToolState['file']>): HTMLElement {
+    const info = h('span', null, formatSize(file.size));
+    const head = h('code', { class: 'file-head' });
+    const showHead = (bytes: Uint8Array) => {
+      const kind = identify(bytes)[0];
+      info.textContent = `${formatSize(file.size)}${kind ? ` · ${kind.name}` : ''}`;
+      head.textContent = toHex(bytes.subarray(0, 12), ' ');
+      return kind;
+    };
     let preview: HTMLElement | null = null;
-    if (tool.input === 'image' || (kind && kind.mime?.startsWith('image/'))) {
-      const url = URL.createObjectURL(new Blob([file.bytes as BlobPart]));
-      preview = h('img', { class: 'file-preview', src: url, alt: '' });
-    } else if (tool.input === 'audio') {
-      const url = URL.createObjectURL(new Blob([file.bytes as BlobPart]));
-      preview = h('audio', { controls: true, src: url, class: 'file-audio' });
+    const src = file.blob ?? new Blob([file.bytes as BlobPart]);
+    if (file.bytes) {
+      const kind = showHead(file.bytes);
+      if (tool.input === 'image' || (kind && kind.mime?.startsWith('image/'))) {
+        preview = h('img', { class: 'file-preview', src: URL.createObjectURL(src), alt: '' });
+      }
+    } else {
+      // Only the first bytes are read, whatever the file size.
+      void src
+        .slice(0, 4096)
+        .arrayBuffer()
+        .then((b) => showHead(new Uint8Array(b)));
+    }
+    if (tool.input === 'audio') {
+      preview = h('audio', { controls: true, src: URL.createObjectURL(src), class: 'file-audio' });
     }
     return h(
       'div',
@@ -492,8 +513,8 @@ export function renderTool(
         'div',
         { class: 'file-info' },
         h('strong', { class: 'file-name' }, file.name),
-        h('span', null, `${formatSize(file.bytes.length)}${kind ? ` · ${kind.name}` : ''}`),
-        h('code', { class: 'file-head' }, toHex(file.bytes.subarray(0, 12), ' ')),
+        info,
+        head,
         h(
           'span',
           { class: 'file-actions' },
@@ -556,7 +577,7 @@ export function renderTool(
     busyTimer = setTimeout(() => (status.textContent = t('ui.tool.running')), 200);
     root.classList.add('is-busy');
     try {
-      const key = raw.bytes ?? raw.text;
+      const key = raw.bytes ?? raw.file ?? raw.text;
       if (!prepared || prepared.key !== key) {
         prepared = { key, value: await prepareInput(tool.input, raw) };
       }

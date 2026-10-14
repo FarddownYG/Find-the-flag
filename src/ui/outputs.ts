@@ -379,16 +379,19 @@ function filesBlock(o: Extract<Output, { type: 'files' }>, ctx: OutputContext): 
           h(
             'span',
             { class: 'file-meta' },
-            formatSize(f.data.length),
+            formatSize(f.blob ? f.blob.size : f.data.length),
             f.note ? ` · ${f.note}` : '',
           ),
           h(
             'span',
             { class: 'out-actions' },
             button(t('ui.out.download'), () =>
-              downloadBytes(f.data, f.name.split('/').pop() || 'file.bin'),
+              downloadBytes(f.blob ?? f.data, f.name.split('/').pop() || 'file.bin'),
             ),
-            pipeSelect(() => ({ bytes: f.data, name: f.name }), ctx),
+            pipeSelect(
+              () => (f.blob ? { file: f.blob, name: f.name } : { bytes: f.data, name: f.name }),
+              ctx,
+            ),
           ),
         ),
       ),

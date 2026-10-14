@@ -230,6 +230,8 @@ function settingsPanel(): HTMLElement {
 
 // ---------- home: triage ----------
 
+const TRIAGE_READ_LIMIT = 8 * 1024 * 1024;
+
 function sampleFrom(text: string | null, bytes: Uint8Array, name?: string): Sample {
   return { text, bytes, name };
 }
@@ -256,7 +258,7 @@ function rank(sample: Sample) {
 }
 
 function renderHome(main: HTMLElement) {
-  let file: { bytes: Uint8Array; name: string } | null = null;
+  let file: { bytes: Uint8Array; name: string; handle: File } | null = null;
   const results = h('div', { class: 'triage-results', 'aria-live': 'polite' });
   const fileInput = h('input', {
     type: 'file',
@@ -280,7 +282,9 @@ function renderHome(main: HTMLElement) {
   });
 
   async function takeFile(f: File) {
-    file = { bytes: new Uint8Array(await f.arrayBuffer()), name: f.name };
+    // Detectors only need the start of a big file; the full handle goes to the chosen tool.
+    const head = f.size > TRIAGE_READ_LIMIT ? f.slice(0, TRIAGE_READ_LIMIT) : f;
+    file = { bytes: new Uint8Array(await head.arrayBuffer()), name: f.name, handle: f };
     ta.value = '';
     update();
   }
@@ -295,7 +299,7 @@ function renderHome(main: HTMLElement) {
         h(
           'p',
           { class: 'triage-file' },
-          t('ui.home.fileInfo', { name: file.name, count: file.bytes.length }),
+          t('ui.home.fileInfo', { name: file.name, count: file.handle.size }),
         ),
       );
     } else {
@@ -345,7 +349,11 @@ function renderHome(main: HTMLElement) {
                 onclick: () => {
                   setPending(
                     r.tool.id,
-                    file ? { bytes: file.bytes, name: file.name } : { text: sample.text ?? '' },
+                    file
+                      ? file.handle.size > TRIAGE_READ_LIMIT
+                        ? { file: file.handle, name: file.name }
+                        : { bytes: file.bytes, file: file.handle, name: file.name }
+                      : { text: sample.text ?? '' },
                     r.options,
                   );
                   location.hash = `#/tool/${r.tool.id}`;
