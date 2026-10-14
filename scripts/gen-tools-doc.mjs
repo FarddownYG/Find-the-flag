@@ -1,5 +1,7 @@
 // Regenerates docs/TOOLS.md from the registry. Run: npm run docs:tools
 import { writeFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { format, resolveConfig } from 'prettier';
 import { createServer } from 'vite';
 
 const vite = await createServer({
@@ -36,5 +38,8 @@ for (const cat of CATEGORIES) {
   }
   lines.push('');
 }
-writeFileSync(new URL('../docs/TOOLS.md', import.meta.url), lines.join('\n'));
+// Formatted like the rest of the repo, so `npm run format:check` and the CI diff agree.
+const out = fileURLToPath(new URL('../docs/TOOLS.md', import.meta.url));
+const options = { ...(await resolveConfig(out)), filepath: out };
+writeFileSync(out, await format(lines.join('\n'), options));
 console.log(`docs/TOOLS.md: ${TOOLS.length} tools`);
