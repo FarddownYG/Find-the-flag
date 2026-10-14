@@ -650,6 +650,12 @@ input.num {
 .table-scroll {
   overflow: auto;
   max-height: 60vh;
+  /* Edge shadows appear only while columns are hidden to the left or right. */
+  background:
+    linear-gradient(to right, var(--bg) 40%, transparent) left / 28px 100% no-repeat local,
+    linear-gradient(to left, var(--bg) 40%, transparent) right / 28px 100% no-repeat local,
+    linear-gradient(to right, rgb(242 200 75 / 0.22), transparent) left / 10px 100% no-repeat scroll,
+    linear-gradient(to left, rgb(242 200 75 / 0.22), transparent) right / 10px 100% no-repeat scroll;
 }
 table {
   border-collapse: collapse;
@@ -662,6 +668,12 @@ td {
   padding: 4px 10px;
   border-bottom: 1px solid var(--line);
   vertical-align: top;
+  overflow-wrap: break-word;
+}
+td.td-short {
+  white-space: nowrap;
+}
+td.td-long {
   word-break: break-all;
 }
 th {

@@ -246,6 +246,9 @@ function filterBox(onInput: (q: string) => void): HTMLInputElement {
   });
 }
 
+const LONG_TOKEN = /\S{25,}/;
+const SHORT_CELL = 24;
+
 function tableBlock(o: Extract<Output, { type: 'table' }>, ctx: OutputContext): HTMLElement {
   const tbody = h('tbody');
   const hl = new Set(o.highlight ?? []);
@@ -264,7 +267,14 @@ function tableBlock(o: Extract<Output, { type: 'table' }>, ctx: OutputContext): 
         h(
           'tr',
           { class: hl.has(i) ? 'is-hl' : undefined },
-          ...r.map((c) => h('td', null, ...flagged(String(c), ctx))),
+          ...r.map((c) => {
+            const text = String(c);
+            // Short values (offsets, dates, sizes) stay on one line and only long tokens (hashes,
+            // base64, URLs) break mid-word; a table wider than the pane scrolls instead.
+            const cls =
+              text.length <= SHORT_CELL ? 'td-short' : LONG_TOKEN.test(text) ? 'td-long' : null;
+            return h('td', cls ? { class: cls } : null, ...flagged(text, ctx));
+          }),
         ),
       );
     }
