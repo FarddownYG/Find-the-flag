@@ -80,7 +80,15 @@ export interface BoolOption extends OptionBase<boolean> {
   type: 'bool';
 }
 
-export type OptionSpec = SelectOption | TextOption | NumberOption | BoolOption;
+/** A second file next to the main input (e.g. the other image to XOR with). Null until chosen. */
+export interface FileOption<
+  K extends 'bytes' | 'image' = 'bytes' | 'image',
+> extends OptionBase<null> {
+  type: 'file';
+  kind: K;
+}
+
+export type OptionSpec = SelectOption | TextOption | NumberOption | BoolOption | FileOption;
 export type OptionSpecs = Record<string, OptionSpec>;
 
 export type OptionValues<O> = {
@@ -90,7 +98,16 @@ export type OptionValues<O> = {
       ? number
       : O[K] extends BoolOption
         ? boolean
-        : string;
+        : O[K] extends FileOption<'image'>
+          ? ImageInput | null
+          : O[K] extends FileOption<'bytes'>
+            ? FileInput | null
+            : string;
+};
+
+/** Example option values: file options take a sample name instead of loaded data. */
+export type ExampleOptions<V> = {
+  [K in keyof V]?: V[K] extends FileInput | null ? { sample: string } : V[K];
 };
 
 // ---------- outputs ----------
@@ -133,7 +150,7 @@ export type ExampleInput = string | { sample: string } | { hex: string };
 export interface Example<O> {
   label: string;
   input: ExampleInput;
-  options?: Partial<O>;
+  options?: ExampleOptions<O>;
   /** Substring that must appear in the rendered output. Used by the unit + browser test suites. */
   expect: string;
 }

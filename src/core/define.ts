@@ -1,5 +1,6 @@
 import type {
   BoolOption,
+  FileOption,
   InputKind,
   NumberOption,
   OptionSpecs,
@@ -66,4 +67,13 @@ export function bool(
   extra: Partial<Omit<BoolOption, 'type' | 'default' | 'label'>> = {},
 ): BoolOption {
   return { type: 'bool', label, default: def, ...extra };
+}
+
+/** A second file input, e.g. file('Second image', 'image'). Its value is null until chosen. */
+export function file<const K extends 'bytes' | 'image'>(
+  label: string,
+  kind: K,
+  extra: Partial<Omit<FileOption<K>, 'type' | 'default' | 'label' | 'kind'>> = {},
+): FileOption<K> {
+  return { type: 'file', label, kind, default: null, ...extra };
 }

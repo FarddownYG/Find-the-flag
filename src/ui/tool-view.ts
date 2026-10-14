@@ -1,7 +1,7 @@
 import { ToolError } from '../core/errors';
 import { selectFlags } from '../core/flags';
 import { resultToText } from '../core/result-text';
-import { exampleToRaw, prepareInput, type RawInput } from '../core/prepare';
+import { exampleToRaw, prepareInput, resolveExampleOptions, type RawInput } from '../core/prepare';
 import { defaultOptions } from '../core/registry';
 import { CancelledError, Runner } from '../core/runner';
 import { CATEGORIES, type AnyTool, type ExampleInput, type OptionSpec } from '../core/types';
@@ -152,18 +152,21 @@ export function renderTool(
   }
 
   async function loadExample(input: ExampleInput, options?: Record<string, unknown>) {
-    state.values = { ...defaultOptions(tool), ...options };
     state.file = null;
-    if (typeof input === 'object' && 'hex' in input && tool.input === 'bytes') {
-      state.text = input.hex;
-      state.pasteAs = 'hex';
-    } else {
-      try {
+    try {
+      state.values = {
+        ...defaultOptions(tool),
+        ...(await resolveExampleOptions(tool, options, loadSample)),
+      };
+      if (typeof input === 'object' && 'hex' in input && tool.input === 'bytes') {
+        state.text = input.hex;
+        state.pasteAs = 'hex';
+      } else {
         applyRaw(await exampleToRaw(input, loadSample));
-      } catch (e) {
-        showError(e);
-        return;
       }
+    } catch (e) {
+      showError(e);
+      return;
     }
     prepared = null;
     renderOptions();
@@ -234,6 +237,50 @@ export function renderTool(
           onchange: (e: Event) => setValue(key, (e.target as HTMLInputElement).checked),
         }),
         spec.label,
+        hint(spec),
+      );
+    } else if (spec.type === 'file') {
+      const picker = h('input', {
+        type: 'file',
+        hidden: true,
+        accept: spec.kind === 'image' ? 'image/*' : undefined,
+        onchange: async () => {
+          const f = picker.files?.[0];
+          if (!f) return;
+          const bytes = new Uint8Array(await f.arrayBuffer());
+          try {
+            setValue(key, await prepareInput(spec.kind, { bytes, name: f.name }));
+          } catch (e) {
+            showError(e);
+          }
+        },
+      });
+      const chosen =
+        v && typeof v === 'object' && 'name' in v
+          ? String((v as { name?: string }).name ?? 'file')
+          : null;
+      return h(
+        'div',
+        { class: 'opt' },
+        h('span', { class: 'opt-label' }, spec.label),
+        picker,
+        h(
+          'button',
+          { type: 'button', class: 'btn btn-ghost', onclick: () => picker.click() },
+          chosen ?? 'Choose file',
+        ),
+        chosen
+          ? h(
+              'button',
+              {
+                type: 'button',
+                class: 'btn btn-ghost',
+                'aria-label': `Remove ${spec.label}`,
+                onclick: () => setValue(key, null),
+              },
+              '×',
+            )
+          : null,
         hint(spec),
       );
     } else if (spec.type === 'number') {

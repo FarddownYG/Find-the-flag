@@ -60,10 +60,13 @@ options: {
   strict: bool('Strict', false, { hint: 'Fail on invalid characters' }),
   // Show a control only when it matters:
   pad: bool('Pad', true, { showIf: (v) => v.mode === 'encode' }),
+  // A second file (value: null until chosen; 'image' gives decoded pixels like the main input):
+  other: file('Second image', 'image'),
 }
 ```
 
 Choices can be plain strings or `{ value, label }` when the label should be friendlier.
+In examples, a file option takes a sample name: `options: { other: { sample: 'b.png' } }`.
 
 ## 4. Outputs
 

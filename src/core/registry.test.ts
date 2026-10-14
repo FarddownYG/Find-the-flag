@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 import { defaultOptions, TOOLS, validateTools } from './registry';
-import { exampleToRaw, prepareInput } from './prepare';
+import { exampleToRaw, prepareInput, resolveExampleOptions } from './prepare';
 import { resultToText } from './result-text';
 
 const loadSample = async (name: string) =>
@@ -30,7 +30,10 @@ describe.each(TOOLS.map((t) => [t.id, t] as const))('%s examples', (_id, tool) =
   it.each(tool.examples.map((e) => [e.label, e] as const))('%s', async (_label, ex) => {
     const raw = await exampleToRaw(ex.input, loadSample);
     const input = await prepareInput(tool.input, raw);
-    const opts = { ...defaultOptions(tool), ...ex.options };
+    const opts = {
+      ...defaultOptions(tool),
+      ...(await resolveExampleOptions(tool, ex.options, loadSample)),
+    };
     const text = resultToText(await tool.run(input as never, opts as never));
     expect(text).toContain(ex.expect);
   });
