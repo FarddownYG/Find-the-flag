@@ -1,5 +1,8 @@
 import { defineTool, number, toggle } from '../../core/define';
+import { toolT } from '../../i18n/tool-text';
 import { plaintextScore } from '../../lib/english';
+
+const T = toolT('caesar');
 
 type Alphabet = 'letters' | 'rot47' | 'alnum';
 
@@ -71,11 +74,11 @@ export default defineTool({
     const ranked = [...rows].sort((a, b) => b.score - a.score);
     const best = ranked[0]!;
     return [
-      { type: 'text', label: `Best guess · shift ${best.n}`, value: best.out },
+      { type: 'text', label: T('label.best', { shift: best.n }), value: best.out },
       {
         type: 'table',
-        label: 'Every shift, most readable first',
-        columns: ['Shift', 'Score', 'Result'],
+        label: T('label.all'),
+        columns: [T('col.shift'), T('col.score'), T('col.result')],
         rows: ranked.map((r) => [r.n, r.score.toFixed(1), r.out]),
         highlight: [0],
       },

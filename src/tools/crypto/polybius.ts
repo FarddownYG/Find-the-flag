@@ -1,6 +1,9 @@
 import { bool, defineTool, text, toggle } from '../../core/define';
 import { ToolError } from '../../core/errors';
+import { toolT } from '../../i18n/tool-text';
 import { flagForm } from './_classical';
+
+const T = toolT('polybius');
 
 export type Cipher = 'polybius' | 'tap' | 'adfgx';
 
@@ -69,7 +72,7 @@ export function polybiusEncode(
       tokens.push(`${row + 1}${col + 1}`);
     }
   }
-  if (!tokens.length) throw new ToolError('Nothing to encode: the text has no letters (A-Z).');
+  if (!tokens.length) throw new ToolError(T('error.noLetters'));
   const sep = cipher === 'tap' && tapStyle === 'dots' ? '  ' : ' ';
   return { text: tokens.join(spaced ? sep : ''), skipped };
 }
@@ -89,7 +92,7 @@ export function readCoordinates(input: string, cipher: Cipher): Coordinates {
   const pairs: [number, number][] = [];
   const breaks = new Set<number>();
   const stripped = input.replace(/[\s/|,;:-]+/g, '');
-  if (!stripped) throw new ToolError('Paste the coordinates, for example "23 15 31 31 34".');
+  if (!stripped) throw new ToolError(T('error.empty'));
 
   // Tap code written with dots: runs of dots separated by spaces.
   if ([...stripped].every((c) => DOT.test(c))) {
@@ -103,9 +106,7 @@ export function readCoordinates(input: string, cipher: Cipher): Coordinates {
         const parts = token.split(/[^.•·*]+/).filter(Boolean);
         for (const p of parts) {
           if (p.length > 5) {
-            throw new ToolError(
-              `A group of ${p.length} dots is too long: a 5×5 square has 1 to 5 taps.`,
-            );
+            throw new ToolError(T('error.longGroup', { count: p.length }));
           }
           if (pendingBreak && groups.length % 2 === 0) wordStarts.add(groups.length / 2);
           pendingBreak = false;
@@ -114,9 +115,7 @@ export function readCoordinates(input: string, cipher: Cipher): Coordinates {
       }
     }
     if (groups.length % 2) {
-      throw new ToolError(
-        `Found ${groups.length} dot groups: taps come in pairs (row, column). One group is missing or two were glued together.`,
-      );
+      throw new ToolError(T('error.oddDots', { count: groups.length }));
     }
     for (let i = 0; i < groups.length; i += 2) pairs.push([groups[i]! - 1, groups[i + 1]! - 1]);
     return { pairs, breaks: wordStarts, kind: 'dots' };
@@ -132,15 +131,11 @@ export function readCoordinates(input: string, cipher: Cipher): Coordinates {
       pending = false;
       symbols.push(ch.toUpperCase());
     } else if (!/[\s,;:-]/.test(ch)) {
-      throw new ToolError(
-        `Unexpected character "${ch}": coordinates are digits 1-5, letters A-E / ADFGX, or dots.`,
-      );
+      throw new ToolError(T('error.unexpected', { char: ch }));
     }
   }
   if (symbols.length % 2) {
-    throw new ToolError(
-      `Found ${symbols.length} coordinate symbols: they come in pairs (row, column), so one is missing.`,
-    );
+    throw new ToolError(T('error.oddSymbols', { count: symbols.length }));
   }
   const joined = symbols.join('');
   let kind: Coordinates['kind'];
@@ -148,27 +143,25 @@ export function readCoordinates(input: string, cipher: Cipher): Coordinates {
   if (/^[0-9]+$/.test(joined)) {
     const bad = [...joined].find((c) => c > '5');
     if (bad) {
-      throw new ToolError(
-        `The digit ${bad} is outside 1-5: a 5×5 square only has coordinates 1 to 5.`,
-      );
+      throw new ToolError(T('error.digit', { digit: bad }));
     }
     kind = joined.includes('0') ? 'digits0' : 'digits';
     alphabet = kind === 'digits0' ? '01234' : '12345';
     if (kind === 'digits0' && joined.includes('5')) {
-      throw new ToolError('Mixed 0 and 5: use coordinates 1-5 or 0-4, not both.');
+      throw new ToolError(T('error.mixed05'));
     }
   } else if (/^[A-Z]+$/.test(joined)) {
     const set = new Set(joined);
     const inAbcde = [...set].every((c) => ABCDE.includes(c));
     const inAdfgx = [...set].every((c) => ADFGX.includes(c));
     if (!inAbcde && !inAdfgx) {
-      throw new ToolError('Coordinate letters must all come from A-E or from A D F G X.');
+      throw new ToolError(T('error.letters'));
     }
     kind =
       inAbcde && inAdfgx ? (cipher === 'adfgx' ? 'adfgx' : 'abcde') : inAdfgx ? 'adfgx' : 'abcde';
     alphabet = kind === 'adfgx' ? ADFGX : ABCDE;
   } else {
-    throw new ToolError('Do not mix digits and letters in the coordinates.');
+    throw new ToolError(T('error.mixedKinds'));
   }
   for (let i = 0; i < symbols.length; i += 2) {
     pairs.push([alphabet.indexOf(symbols[i]!), alphabet.indexOf(symbols[i + 1]!)]);
@@ -182,7 +175,7 @@ export function polybiusDecode(input: string, cipher: Cipher, keyword: string): 
   let out = '';
   pairs.forEach(([r, c], i) => {
     if (r < 0 || r > 4 || c < 0 || c > 4) {
-      throw new ToolError(`Coordinate pair ${i + 1} is outside the 5×5 square.`);
+      throw new ToolError(T('error.outside', { index: i + 1 }));
     }
     if (breaks.has(i) && out) out += ' ';
     out += square[r * 5 + c]!;
@@ -266,13 +259,13 @@ export default defineTool({
     const s = t?.trim() ?? '';
     // Digit pairs 1-5 separated by spaces or commas (a bare digit blob could be anything).
     if (/^([1-5]{2}[\s,]+){4,}[1-5]{2}$/.test(s)) {
-      return { score: 0.55, options: { mode: 'decode' as const }, reason: 'Pairs of digits 1-5' };
+      return { score: 0.55, options: { mode: 'decode' as const }, reason: T('detect.digits') };
     }
     if (/^([.•·]{1,5}\s+[.•·]{1,5}\s*[/|]?\s*){4,}$/.test(s)) {
       return {
         score: 0.6,
         options: { cipher: 'tap' as const, mode: 'decode' as const },
-        reason: 'Pairs of dot groups (tap code)',
+        reason: T('detect.dots'),
       };
     }
     return null;
@@ -282,7 +275,7 @@ export default defineTool({
     const labels = cipher === 'adfgx' ? [...ADFGX] : ['1', '2', '3', '4', '5'];
     const squareTable = {
       type: 'table' as const,
-      label: cipher === 'tap' ? 'Square (C also stands for K)' : 'Square (I also stands for J)',
+      label: cipher === 'tap' ? T('label.squareTap') : T('label.square'),
       columns: ['', ...labels],
       rows: labels.map((l, r) => [l, ...[...square.slice(r * 5, r * 5 + 5)]]),
     };
@@ -296,7 +289,7 @@ export default defineTool({
               {
                 type: 'note' as const,
                 level: 'info' as const,
-                text: `${skipped} digit/punctuation character(s) were skipped: only letters have a cell.`,
+                text: T('note.skipped', { count: skipped }),
               },
             ]
           : []),
@@ -306,15 +299,12 @@ export default defineTool({
     const flag = flagForm(decoded);
     return [
       { type: 'text', value: decoded },
-      ...(flag ? [{ type: 'text' as const, label: 'Flag form', value: flag }] : []),
+      ...(flag ? [{ type: 'text' as const, label: T('label.flag'), value: flag }] : []),
       squareTable,
       {
         type: 'note',
         level: 'info',
-        text:
-          cipher === 'tap'
-            ? 'Tap code has no K: a decoded C may be a K.'
-            : 'The square merges I and J: a decoded I may be a J.',
+        text: cipher === 'tap' ? T('note.tapK') : T('note.mergeIJ'),
       },
     ];
   },

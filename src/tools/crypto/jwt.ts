@@ -1,9 +1,12 @@
 import { bool, defineTool, select, text, toggle } from '../../core/define';
 import { ToolError } from '../../core/errors';
 import type { Output } from '../../core/types';
+import { toolT } from '../../i18n/tool-text';
 import { fromBase64, toBase64, toHex, utf8Decode, utf8Encode } from '../../lib/bytes';
 import { createHmac, type HmacAlgo } from './_hmac';
 import { WEAK_SECRETS } from './_jwt-secrets';
+
+const T = toolT('jwt');
 
 const URL_SAFE = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
 const b64url = (b: Uint8Array) => toBase64(b, URL_SAFE, false);
@@ -78,26 +81,25 @@ function findToken(input: string): string {
   const lone = input.trim();
   if (/^eyJ\S*$/.test(lone)) {
     const bad = lone.match(/[^\w.-]/)?.[0];
-    throw new ToolError(
-      bad
-        ? `Not a clean JWT: unexpected character "${bad}". Base64URL only uses A-Z a-z 0-9 - _ and dots.`
-        : 'Not a complete JWT: it needs at least two parts separated by a dot.',
-    );
+    throw new ToolError(bad ? T('error.badChar', { char: bad }) : T('error.incomplete'));
   }
   const found = input.match(TOKEN_RE);
   if (found) return found[0];
   if (/^[\w-]+(?:\.[\w-]*){1,4}$/.test(compact)) return compact;
-  throw new ToolError(
-    'No JWT found. A token is three Base64URL parts joined by dots and starting with "eyJ", e.g. eyJhbGciOi….eyJzdWIi….signature.',
-  );
+  throw new ToolError(T('error.notFound'));
 }
 
-function decodePart(part: string, what: string): Uint8Array {
+const NOT_BASE64URL = {
+  header: (reason: string) => T('error.headerNotB64', { reason }),
+  payload: (reason: string) => T('error.payloadNotB64', { reason }),
+  signature: (reason: string) => T('error.signatureNotB64', { reason }),
+};
+
+function decodePart(part: string, what: keyof typeof NOT_BASE64URL): Uint8Array {
   try {
     return fromBase64(part);
   } catch (e) {
-    if (e instanceof ToolError)
-      throw new ToolError(`The ${what} is not Base64URL (${e.message}) Was the token cut short?`);
+    if (e instanceof ToolError) throw new ToolError(NOT_BASE64URL[what](e.message));
     throw e;
   }
 }
@@ -105,20 +107,17 @@ function decodePart(part: string, what: string): Uint8Array {
 function parseToken(input: string): Token {
   const raw = findToken(input);
   const parts = raw.split('.');
-  if (parts.length === 5)
-    throw new ToolError(
-      'This is a JWE (5 parts): its payload is encrypted, so there is nothing to decode without the key.',
-    );
+  if (parts.length === 5) throw new ToolError(T('error.jwe'));
   if (parts.length < 2 || parts.length > 3)
-    throw new ToolError(`A JWT has 3 parts separated by dots, this one has ${parts.length}.`);
+    throw new ToolError(T('error.partCount', { count: parts.length }));
   let header: unknown;
   try {
     header = JSON.parse(utf8Decode(decodePart(parts[0]!, 'header')));
   } catch (e) {
     if (e instanceof ToolError) throw e;
-    throw new ToolError('The header (first part) is not JSON. Is this really a JWT?');
+    throw new ToolError(T('error.headerNotJson'));
   }
-  if (!isRecord(header)) throw new ToolError('The header must be a JSON object.');
+  if (!isRecord(header)) throw new ToolError(T('error.headerNotObject'));
   const payloadText = utf8Decode(decodePart(parts[1]!, 'payload'));
   let payload: unknown;
   try {
@@ -142,14 +141,14 @@ function parseToken(input: string): Token {
 
 function human(ms: number): string {
   const s = Math.round(Math.abs(ms) / 1000);
-  if (s < 60) return `${s} s`;
+  if (s < 60) return T('time.seconds', { count: s });
   const m = Math.floor(s / 60);
-  if (m < 60) return `${m} min`;
+  if (m < 60) return T('time.minutes', { count: m });
   const h = Math.floor(m / 60);
-  if (h < 48) return `${h} h`;
+  if (h < 48) return T('time.hours', { count: h });
   const d = Math.floor(h / 24);
-  if (d < 730) return `${d} days`;
-  return `${Math.floor(d / 365.25)} years`;
+  if (d < 730) return T('time.days', { count: d });
+  return T('time.years', { count: Math.floor(d / 365.25) });
 }
 
 interface TimeInfo {
@@ -171,14 +170,14 @@ function timeInfo(v: unknown): TimeInfo {
 
 // ---------- decode ----------
 
-const CLAIM_NAMES: Record<string, string> = {
-  iss: 'Issuer',
-  sub: 'Subject',
-  aud: 'Audience',
-  exp: 'Expires',
-  nbf: 'Not valid before',
-  iat: 'Issued at',
-  jti: 'Token ID',
+const CLAIM_NAMES: Record<string, () => string> = {
+  iss: () => T('claim.iss'),
+  sub: () => T('claim.sub'),
+  aud: () => T('claim.aud'),
+  exp: () => T('claim.exp'),
+  nbf: () => T('claim.nbf'),
+  iat: () => T('claim.iat'),
+  jti: () => T('claim.jti'),
 };
 
 const PRIVILEGE_CLAIMS = new Set([
@@ -198,29 +197,45 @@ function claimsTable(payload: Rec, now: number): Output[] {
   const rows: string[][] = [];
   for (const [k, v] of Object.entries(payload)) {
     const meaning: string[] = [];
-    if (CLAIM_NAMES[k]) meaning.push(CLAIM_NAMES[k]);
+    const claimName = Object.hasOwn(CLAIM_NAMES, k) ? CLAIM_NAMES[k] : undefined;
+    if (claimName) meaning.push(claimName());
     let shown = typeof v === 'string' ? v : JSON.stringify(v);
     if (k === 'exp' || k === 'nbf' || k === 'iat') {
       const t = timeInfo(v);
       shown = t.value;
-      if (t.ms === undefined) meaning.push('should be a number of seconds since 1970');
+      if (t.ms === undefined) meaning.push(T('meaning.notSeconds'));
       else {
-        const rel = t.ms <= now ? `${human(now - t.ms)} ago` : `in ${human(t.ms - now)}`;
+        const rel =
+          t.ms <= now
+            ? T('time.ago', { time: human(now - t.ms) })
+            : T('time.in', { time: human(t.ms - now) });
         meaning.push(rel);
-        if (t.guessedMs) meaning.push('looks like milliseconds, JWT expects seconds');
+        if (t.guessedMs) meaning.push(T('meaning.millis'));
       }
     }
-    if (PRIVILEGE_CLAIMS.has(k)) meaning.push('privilege-related: the usual tampering target');
+    if (PRIVILEGE_CLAIMS.has(k)) meaning.push(T('meaning.privilege'));
     rows.push([k, shown ?? '', meaning.join(' · ')]);
   }
   const exp = timeInfo(payload.exp);
-  if (payload.exp === undefined) rows.push(['expired?', 'no exp claim', 'the token never expires']);
-  else if (exp.ms === undefined) rows.push(['expired?', 'unknown', 'exp is not a valid timestamp']);
-  else rows.push(['expired?', exp.ms <= now ? 'yes' : 'no', 'compared with the current time']);
+  const expired = T('row.expired');
+  if (payload.exp === undefined) rows.push([expired, T('value.noExp'), T('meaning.neverExpires')]);
+  else if (exp.ms === undefined) rows.push([expired, T('value.unknown'), T('meaning.badExp')]);
+  else rows.push([expired, exp.ms <= now ? T('value.yes') : T('value.no'), T('meaning.clock')]);
   const nbf = timeInfo(payload.nbf);
   if (nbf.ms !== undefined && nbf.ms > now)
-    rows.push(['valid yet?', 'no', `nbf is ${human(nbf.ms - now)} in the future`]);
-  return [{ type: 'table', label: 'Claims', columns: ['Claim', 'Value', 'Meaning'], rows }];
+    rows.push([
+      T('row.validYet'),
+      T('value.no'),
+      T('meaning.nbfFuture', { time: human(nbf.ms - now) }),
+    ]);
+  return [
+    {
+      type: 'table',
+      label: T('label.claims'),
+      columns: [T('col.claim'), T('col.value'), T('col.meaning')],
+      rows,
+    },
+  ];
 }
 
 /** Test a token against a list of secrets. Returns the first that reproduces the signature. */
@@ -242,11 +257,9 @@ async function securityNotes(t: Token): Promise<Output[]> {
   const warn = (text: string) => notes.push({ type: 'note', level: 'warn', text });
   const alg = t.alg;
   if (alg === undefined) {
-    warn('The header has no "alg". Servers differ in how they handle that.');
+    warn(T('note.noAlg'));
   } else if (alg.toLowerCase() === 'none') {
-    warn(
-      `alg is "${alg}": this token is unsigned. If the server accepts it, any payload can be forged. Try Sign mode with alg none (the tool also prints the None/NONE/nOnE spellings).`,
-    );
+    warn(T('note.algNone', { alg }));
   } else if (HS[alg]) {
     if (t.signature.length > 0) {
       const found = await findSecret(t, HS[alg], WEAK_SECRETS);
@@ -254,7 +267,7 @@ async function securityNotes(t: Token): Promise<Output[]> {
         notes.push({
           type: 'note',
           level: 'success',
-          text: `Weak secret found: this token is signed with "${found}". Anyone can forge tokens: use Sign mode.`,
+          text: T('note.weakSecret', { secret: found }),
         });
       }
     }
@@ -262,39 +275,24 @@ async function securityNotes(t: Token): Promise<Output[]> {
     notes.push({
       type: 'note',
       level: 'info',
-      text: `${alg} is asymmetric. Worth testing: sign the token as HS256 using the server's public key as the HMAC secret (algorithm confusion), or alg none.`,
+      text: T('note.asymmetric', { alg }),
     });
   }
   const show = (v: unknown) => (typeof v === 'string' ? v : JSON.stringify(v));
-  if (t.header.kid !== undefined)
-    warn(
-      `kid is set (${show(t.header.kid)}): the server uses it to pick a key. Test path traversal (../../dev/null with an empty secret), SQL injection and command injection in this value.`,
-    );
-  if (t.header.jku !== undefined)
-    warn(
-      `jku is set (${show(t.header.jku)}): the server may fetch keys from this URL. Check whether it validates the host.`,
-    );
-  if (t.header.x5u !== undefined)
-    warn(
-      `x5u is set (${show(t.header.x5u)}): the server may fetch a certificate from this URL. Check whether it validates the host.`,
-    );
-  if (t.header.jwk !== undefined)
-    warn(
-      'jwk is embedded in the header: a server that trusts it lets you sign with your own key (CVE-2018-0114 style).',
-    );
-  if (t.header.x5c !== undefined)
-    warn(
-      'x5c is embedded in the header: a server that trusts it lets you sign with your own certificate.',
-    );
+  if (t.header.kid !== undefined) warn(T('note.kid', { value: show(t.header.kid) }));
+  if (t.header.jku !== undefined) warn(T('note.jku', { value: show(t.header.jku) }));
+  if (t.header.x5u !== undefined) warn(T('note.x5u', { value: show(t.header.x5u) }));
+  if (t.header.jwk !== undefined) warn(T('note.jwk'));
+  if (t.header.x5c !== undefined) warn(T('note.x5c'));
   return notes;
 }
 
 async function decode(t: Token): Promise<Output[]> {
   const out: Output[] = [
-    { type: 'text', label: 'Header', value: JSON.stringify(t.header, null, 2) },
+    { type: 'text', label: T('label.header'), value: JSON.stringify(t.header, null, 2) },
     {
       type: 'text',
-      label: 'Payload',
+      label: T('label.payload'),
       value:
         isRecord(t.payload) || Array.isArray(t.payload)
           ? JSON.stringify(t.payload, null, 2)
@@ -306,12 +304,12 @@ async function decode(t: Token): Promise<Output[]> {
     out.push({
       type: 'note',
       level: 'info',
-      text: 'The payload is not a JSON object, so there are no claims to list.',
+      text: T('note.payloadNotObject'),
     });
   out.push({
     type: 'text',
-    label: `Signature (hex, ${t.signature.length} bytes)`,
-    value: t.signature.length ? toHex(t.signature) : '(empty: unsigned token)',
+    label: T('label.signature', { count: t.signature.length }),
+    value: t.signature.length ? toHex(t.signature) : T('value.unsigned'),
   });
   out.push(...(await securityNotes(t)));
   return out;
@@ -321,10 +319,7 @@ async function decode(t: Token): Promise<Output[]> {
 
 function subtle(): SubtleCrypto {
   const s = globalThis.crypto?.subtle;
-  if (!s)
-    throw new ToolError(
-      'WebCrypto is not available here (it needs HTTPS or localhost). HS256/384/512 still work.',
-    );
+  if (!s) throw new ToolError(T('error.noWebCrypto'));
   return s;
 }
 
@@ -352,7 +347,7 @@ function jwkFrom(rec: Rec, kid: unknown): JsonWebKey {
   if (Array.isArray(rec.keys)) {
     const keys = rec.keys.filter(isRecord);
     const chosen = keys.find((k) => kid !== undefined && k.kid === kid) ?? keys[0];
-    if (!chosen) throw new ToolError('That JWKS has no keys.');
+    if (!chosen) throw new ToolError(T('error.emptyJwks'));
     key = chosen;
   }
   const jwk: JsonWebKey = {};
@@ -360,7 +355,7 @@ function jwkFrom(rec: Rec, kid: unknown): JsonWebKey {
     const v = key[f];
     if (typeof v === 'string') jwk[f] = v;
   }
-  if (!jwk.kty) throw new ToolError('The JWK has no "kty" field.');
+  if (!jwk.kty) throw new ToolError(T('error.noKty'));
   return jwk;
 }
 
@@ -374,9 +369,9 @@ function parseKeyMaterial(input: string, kid: unknown): KeyMaterial {
     try {
       parsed = JSON.parse(t);
     } catch {
-      throw new ToolError('The key looks like JSON but does not parse. Paste a JWK or a PEM.');
+      throw new ToolError(T('error.keyBadJson'));
     }
-    if (!isRecord(parsed)) throw new ToolError('Paste a JWK object or a PEM public key.');
+    if (!isRecord(parsed)) throw new ToolError(T('error.keyNotObject'));
     return { jwk: jwkFrom(parsed, kid) };
   }
   const pem = t.match(/-----BEGIN ([A-Z0-9 ]+)-----([\s\S]*?)-----END \1-----/);
@@ -385,20 +380,12 @@ function parseKeyMaterial(input: string, kid: unknown): KeyMaterial {
     const der = fromBase64(pem[2]!);
     if (label === 'PUBLIC KEY') return { der };
     if (label === 'RSA PUBLIC KEY') return { der: pkcs1ToSpki(der) };
-    if (label === 'CERTIFICATE')
-      throw new ToolError(
-        'That is a certificate, not a bare key. Extract the key with: openssl x509 -in cert.pem -pubkey -noout',
-      );
-    if (label.includes('PRIVATE KEY'))
-      throw new ToolError(
-        'That is a private key. Verifying only needs the public half: openssl pkey -in key.pem -pubout',
-      );
-    throw new ToolError(`Unsupported PEM block "${label}". Use "PUBLIC KEY" (SPKI) or a JWK.`);
+    if (label === 'CERTIFICATE') throw new ToolError(T('error.certificate'));
+    if (label.includes('PRIVATE KEY')) throw new ToolError(T('error.privateKey'));
+    throw new ToolError(T('error.pemLabel', { label }));
   }
   if (/^[A-Za-z0-9+/_\-\s]+=*$/.test(t) && t.length > 40) return { der: fromBase64(t) };
-  throw new ToolError(
-    'Could not read the public key. Paste a PEM ("-----BEGIN PUBLIC KEY-----…"), a JWK or a JWKS.',
-  );
+  throw new ToolError(T('error.unreadableKey'));
 }
 
 async function importPublicKey(input: string, alg: string, kid: unknown): Promise<CryptoKey> {
@@ -411,9 +398,7 @@ async function importPublicKey(input: string, alg: string, kid: unknown): Promis
       : await s.importKey('spki', buf(material.der), spec.importAlg, false, ['verify']);
   } catch (e) {
     const why = e instanceof Error ? e.message : String(e);
-    throw new ToolError(
-      `That key cannot verify ${alg} (${why}). Check the key type: RS/PS need RSA, ES256/384/512 need a P-256/384/521 EC key, EdDSA needs Ed25519.`,
-    );
+    throw new ToolError(T('error.keyMismatch', { alg, reason: why }));
   }
 }
 
@@ -426,16 +411,15 @@ async function verify(
   publicKey: string,
 ): Promise<Output[]> {
   const alg = t.alg;
-  if (alg === undefined)
-    throw new ToolError('The header has no "alg", so there is no way to know how to verify.');
+  if (alg === undefined) throw new ToolError(T('error.verifyNoAlg'));
   if (alg.toLowerCase() === 'none') {
     return [
       {
         type: 'note',
         level: t.signature.length ? 'warn' : 'info',
         text: t.signature.length
-          ? `alg is "${alg}" but the token carries a signature. A compliant server rejects "none" tokens outright.`
-          : `alg is "${alg}": there is no signature to verify. Servers that accept this are vulnerable.`,
+          ? T('note.noneWithSignature', { alg })
+          : T('note.noneNoSignature', { alg }),
       },
     ];
   }
@@ -443,31 +427,23 @@ async function verify(
   const data = utf8Encode(t.signingInput);
   const hmacAlgo = HS[alg];
   if (hmacAlgo) {
-    if (!secret)
-      throw new ToolError(`${alg} needs the secret: fill the Secret option (or use Crack mode).`);
+    if (!secret) throw new ToolError(T('error.verifyNeedsSecret', { alg }));
     const key = secretIsB64 ? fromBase64(secret) : utf8Encode(secret);
     ok = equalBytes((await createHmac(hmacAlgo))(key, data), t.signature);
   } else if (ASYM[alg]) {
-    if (!publicKey.trim())
-      throw new ToolError(
-        `${alg} needs the issuer's public key: paste a PEM or JWK in the Public key option.`,
-      );
+    if (!publicKey.trim()) throw new ToolError(T('error.needsPublicKey', { alg }));
     const key = await importPublicKey(publicKey, alg, t.header.kid);
     ok = await subtle().verify(ASYM[alg].verifyAlg, key, buf(t.signature), buf(data));
   } else {
-    throw new ToolError(
-      `Unsupported alg "${alg}". Supported: HS256/384/512, RS256/384/512, PS256/384/512, ES256/384/512, EdDSA.`,
-    );
+    throw new ToolError(T('error.unsupportedAlg', { alg }));
   }
   return [
     ok
-      ? { type: 'note', level: 'success', text: `Signature is valid (${alg}).` }
+      ? { type: 'note', level: 'success', text: T('note.valid', { alg }) }
       : {
           type: 'note',
           level: 'error',
-          text: hmacAlgo
-            ? `Signature does NOT match (${alg}) with this secret. Wrong secret, or try "Secret is Base64"; Crack mode tests common weak secrets.`
-            : `Signature does NOT match (${alg}) with this key.`,
+          text: hmacAlgo ? T('note.mismatchSecret', { alg }) : T('note.mismatchKey', { alg }),
         },
   ];
 }
@@ -479,18 +455,17 @@ function encodeSegment(value: unknown): string {
 /** Header and payload to sign: from an existing token, `{header, payload}` JSON, or a bare payload. */
 function signSource(input: string): { header: Rec; payload: unknown } {
   const trimmed = input.trim();
-  if (!trimmed) throw new ToolError('Paste a token to re-sign, or JSON like {"user":"admin"}.');
+  if (!trimmed) throw new ToolError(T('error.signEmpty'));
   if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
     const t = parseToken(trimmed);
-    if (typeof t.payload === 'string')
-      throw new ToolError("That token's payload is not JSON, so it cannot be re-signed here.");
+    if (typeof t.payload === 'string') throw new ToolError(T('error.signPayloadNotJson'));
     return { header: t.header, payload: t.payload };
   }
   let parsed: unknown;
   try {
     parsed = JSON.parse(trimmed);
   } catch {
-    throw new ToolError('The input starts like JSON but does not parse. Check quotes and commas.');
+    throw new ToolError(T('error.signBadJson'));
   }
   if (isRecord(parsed) && isRecord(parsed.payload)) {
     return { header: isRecord(parsed.header) ? parsed.header : {}, payload: parsed.payload };
@@ -515,33 +490,29 @@ async function sign(
 
   if (alg === 'none') {
     return [
-      { type: 'text', label: 'Unsigned token (alg none)', value: make('none', '') },
+      { type: 'text', label: T('label.unsigned'), value: make('none', '') },
       {
         type: 'table',
-        label: 'Spellings to try against a filter that blocks "none"',
-        columns: ['alg', 'Token'],
+        label: T('label.spellings'),
+        // "alg" is the name of the header field, not prose.
+        columns: ['alg', T('col.token')],
         rows: NONE_SPELLINGS.map((n) => [n, make(n, '')]),
       },
     ];
   }
   const hmacAlgo = HS[alg];
-  if (!hmacAlgo)
-    throw new ToolError(`Cannot sign with "${alg}" here. Use none, HS256, HS384 or HS512.`);
-  if (!secret) throw new ToolError(`${alg} needs a secret: fill the Secret option.`);
+  if (!hmacAlgo) throw new ToolError(T('error.cannotSign', { alg }));
+  if (!secret) throw new ToolError(T('error.signNeedsSecret', { alg }));
   const key = secretIsB64 ? fromBase64(secret) : utf8Encode(secret);
   const unsigned = make(alg, '');
   const mac = (await createHmac(hmacAlgo))(key, utf8Encode(unsigned.slice(0, -1)));
-  return [{ type: 'text', label: `Signed token (${alg})`, value: unsigned + b64url(mac) }];
+  return [{ type: 'text', label: T('label.signed', { alg }), value: unsigned + b64url(mac) }];
 }
 
 async function crack(t: Token, extra: string): Promise<Output[]> {
   const hmacAlgo = t.alg ? HS[t.alg] : undefined;
-  if (!hmacAlgo)
-    throw new ToolError(
-      `Cracking only applies to HMAC tokens (HS256/384/512); this one uses ${t.alg ?? 'no alg'}. For RS/ES tokens there is no shared secret to guess.`,
-    );
-  if (t.signature.length === 0)
-    throw new ToolError('This token has no signature part, so there is nothing to crack.');
+  if (!hmacAlgo) throw new ToolError(T('error.notHmac', { alg: t.alg ?? T('value.noAlg') }));
+  if (t.signature.length === 0) throw new ToolError(T('error.noSignature'));
   const extras = extra.split(',').filter((s) => s !== '');
   const candidates = [...new Set(['', ...extras, ...WEAK_SECRETS])];
   const found = await findSecret(t, hmacAlgo, candidates);
@@ -550,7 +521,7 @@ async function crack(t: Token, extra: string): Promise<Output[]> {
       {
         type: 'note',
         level: 'warn',
-        text: `None of the ${candidates.length} candidates matches. Add guesses in "Extra candidates", or go offline: hashcat -m 16500 token.txt wordlist.txt`,
+        text: T('note.noMatch', { count: candidates.length }),
       },
     ];
   }
@@ -558,20 +529,20 @@ async function crack(t: Token, extra: string): Promise<Output[]> {
     {
       type: 'note',
       level: 'success',
-      text: found === '' ? 'The secret is the empty string.' : `Secret found: ${found}`,
+      text: found === '' ? T('note.emptySecret') : T('note.secretFound', { secret: found }),
     },
     {
       type: 'kv',
       entries: [
-        ['Algorithm', t.alg ?? ''],
-        ['Secret', found === '' ? '(empty)' : found],
-        ['Candidates tried', String(candidates.length)],
+        [T('kv.algorithm'), t.alg ?? ''],
+        [T('kv.secret'), found === '' ? T('value.empty') : found],
+        [T('kv.tried'), String(candidates.length)],
       ],
     },
     {
       type: 'note',
       level: 'info',
-      text: 'Switch to Sign mode with this secret to forge a token (change the role, user or exp claims).',
+      text: T('note.forge'),
     },
   ];
 }
@@ -678,7 +649,7 @@ export default defineTool({
       return {
         score: parsed.alg !== undefined ? 0.95 : 0.7,
         options: { mode: 'decode' },
-        reason: `JSON Web Token (${parsed.alg ?? 'no alg'})`,
+        reason: T('detect.token', { alg: parsed.alg ?? T('value.noAlg') }),
       };
     } catch {
       return null;

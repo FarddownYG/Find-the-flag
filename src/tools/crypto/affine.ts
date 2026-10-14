@@ -1,7 +1,10 @@
 import { defineTool, number, toggle } from '../../core/define';
 import { ToolError } from '../../core/errors';
+import { toolT } from '../../i18n/tool-text';
 import { mod, preview } from './_classical';
 import { rankScore } from './_fitness';
+
+const T = toolT('affine');
 
 /** The 12 multipliers that are coprime with 26 (the others are not invertible). */
 export const VALID_A = [1, 3, 5, 7, 9, 11, 15, 17, 19, 21, 23, 25] as const;
@@ -25,9 +28,7 @@ const INVERSE: Record<number, number> = {
 export function checkA(a: number): number {
   const m = mod(a, 26);
   if (!Number.isInteger(a) || INVERSE[m] === undefined) {
-    throw new ToolError(
-      `a = ${a} is not valid: it must be coprime with 26 (not even, not 13). Use one of ${VALID_A.join(', ')}.`,
-    );
+    throw new ToolError(T('error.invalidA', { a, values: VALID_A.join(', ') }));
   }
   return m;
 }
@@ -97,7 +98,7 @@ export default defineTool({
   run(text, { mode, a, b }) {
     if (mode === 'decrypt') return [{ type: 'text', value: affineDecrypt(text, a, b) }];
     if (mode === 'encrypt') return [{ type: 'text', value: affineEncrypt(text, a, b) }];
-    if (!/[A-Za-z]/.test(text)) throw new ToolError('Paste some letters to brute-force.');
+    if (!/[A-Za-z]/.test(text)) throw new ToolError(T('error.noLetters'));
     const rows = VALID_A.flatMap((ka) =>
       Array.from({ length: 26 }, (_, kb) => {
         const out = affineDecrypt(text, ka, kb);
@@ -107,11 +108,11 @@ export default defineTool({
     const ranked = rows.sort((x, y) => y.score - x.score || x.a - y.a || x.b - y.b);
     const best = ranked[0]!;
     return [
-      { type: 'text', label: `Best guess · a=${best.a}, b=${best.b}`, value: best.out },
+      { type: 'text', label: T('label.best', { a: best.a, b: best.b }), value: best.out },
       {
         type: 'table',
-        label: 'All 312 keys, most readable first',
-        columns: ['a', 'b', 'Score', 'Result'],
+        label: T('label.all'),
+        columns: ['a', 'b', T('col.score'), T('col.result')],
         rows: ranked.map((r) => [r.a, r.b, r.score.toFixed(1), preview(r.out, 100)]),
         highlight: [0],
       },

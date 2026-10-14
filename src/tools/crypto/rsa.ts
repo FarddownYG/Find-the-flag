@@ -1,6 +1,7 @@
 import { defineTool, number } from '../../core/define';
 import { ToolError } from '../../core/errors';
 import type { Output } from '../../core/types';
+import { toolT } from '../../i18n/tool-text';
 import { printableRatio, utf8Decode } from '../../lib/bytes';
 import {
   bitLength,
@@ -27,6 +28,8 @@ import {
 } from './_rsa-attacks';
 import { COMMON, FERMAT, HASTAD, SMALL_E, TINY, WIENER } from './_rsa-examples';
 import { factorize, totient } from './_rsa-factor';
+
+const T = toolT('rsa');
 
 // ---------------------------------------------------------------------------------------------
 // Parsing: `n = …`, `e: 0x10001`, {"c": "123"}, n1/c1/n2/c2, Python dumps. Never evaluates code.
@@ -146,10 +149,7 @@ function groupEntries(entries: Entry[]): { label: string; params: Params }[] {
 export function parseInput(text: string): { insts: Inst[]; warnings: string[] } {
   const entries = scan(text);
   if (entries.length === 0) {
-    throw new ToolError(
-      'No RSA parameters found. Write one per line, e.g. "n = 0x…", "e = 65537", "c = 1234…" ' +
-        '(decimal or 0x hex; also p, q, d, dp, dq, phi; n1/c1, n2/c2 for several instances).',
-    );
+    throw new ToolError(T('error.noParams'));
   }
   const warnings: string[] = [];
   const insts: Inst[] = [];
@@ -160,27 +160,27 @@ export function parseInput(text: string): { insts: Inst[]; warnings: string[] } 
     let n = params.n;
     if (n === undefined && p !== undefined && q !== undefined) n = p * q;
     if (n === undefined) {
-      warnings.push(`Instance${at} has no modulus n (and no p and q): ignored.`);
+      warnings.push(T('warn.noModulus', { at }));
       continue;
     }
-    if (n < 4n) throw new ToolError(`The modulus n${at} must be at least 4 (got ${n}).`);
+    if (n < 4n) throw new ToolError(T('error.smallModulus', { at, n: String(n) }));
     const inst: Inst = { ...params, n, label };
     for (const key of ['p', 'q'] as const) {
       const f = inst[key];
       if (f !== undefined && (f < 2n || f >= n || n % f !== 0n)) {
-        warnings.push(`${key}${at} does not divide n: ignored.`);
+        warnings.push(T('warn.notDivisor', { name: key, at }));
         delete inst[key];
       }
     }
     if (inst.p !== undefined && inst.q === undefined && n % inst.p === 0n) inst.q = n / inst.p;
     if (inst.q !== undefined && inst.p === undefined && n % inst.q === 0n) inst.p = n / inst.q;
     if (inst.c !== undefined && inst.c >= n) {
-      warnings.push(`c${at} is not smaller than n: the plaintext can only be recovered modulo n.`);
+      warnings.push(T('warn.cTooLarge', { at }));
     }
     insts.push(inst);
   }
   if (insts.length === 0) {
-    throw new ToolError('The modulus n is missing: add a line like "n = 0x…" (or give p and q).');
+    throw new ToolError(T('error.noModulus'));
   }
   return { insts, warnings };
 }
@@ -262,7 +262,36 @@ const showFactors = (m: Modulus) =>
     .map(([p, k]) => (k > 1 ? `${p}^${k}` : `${p}`))
     .join(' · ');
 
-const viaLabel = (m: Modulus) => m.via.join(' + ') || 'Known factors';
+/**
+ * Display names of the attacks and factoring methods. The English names stay the identifiers
+ * (Attempt.attack, Modulus.via, factorize().methods); proper names such as Wiener, Fermat or
+ * Pollard rho and formulas such as "e = 1" are shown as they are.
+ */
+const METHOD_NAMES: Record<string, () => string> = {
+  'Known p, q': () => T('method.knownPQ'),
+  'Known φ': () => T('method.knownPhi'),
+  'Known d': () => T('method.knownD'),
+  'dp / dq leak': () => T('method.dpLeak'),
+  'Shared factor (gcd)': () => T('method.sharedFactor'),
+  'Håstad broadcast': () => T('method.hastad'),
+  'Common modulus': () => T('method.commonModulus'),
+  'Small e (integer root)': () => T('method.smallERoot'),
+  'Small e (m^e = c + k·n)': () => T('method.smallEScan'),
+  'n is prime': () => T('method.nPrime'),
+  'Factor n': () => T('method.factorN'),
+  'trial division': () => T('method.trialDivision'),
+  'perfect power': () => T('method.perfectPower'),
+};
+const methodName = (id: string): string =>
+  Object.hasOwn(METHOD_NAMES, id) ? METHOD_NAMES[id]!() : id;
+
+const STATUS_NAMES: Record<Attempt['status'], () => string> = {
+  worked: () => T('status.worked'),
+  failed: () => T('status.failed'),
+  'not applicable': () => T('status.notApplicable'),
+};
+
+const viaLabel = (m: Modulus) => m.via.map(methodName).join(' + ') || T('method.knownFactors');
 
 const MAX_SCAN_E = 64;
 const SCAN_LIMIT = 1 << 20;
@@ -325,7 +354,7 @@ export function analyze(insts: Inst[], budgetMs: number): Analysis {
       const m = modOf(inst);
       if (inst.d !== undefined) {
         privateExponents.set(inst, inst.d);
-        solved.set(inst, { m: [modPow(c, inst.d, inst.n)], via: 'Known d' });
+        solved.set(inst, { m: [modPow(c, inst.d, inst.n)], via: methodName('Known d') });
         continue;
       }
       const phi = phiOf(m);
@@ -338,14 +367,12 @@ export function analyze(insts: Inst[], budgetMs: number): Analysis {
       }
       const roots = evenExponentCandidates(c, inst.n, inst.e, m);
       if (roots && roots.length > 0) {
-        solved.set(inst, { m: roots, via: `${viaLabel(m)} + Rabin square roots` });
+        solved.set(inst, { m: roots, via: `${viaLabel(m)} + ${T('method.rabin')}` });
       } else {
+        const params = { e: String(inst.e), g: String(gcd(inst.e, phi)) };
         blocked.set(
           inst,
-          `e = ${inst.e} is not coprime to φ(n) (gcd = ${gcd(inst.e, phi)}), so d does not exist` +
-            (roots
-              ? ' and c is not a square modulo n.'
-              : '. Only e = 2^j·e′ with n = p·q is handled.'),
+          roots ? T('reason.notCoprimeNoSquare', params) : T('reason.notCoprimeUnhandled', params),
         );
       }
     }
@@ -358,12 +385,7 @@ export function analyze(insts: Inst[], budgetMs: number): Analysis {
     if (inst.p !== undefined || inst.q !== undefined) {
       for (const f of [inst.p, inst.q]) if (f !== undefined) absorb(m, f, 'Known p, q');
       if (!m.via.includes('Known p, q')) m.via.push('Known p, q');
-      log(
-        'Known p, q',
-        t,
-        'worked',
-        complete(m) ? 'n = p · q, φ(n) computed' : 'n partly factored, the rest is factored below',
-      );
+      log('Known p, q', t, 'worked', complete(m) ? T('detail.pqComplete') : T('detail.pqPartial'));
     }
     if (inst.phi !== undefined) {
       m.phi ??= inst.phi;
@@ -371,10 +393,10 @@ export function analyze(insts: Inst[], budgetMs: number): Analysis {
       if (pq) {
         absorb(m, pq[0], 'Known φ');
         absorb(m, pq[1], 'Known φ');
-        log('Known φ', t, 'worked', 'p and q solve x² − (n − φ + 1)x + n = 0');
+        log('Known φ', t, 'worked', T('detail.phiQuadratic'));
       } else {
         if (!m.via.includes('Known φ')) m.via.push('Known φ');
-        log('Known φ', t, 'worked', 'φ used as given (n is not p·q with this φ: multi-prime n?)');
+        log('Known φ', t, 'worked', T('detail.phiAsGiven'));
       }
     }
     if (inst.d !== undefined) {
@@ -387,11 +409,7 @@ export function analyze(insts: Inst[], budgetMs: number): Analysis {
         'Known d',
         t,
         'worked',
-        inst.c !== undefined
-          ? 'm = c^d mod n'
-          : pq
-            ? 'n factored from e·d − 1'
-            : 'private key given',
+        inst.c !== undefined ? 'm = c^d mod n' : pq ? T('detail.dFactored') : T('detail.dGiven'),
       );
     }
     for (const key of ['dp', 'dq'] as const) {
@@ -399,14 +417,14 @@ export function analyze(insts: Inst[], budgetMs: number): Analysis {
       if (v === undefined) continue;
       const name = key === 'dp' ? 'dp' : 'dq';
       if (inst.e === undefined) {
-        log('dp / dq leak', t, 'failed', `${name} given but e is missing`);
+        log('dp / dq leak', t, 'failed', T('detail.leakNoE', { name }));
         continue;
       }
       const f = crtExponentLeak(inst.n, inst.e, v);
       if (f !== null && absorb(m, f, 'dp / dq leak')) {
-        log('dp / dq leak', t, 'worked', `gcd(2^(e·${name}) − 2, n) is a prime factor of n`);
+        log('dp / dq leak', t, 'worked', T('detail.leakWorked', { name }));
       } else {
-        log('dp / dq leak', t, 'failed', `gcd(x^(e·${name}) − x, n) gave no factor`);
+        log('dp / dq leak', t, 'failed', T('detail.leakFailed', { name }));
       }
     }
   }
@@ -444,11 +462,9 @@ export function analyze(insts: Inst[], budgetMs: number): Analysis {
     if (found === 0) {
       log(
         'Shared factor (gcd)',
-        `${mods.length} moduli`,
+        T('target.moduli', { count: mods.length }),
         'failed',
-        checked < total
-          ? `no shared prime in the first ${checked} of ${total} pairs (time limit)`
-          : 'every pair of moduli is coprime',
+        checked < total ? T('detail.gcdTimeLimit', { checked, total }) : T('detail.gcdCoprime'),
       );
     }
     decryptKnown();
@@ -480,14 +496,14 @@ export function analyze(insts: Inst[], budgetMs: number): Analysis {
         if (msg === null) continue;
         for (const inst of group) {
           if (modPow(msg, BigInt(e), inst.n) === mod(inst.c!, inst.n)) {
-            solved.set(inst, { m: [msg], via: 'Håstad broadcast' });
+            solved.set(inst, { m: [msg], via: methodName('Håstad broadcast') });
           }
         }
         log(
           'Håstad broadcast',
           used.map(tgt).join(', '),
           'worked',
-          `CRT over ${used.length} moduli, then an exact integer root of degree ${e}`,
+          T('detail.hastadWorked', { count: used.length, e }),
         );
         done = true;
         break;
@@ -498,8 +514,8 @@ export function analyze(insts: Inst[], budgetMs: number): Analysis {
           `e = ${e}`,
           'failed',
           distinct.length < e
-            ? `CRT result is not a perfect power; usually ${e} ciphertexts under different moduli are needed, ${distinct.length} given`
-            : 'CRT result is not a perfect power (different messages, or padding was used)',
+            ? T('detail.hastadTooFew', { e, given: distinct.length })
+            : T('detail.hastadFailed'),
         );
       }
     }
@@ -513,7 +529,7 @@ export function analyze(insts: Inst[], budgetMs: number): Analysis {
       const exps = new Set(group.map((i) => i.e!.toString()));
       if (group.length < 2 || exps.size < 2) continue;
       let done = false;
-      let reason = 'no pair of ciphertexts with different exponents';
+      let reason = T('reason.noExponentPair');
       for (let a = 0; a < group.length && !done; a++) {
         for (let b = a + 1; b < group.length && !done; b++) {
           const x = group[a]!;
@@ -528,17 +544,12 @@ export function analyze(insts: Inst[], budgetMs: number): Analysis {
           const good =
             modPow(r.m, x.e!, x.n) === mod(x.c!, x.n) && modPow(r.m, y.e!, y.n) === mod(y.c!, y.n);
           if (!good) {
-            reason = 'the two ciphertexts do not encrypt the same message';
+            reason = T('reason.differentMessages');
             continue;
           }
-          solved.set(x, { m: [r.m], via: 'Common modulus' });
-          solved.set(y, { m: [r.m], via: 'Common modulus' });
-          log(
-            'Common modulus',
-            `${tgt(x)}, ${tgt(y)}`,
-            'worked',
-            `a·e1 + b·e2 = 1 (extended gcd), m = c1^a · c2^b mod n`,
-          );
+          solved.set(x, { m: [r.m], via: methodName('Common modulus') });
+          solved.set(y, { m: [r.m], via: methodName('Common modulus') });
+          log('Common modulus', `${tgt(x)}, ${tgt(y)}`, 'worked', T('detail.commonWorked'));
           done = true;
         }
       }
@@ -554,26 +565,16 @@ export function analyze(insts: Inst[], budgetMs: number): Analysis {
     const t = tgt(inst);
     if (e === 1n) {
       solved.set(inst, { m: [mod(inst.c!, inst.n)], via: 'e = 1' });
-      log('e = 1', t, 'worked', 'c = m mod n, nothing was encrypted');
+      log('e = 1', t, 'worked', T('detail.eIsOne'));
       continue;
     }
     if (e <= 4096n) {
       const root = exactRoot(inst.c!, Number(e));
       if (root !== null) {
-        solved.set(inst, { m: [root], via: 'Small e (integer root)' });
-        log(
-          'Small e (integer root)',
-          t,
-          'worked',
-          `m^e < n, so c is a perfect power with exponent ${e}`,
-        );
+        solved.set(inst, { m: [root], via: methodName('Small e (integer root)') });
+        log('Small e (integer root)', t, 'worked', T('detail.rootWorked', { e: String(e) }));
       } else {
-        log(
-          'Small e (integer root)',
-          t,
-          'failed',
-          `c is not a perfect power with exponent ${e} (m^e wraps around n)`,
-        );
+        log('Small e (integer root)', t, 'failed', T('detail.rootFailed', { e: String(e) }));
       }
     }
   }
@@ -595,7 +596,7 @@ export function analyze(insts: Inst[], budgetMs: number): Analysis {
         'Wiener',
         tgt(inst),
         'not applicable',
-        `e has only ${bitLength(inst.e)} bits; Wiener needs a large e`,
+        T('detail.wienerSmallE', { count: bitLength(inst.e) }),
       );
       continue;
     }
@@ -603,14 +604,9 @@ export function analyze(insts: Inst[], budgetMs: number): Analysis {
     if (w) {
       absorb(m, w.p, 'Wiener');
       absorb(m, w.q, 'Wiener');
-      log(
-        'Wiener',
-        tgt(inst),
-        'worked',
-        `continued fraction of e/n gives d (${bitLength(w.d)} bits)`,
-      );
+      log('Wiener', tgt(inst), 'worked', T('detail.wienerWorked', { count: bitLength(w.d) }));
     } else {
-      log('Wiener', tgt(inst), 'failed', 'no convergent of e/n gives a valid d (d is not small)');
+      log('Wiener', tgt(inst), 'failed', T('detail.wienerFailed'));
     }
   }
   decryptKnown();
@@ -621,19 +617,19 @@ export function analyze(insts: Inst[], budgetMs: number): Analysis {
     if (e === undefined || e < 2n || e > BigInt(MAX_SCAN_E) || bitLength(inst.n) < 128) continue;
     const hit = smallExponentScan(inst.c!, inst.n, Number(e), SCAN_LIMIT, Date.now() + 800);
     if (hit) {
-      solved.set(inst, { m: [hit.m], via: 'Small e (m^e = c + k·n)' });
+      solved.set(inst, { m: [hit.m], via: methodName('Small e (m^e = c + k·n)') });
       log(
         'Small e (m^e = c + k·n)',
         tgt(inst),
         'worked',
-        `k = ${hit.k}: c + k·n is a perfect power with exponent ${e}`,
+        T('detail.scanWorked', { k: hit.k, e: String(e) }),
       );
     } else {
       log(
         'Small e (m^e = c + k·n)',
         tgt(inst),
         'failed',
-        `no k up to ${SCAN_LIMIT} makes c + k·n a perfect power with exponent ${e}`,
+        T('detail.scanFailed', { limit: SCAN_LIMIT, e: String(e) }),
       );
     }
   }
@@ -653,31 +649,28 @@ export function analyze(insts: Inst[], budgetMs: number): Analysis {
       m.composites.push(...r.unfactored);
     }
     const used = [...new Set(methods)];
-    m.tried = ['trial division (primes < 200 000)', 'Fermat', 'Pollard p−1', 'Pollard rho'];
+    m.tried = [T('method.trialDivisionLimit'), 'Fermat', 'Pollard p−1', 'Pollard rho'];
     if (complete(m)) {
       const single = fromScratch && m.primes.size === 1;
       const attack = single ? ([...m.primes][0]![1] === 1 ? 'n is prime' : 'n = p^k') : 'Factor n';
       if (single) m.via = [attack];
       else for (const v of used) if (!m.via.includes(v)) m.via.push(v);
       const text = showFactors(m);
-      const how = used.length > 0 ? ` via ${used.join(', ')}` : '';
+      const what = text.length <= 90 ? `n = ${text}` : T('detail.fullyFactored');
       log(
         attack,
         label,
         'worked',
-        `${text.length <= 90 ? `n = ${text}` : 'n fully factored'}${how}`,
+        used.length > 0
+          ? T('detail.via', { what, methods: used.map(methodName).join(', ') })
+          : what,
       );
     } else if (m.primes.size > 0) {
       const rest = bitLength(m.composites.reduce((a, b) => a * b, 1n));
-      log(
-        'Factor n',
-        label,
-        'failed',
-        `partial: ${m.primes.size} prime factor(s), a ${rest}-bit cofactor remains`,
-      );
+      log('Factor n', label, 'failed', T('detail.partial', { count: m.primes.size, bits: rest }));
     } else {
       const secs = (share / 1000).toFixed(1);
-      log('Factor n', label, 'failed', `${bitLength(m.n)}-bit n not factored in ${secs} s`);
+      log('Factor n', label, 'failed', T('detail.notFactored', { bits: bitLength(m.n), secs }));
     }
   }
   decryptKnown();
@@ -697,7 +690,7 @@ export function analyze(insts: Inst[], budgetMs: number): Analysis {
 // Output
 // ---------------------------------------------------------------------------------------------
 
-const bitsOf = (n: bigint) => `${bitLength(n)} bits`;
+const bitsOf = (n: bigint) => T('value.bits', { count: bitLength(n) });
 
 function bestFirst(candidates: bigint[]): { m: bigint; bytes: Uint8Array; score: number }[] {
   return candidates
@@ -716,7 +709,7 @@ function plaintextBlocks(insts: Inst[], plain: Plain): Output[] {
   const out: Output[] = [
     {
       type: 'bytes',
-      label: `Plaintext${tag} · long_to_bytes(m)`,
+      label: T('label.plaintext', { tag }),
       value: best.bytes,
       filename: 'plaintext.bin',
     },
@@ -724,17 +717,17 @@ function plaintextBlocks(insts: Inst[], plain: Plain): Output[] {
       type: 'kv',
       label: `m${tag}`,
       entries: [
-        ['Recovered by', plain.via],
-        ['m (decimal)', best.m.toString()],
-        ['m (hex)', toHexString(best.m)],
+        [T('kv.recoveredBy'), plain.via],
+        [T('kv.mDecimal'), best.m.toString()],
+        [T('kv.mHex'), toHexString(best.m)],
       ],
     },
   ];
   if (ranked.length > 1) {
     out.push({
       type: 'table',
-      label: `All ${ranked.length} square-root candidates${tag}`,
-      columns: ['#', 'Printable', 'As text'],
+      label: T('label.candidates', { count: ranked.length, tag }),
+      columns: ['#', T('col.printable'), T('col.asText')],
       rows: ranked.map((r, i) => [
         i + 1,
         `${Math.round(r.score * 100)} %`,
@@ -754,11 +747,11 @@ function keyBlock(a: Analysis, m: Modulus): Output | null {
     if (complete(m) && sorted.length === 2 && sorted.every(([, k]) => k === 1)) {
       entries.push(['p', sorted[0]![0].toString()], ['q', sorted[1]![0].toString()]);
     } else {
-      entries.push([complete(m) ? 'factors' : 'factors found', showFactors(m)]);
+      entries.push([complete(m) ? T('kv.factors') : T('kv.factorsFound'), showFactors(m)]);
     }
   }
   if (!complete(m) && m.primes.size > 0) {
-    entries.push(['unfactored rest', m.composites.map((c) => bitsOf(c)).join(', ')]);
+    entries.push([T('kv.unfactored'), m.composites.map((c) => bitsOf(c)).join(', ')]);
   }
   if (phi !== undefined) entries.push(['φ(n)', phi.toString()]);
   const seen = new Set<string>();
@@ -772,7 +765,7 @@ function keyBlock(a: Analysis, m: Modulus): Output | null {
     ]);
   }
   if (entries.length === 1) return null;
-  return { type: 'kv', label: `Key material${m.tag ? ` ${m.tag}` : ''}`, entries };
+  return { type: 'kv', label: T('label.keyMaterial', { tag: m.tag ? ` ${m.tag}` : '' }), entries };
 }
 
 function failureNotes(a: Analysis): Output[] {
@@ -785,21 +778,20 @@ function failureNotes(a: Analysis): Output[] {
     const tag = inst.label ? ` ${inst.label}` : '';
     const reason = a.blocked.get(inst);
     if (reason) {
-      lines.push(`Could not decrypt c${tag}: ${reason}`);
+      lines.push(T('note.cannotDecrypt', { tag, reason }));
     } else if (inst.e === undefined) {
-      lines.push(
-        `Could not decrypt c${tag}: the public exponent e is missing (add "e = 65537" or similar).`,
-      );
+      lines.push(T('note.missingE', { tag }));
     } else if (!complete(m)) {
       if (seenMods.has(m)) continue;
       seenMods.add(m);
       const secs = (a.budgetMs / 1000).toFixed(1);
       lines.push(
-        `n${m.tag ? ` ${m.tag}` : ''} (${bitsOf(m.n)}) could not be factored in ${secs} s ` +
-          `(tried ${m.tried.join(', ') || 'nothing'}). Missing: p and q, or φ(n), or d, or dp/dq. ` +
-          'Try factordb.com manually (this tool never goes online) or yafu / msieve / CADO-NFS; ' +
-          'RsaCtfTool has more attacks. Extra ciphertexts help too: several n with the same small e ' +
-          '(Håstad), a repeated n with another e (common modulus), or moduli sharing a prime.',
+        T('note.notFactored', {
+          tag: m.tag ? ` ${m.tag}` : '',
+          bits: bitsOf(m.n),
+          secs,
+          tried: m.tried.join(', ') || T('value.nothing'),
+        }),
       );
     }
   }
@@ -809,9 +801,7 @@ function failureNotes(a: Analysis): Output[] {
     out.push({
       type: 'note',
       level: found ? 'info' : 'warn',
-      text: found
-        ? 'No ciphertext c given: only the key material was recovered.'
-        : 'No ciphertext c given and n could not be broken. Add c to decrypt once the key is known.',
+      text: found ? T('note.keyOnly') : T('note.nothingBroken'),
     });
   }
   return out;
@@ -824,7 +814,11 @@ export function render(a: Analysis, warnings: string[]): Output[] {
     out.push({
       type: 'note',
       level: 'success',
-      text: `Decrypted ${a.solved.size} of ${a.insts.filter((i) => i.c !== undefined).length} ciphertext(s) with: ${methods.join('; ')}.`,
+      text: T('note.decrypted', {
+        solved: a.solved.size,
+        count: a.insts.filter((i) => i.c !== undefined).length,
+        methods: methods.join('; '),
+      }),
     });
   }
   const groups = new Map<string, { insts: Inst[]; plain: Plain }>();
@@ -845,9 +839,14 @@ export function render(a: Analysis, warnings: string[]): Output[] {
   if (a.attempts.length > 0) {
     out.push({
       type: 'table',
-      label: 'Attacks tried, in order',
-      columns: ['Attack', 'Target', 'Result', 'Details'],
-      rows: a.attempts.map((t) => [t.attack, t.target, t.status, t.detail]),
+      label: T('label.attacks'),
+      columns: [T('col.attack'), T('col.target'), T('col.result'), T('col.details')],
+      rows: a.attempts.map((t) => [
+        methodName(t.attack),
+        t.target,
+        STATUS_NAMES[t.status](),
+        t.detail,
+      ]),
       highlight: a.attempts.flatMap((t, i) => (t.status === 'worked' ? [i] : [])),
     });
   }
@@ -938,12 +937,11 @@ export default defineTool({
       );
     if (!hasN) return null;
     return hasOther
-      ? { score: 0.9, reason: 'RSA parameters (n, e, c…)' }
-      : { score: 0.55, reason: 'A modulus n' };
+      ? { score: 0.9, reason: T('detect.params') }
+      : { score: 0.55, reason: T('detect.modulus') };
   },
   run(text, { budget }) {
-    if (!text.trim())
-      throw new ToolError('Paste RSA parameters, one per line: n = …, e = …, c = ….');
+    if (!text.trim()) throw new ToolError(T('error.empty'));
     const { insts, warnings } = parseInput(text);
     return render(analyze(insts, Math.round(budget * 1000)), warnings);
   },

@@ -1,5 +1,6 @@
 import { bool, defineTool, number, text, toggle } from '../../core/define';
 import { ToolError } from '../../core/errors';
+import { toolT } from '../../i18n/tool-text';
 import {
   averageColumnIoc,
   chiSquaredCounts,
@@ -14,6 +15,8 @@ import {
   preview,
 } from './_classical';
 import { rankScore } from './_fitness';
+
+const T = toolT('vigenere');
 
 export type Variant = 'vigenere' | 'beaufort' | 'autokey';
 
@@ -32,7 +35,7 @@ export function vigenereTransform(
   decrypt: boolean,
   advanceOnLettersOnly = true,
 ): string {
-  if (!key.length) throw new ToolError('The key is empty: give at least one letter.');
+  if (!key.length) throw new ToolError(T('error.emptyKey'));
   const stream = [...key]; // autokey: primer + plaintext so far
   let letterPos = 0;
   let pos = 0;
@@ -165,11 +168,13 @@ export function crackVigenere(
   return { candidates, limit };
 }
 
-const VARIANT_NAMES: Record<Variant, string> = {
-  vigenere: 'Vigenère',
-  beaufort: 'Beaufort',
-  autokey: 'Autokey',
-};
+/** Display name of a variant (cipher names have their usual spelling in each language). */
+const variantName = (variant: Variant): string =>
+  ({
+    vigenere: T('value.vigenere'),
+    beaufort: T('value.beaufort'),
+    autokey: T('value.autokey'),
+  })[variant];
 
 export default defineTool({
   id: 'vigenere',
@@ -241,13 +246,11 @@ export default defineTool({
     },
   ],
   run(input, { mode, variant, key, maxLen, lettersOnly: advance }) {
-    if (!/[A-Za-z]/.test(input)) throw new ToolError('Paste some text with letters (A-Z).');
+    if (!/[A-Za-z]/.test(input)) throw new ToolError(T('error.noLetters'));
     if (mode === 'crack') {
       const letters = lettersOnly(input);
       if (letters.length < 20) {
-        throw new ToolError(
-          `Only ${letters.length} letters: cracking needs a longer ciphertext (about 10 letters per key letter).`,
-        );
+        throw new ToolError(T('error.tooShort', { count: letters.length }));
       }
       const { candidates, limit } = crackVigenere(input, variant, maxLen, advance);
       const best = candidates[0]!;
@@ -255,13 +258,17 @@ export default defineTool({
       return [
         {
           type: 'text',
-          label: `Best guess · ${VARIANT_NAMES[variant]} key ${best.key} (length ${best.length})`,
+          label: T('label.best', {
+            variant: variantName(variant),
+            key: best.key,
+            length: best.length,
+          }),
           value: best.text,
         },
         {
           type: 'table',
-          label: `Key lengths 1–${limit}, ranked by how English the result is`,
-          columns: ['Length', 'Key', 'Avg IoC', 'Score', 'Result'],
+          label: T('label.lengths', { max: limit }),
+          columns: [T('col.length'), T('col.key'), T('col.ioc'), T('col.score'), T('col.result')],
           rows: candidates
             .slice(0, 12)
             .map((c) => [c.length, c.key, c.ioc.toFixed(3), c.score.toFixed(1), preview(c.text)]),
@@ -270,15 +277,15 @@ export default defineTool({
         {
           type: 'note',
           level: 'info',
-          text:
-            (hint.length
-              ? `Kasiski: repeated trigrams are most often a multiple of ${hint.map((h) => `${h.length} (${h.votes}×)`).join(', ')}. `
-              : 'Kasiski: no repeated trigrams, the text is short or the key is long. ') +
-            'Average IoC near 0.066 means the columns are single-alphabet English (the right length); near 0.04 means the wrong length.',
+          text: hint.length
+            ? T('note.kasiski', {
+                lengths: hint.map((h) => `${h.length} (${h.votes}×)`).join(', '),
+              })
+            : T('note.noKasiski'),
         },
       ];
     }
-    const k = parseLetterKey(key, 'key (or switch to Crack)');
+    const k = parseLetterKey(key, T('error.keyOrCrack'));
     return [
       { type: 'text', value: vigenereTransform(input, k, variant, mode === 'decrypt', advance) },
     ];

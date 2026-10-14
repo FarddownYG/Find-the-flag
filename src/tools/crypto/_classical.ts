@@ -1,6 +1,10 @@
 import { ToolError } from '../../core/errors';
+import { toolT } from '../../i18n/tool-text';
 
 /** Helpers shared by the classical-cipher tools in this folder (not a tool itself). */
+
+/** Only the Vigenère tool parses letter keys, so its error text lives in that namespace. */
+const T = toolT('vigenere');
 
 export const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 
@@ -26,14 +30,14 @@ export function lettersOnly(text: string): string {
   return text.replace(/[^A-Za-z]/g, '').toUpperCase();
 }
 
-/** Key text -> letter values 0..25 (non-letters ignored). */
-export function parseLetterKey(key: string, what = 'key'): number[] {
+/** Key text -> letter values 0..25 (non-letters ignored); `error` is thrown when it has none. */
+export function parseLetterKey(key: string, error = T('error.keyLetters')): number[] {
   const out: number[] = [];
   for (const ch of key) {
     const i = letterIndex(ch);
     if (i >= 0) out.push(i);
   }
-  if (!out.length) throw new ToolError(`Enter the ${what}: it needs at least one letter (A-Z).`);
+  if (!out.length) throw new ToolError(error);
   return out;
 }
 

@@ -1,7 +1,10 @@
 import { bool, defineTool, number } from '../../core/define';
 import { ToolError } from '../../core/errors';
+import { toolT } from '../../i18n/tool-text';
 import { chiSquared, indexOfCoincidence } from '../../lib/english';
 import { ALPHABET, ENGLISH_FREQ, averageColumnIoc, letterCounts } from './_classical';
+
+const T = toolT('frequency');
 
 const ENGLISH_ORDER = 'ETAOINSHRDLCUMWFGYPBVKJXQZ';
 const COMMON_BIGRAMS = 'TH HE IN ER AN RE ON AT EN ND TI ES OR TE OF ED IS IT AL AR ST TO NT NG';
@@ -35,7 +38,8 @@ export function analyse(text: string): FrequencyReport {
     const top = Math.max(...iocs);
     if (top >= 0.052) keyLength = iocs.findIndex((v) => v >= top - 0.008) + 2;
   }
-  const short = n < 40 ? ` Only ${n} letters: treat this as a hint, not a measurement.` : '';
+  // Appended sentences carry their own leading separator (none in Chinese).
+  const short = n < 40 ? T('verdict.short', { count: n }) : '';
   if (ioc >= 0.058) {
     if (chi < 45 || chi / n < 1.2) {
       return {
@@ -45,10 +49,7 @@ export function analyse(text: string): FrequencyReport {
         keyLength,
         verdict: {
           level: 'success',
-          text:
-            'Verdict: IoC ≈ 0.066 and the letter frequencies already look like English. This is plain English or a ' +
-            'transposition (rail fence, columnar, reverse): the letters are the right ones, only their order may be scrambled.' +
-            short,
+          text: T('verdict.plain') + short,
         },
       };
     }
@@ -59,10 +60,7 @@ export function analyse(text: string): FrequencyReport {
       keyLength,
       verdict: {
         level: 'success',
-        text:
-          'Verdict: IoC ≈ 0.066 but the frequencies are not English. This is a monoalphabetic substitution ' +
-          '(Caesar/ROT, Atbash, Affine or a general substitution): one cipher letter always stands for the same plain letter.' +
-          short,
+        text: T('verdict.mono') + short,
       },
     };
   }
@@ -74,10 +72,7 @@ export function analyse(text: string): FrequencyReport {
       keyLength,
       verdict: {
         level: 'info',
-        text:
-          'Verdict: IoC between English (0.066) and random (0.038). Could be a short or mixed-language text, ' +
-          'or a polyalphabetic cipher with a very short key (2 or 3 letters).' +
-          short,
+        text: T('verdict.between') + short,
       },
     };
   }
@@ -90,9 +85,8 @@ export function analyse(text: string): FrequencyReport {
       verdict: {
         level: 'warn',
         text:
-          'Verdict: IoC ≈ 0.038–0.047, a flat distribution. This is polyalphabetic (Vigenère-like: Vigenère, Beaufort, Autokey) ' +
-          'or not English at all.' +
-          (keyLength ? ` The columns look like English for a key length of ${keyLength}.` : '') +
+          T('verdict.poly') +
+          (keyLength ? T('verdict.keyLength', { length: keyLength }) : '') +
           short,
       },
     };
@@ -104,10 +98,7 @@ export function analyse(text: string): FrequencyReport {
     keyLength,
     verdict: {
       level: 'warn',
-      text:
-        'Verdict: IoC is lower than random letters would give. This is probably not a letter cipher at all ' +
-        '(try the encodings: Base64/32/58, hex), or the text is too short.' +
-        short,
+      text: T('verdict.random') + short,
     },
   };
 }
@@ -184,7 +175,7 @@ export default defineTool({
   ],
   run(text, { top, across }) {
     const wordsRaw = text.toUpperCase().match(/[A-Z]+/g) ?? [];
-    if (!wordsRaw.length) throw new ToolError('No letters found: paste some ciphertext (A-Z).');
+    if (!wordsRaw.length) throw new ToolError(T('error.noLetters'));
     const words = across ? [wordsRaw.join('')] : wordsRaw;
     const counts = letterCounts(text);
     const total = counts.reduce((a, b) => a + b, 0);
@@ -210,16 +201,16 @@ export default defineTool({
       },
       {
         type: 'kv',
-        label: 'Summary',
+        label: T('label.summary'),
         entries: [
-          ['Letters', String(total)],
-          ['Distinct letters', String(counts.filter((c) => c > 0).length)],
-          ['Index of coincidence', `${report.ioc.toFixed(4)} (English 0.066, random 0.038)`],
-          ['Chi-squared vs English', Number.isFinite(report.chi) ? report.chi.toFixed(1) : 'n/a'],
-          ['Cipher order', ranked.map((r) => r.letter).join('')],
-          ['English order', ENGLISH_ORDER],
+          [T('kv.letters'), String(total)],
+          [T('kv.distinct'), String(counts.filter((c) => c > 0).length)],
+          [T('kv.ioc'), T('value.ioc', { ioc: report.ioc.toFixed(4) })],
+          [T('kv.chi'), Number.isFinite(report.chi) ? report.chi.toFixed(1) : T('value.na')],
+          [T('kv.cipherOrder'), ranked.map((r) => r.letter).join('')],
+          [T('kv.englishOrder'), ENGLISH_ORDER],
           ...(report.keyLength
-            ? ([['Likely key length', `${report.keyLength} (if Vigenère-like)`]] as [
+            ? ([[T('kv.keyLength'), T('value.keyLength', { length: report.keyLength })]] as [
                 string,
                 string,
               ][])
@@ -228,8 +219,8 @@ export default defineTool({
       },
       {
         type: 'table',
-        label: 'Letter frequencies',
-        columns: ['Letter', 'Count', '%', 'English %', 'Δ'],
+        label: T('label.letters'),
+        columns: [T('col.letter'), T('col.count'), '%', T('col.englishPct'), 'Δ'],
         rows: ranked.map((r) => {
           const p = (r.count / total) * 100;
           const d = p - r.expected;
@@ -244,20 +235,20 @@ export default defineTool({
       },
       {
         type: 'table',
-        label: `Top bigrams (English: ${COMMON_BIGRAMS})`,
-        columns: ['Bigram', 'Count', '%'],
+        label: T('label.bigrams', { list: COMMON_BIGRAMS }),
+        columns: [T('col.bigram'), T('col.count'), '%'],
         rows: ngramRows(topNgrams(words, 2, top), 2),
       },
       {
         type: 'table',
-        label: `Top trigrams (English: ${COMMON_TRIGRAMS})`,
-        columns: ['Trigram', 'Count', '%'],
+        label: T('label.trigrams', { list: COMMON_TRIGRAMS }),
+        columns: [T('col.trigram'), T('col.count'), '%'],
         rows: ngramRows(topNgrams(words, 3, top), 3),
       },
       {
         type: 'table',
-        label: `Doubled letters (English: ${COMMON_DOUBLES})`,
-        columns: ['Pair', 'Count', '%'],
+        label: T('label.doubles', { list: COMMON_DOUBLES }),
+        columns: [T('col.pair'), T('col.count'), '%'],
         rows: ngramRows(doubles(words, top), 2),
       },
     ];

@@ -1,4 +1,7 @@
 import { bool, defineTool } from '../../core/define';
+import { toolT } from '../../i18n/tool-text';
+
+const T = toolT('atbash');
 
 /** Mirror the alphabet (A↔Z, b↔y); optionally the digits too (0↔9). Case is kept. */
 export function atbash(text: string, digits = false): string {
@@ -48,7 +51,7 @@ export default defineTool({
     const t = text?.trim() ?? '';
     if (t.length < 6 || !/^[a-z0-9_]+\{[^}]+\}$/i.test(t)) return null;
     return atbash(t).toLowerCase().startsWith('flag{')
-      ? { score: 0.85, reason: 'Mirrored alphabet turns it into flag{…}' }
+      ? { score: 0.85, reason: T('detect.flag') }
       : null;
   },
   run(text, { digits }) {

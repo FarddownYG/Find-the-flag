@@ -1,9 +1,12 @@
 import { bool, defineTool, number, text, toggle } from '../../core/define';
 import { ToolError } from '../../core/errors';
+import { toolT } from '../../i18n/tool-text';
 import { plaintextScore } from '../../lib/english';
 import { fromHex, latin1Decode, toHex, utf8Encode } from '../../lib/bytes';
 import { ENGLISH_FREQ, minimalPeriod, preview } from './_classical';
 import { rankScore } from './_fitness';
+
+const T = toolT('xor');
 
 /** How many bytes are looked at when ranking candidate keys (keeps big files fast). */
 const SAMPLE = 8192;
@@ -18,11 +21,11 @@ export function xorBytes(data: Uint8Array, key: ArrayLike<number>): Uint8Array {
 
 /** Key text -> bytes. Formats: plain text (UTF-8), hex, or a list of decimal byte values. */
 export function parseKey(key: string, format: 'text' | 'hex' | 'decimal'): Uint8Array {
-  if (!key.trim()) throw new ToolError('Enter the key (or switch to a cracking mode).');
+  if (!key.trim()) throw new ToolError(T('error.noKey'));
   if (format === 'text') return utf8Encode(key);
   if (format === 'hex') {
     const bytes = fromHex(key);
-    if (!bytes.length) throw new ToolError('The hex key is empty.');
+    if (!bytes.length) throw new ToolError(T('error.emptyHex'));
     return bytes;
   }
   const parts = key.trim().split(/[\s,;]+/);
@@ -30,9 +33,7 @@ export function parseKey(key: string, format: 'text' | 'hex' | 'decimal'): Uint8
     parts.map((p) => {
       const n = /^\d+$/.test(p) ? Number(p) : NaN;
       if (!(n >= 0 && n <= 255)) {
-        throw new ToolError(
-          `"${p}" is not a byte: use decimal values from 0 to 255, e.g. 107 51 121.`,
-        );
+        throw new ToolError(T('error.notByte', { value: p }));
       }
       return n;
     }),
@@ -88,14 +89,16 @@ function visible(b: Uint8Array, max = 60): string {
 }
 
 function keyText(key: Uint8Array): string {
-  return key.every((c) => c >= 0x20 && c < 0x7f) ? `"${latin1Decode(key)}"` : '(not printable)';
+  return key.every((c) => c >= 0x20 && c < 0x7f)
+    ? `"${latin1Decode(key)}"`
+    : T('value.notPrintable');
 }
 
 function keyEntries(key: Uint8Array): [string, string][] {
   return [
-    ['Key (text)', keyText(key)],
-    ['Key (hex)', toHex(key)],
-    ['Key length', `${key.length} byte${key.length === 1 ? '' : 's'}`],
+    [T('kv.keyText'), keyText(key)],
+    [T('kv.keyHex'), toHex(key)],
+    [T('kv.keyLength'), T('value.bytes', { count: key.length })],
   ];
 }
 
@@ -260,7 +263,7 @@ export function knownPlaintextAnywhere(
 }
 
 export function parseKnown(known: string): Uint8Array {
-  if (!known) throw new ToolError('Enter the known plaintext, for example flag{');
+  if (!known) throw new ToolError(T('error.noKnown'));
   return /^hex:/i.test(known) ? fromHex(known.slice(4)) : utf8Encode(known);
 }
 
@@ -357,7 +360,7 @@ export default defineTool({
     },
   ],
   run({ bytes }, { mode, keyFormat, key, maxLen, known, offset, everyOffset }) {
-    if (!bytes.length) throw new ToolError('No data: paste the ciphertext or open a file.');
+    if (!bytes.length) throw new ToolError(T('error.noData'));
 
     if (mode === 'key') {
       const k = parseKey(key, keyFormat);
@@ -371,14 +374,14 @@ export default defineTool({
       return [
         {
           type: 'bytes',
-          label: `Best guess · key 0x${toHex(Uint8Array.of(best.key))}`,
+          label: T('label.bestByte', { hex: toHex(Uint8Array.of(best.key)) }),
           value: xorBytes(bytes, [best.key]),
           filename: `xor-${toHex(Uint8Array.of(best.key))}.bin`,
         },
         {
           type: 'table',
-          label: 'Top 20 of 256 keys, most readable first',
-          columns: ['Key', 'Char', 'Score', 'Preview'],
+          label: T('label.top'),
+          columns: [T('col.key'), T('col.char'), T('col.score'), T('col.preview')],
           rows: ranked
             .slice(0, 20)
             .map((r) => [
@@ -393,25 +396,28 @@ export default defineTool({
     }
 
     if (mode === 'crack') {
-      if (bytes.length < 8)
-        throw new ToolError(
-          'Too little data: cracking a repeating key needs at least a few dozen bytes.',
-        );
+      if (bytes.length < 8) throw new ToolError(T('error.tooLittle'));
       const { candidates, lengths } = crackRepeatingKey(bytes, maxLen);
       const best = candidates[0]!;
       return [
         {
           type: 'bytes',
-          label: `Best guess · key ${keyText(best.key)} (${best.key.length} byte${best.key.length === 1 ? '' : 's'})`,
+          label: T('label.bestCrack', { key: keyText(best.key), count: best.key.length }),
           value: xorBytes(bytes, best.key),
           filename: 'xor-cracked.bin',
         },
-        { type: 'kv', label: 'Recovered key', entries: keyEntries(best.key) },
+        { type: 'kv', label: T('label.recovered'), entries: keyEntries(best.key) },
         {
           type: 'table',
-          label:
-            'Likeliest key lengths (normalised Hamming distance, lower is better), solved column by column',
-          columns: ['Length', 'Distance', 'Key (text)', 'Key (hex)', 'Score', 'Preview'],
+          label: T('label.lengths'),
+          columns: [
+            T('col.length'),
+            T('col.distance'),
+            T('kv.keyText'),
+            T('kv.keyHex'),
+            T('col.score'),
+            T('col.preview'),
+          ],
           rows: candidates.map((c) => [
             c.key.length,
             c.extra.toFixed(3),
@@ -425,55 +431,57 @@ export default defineTool({
         {
           type: 'note',
           level: 'info',
-          text: `Other key lengths by distance: ${lengths
-            .slice(0, 8)
-            .map((l) => `${l.length} (${l.distance.toFixed(2)})`)
-            .join(
-              ', ',
-            )}. The data should be text-like once decrypted; very short inputs make the statistics unreliable.`,
+          text: T('note.otherLengths', {
+            lengths: lengths
+              .slice(0, 8)
+              .map((l) => `${l.length} (${l.distance.toFixed(2)})`)
+              .join(', '),
+          }),
         },
       ];
     }
 
     // known plaintext
     const crib = parseKnown(known);
-    if (crib.length > bytes.length)
-      throw new ToolError('The known plaintext is longer than the data.');
+    if (crib.length > bytes.length) throw new ToolError(T('error.cribTooLong'));
     let candidates: KeyCandidate[];
     if (everyOffset) {
       candidates = knownPlaintextAnywhere(bytes, crib, maxLen);
     } else {
       if (offset + crib.length > bytes.length) {
-        throw new ToolError(
-          `Offset ${offset} + ${crib.length} known bytes goes past the end of the data (${bytes.length} bytes).`,
-        );
+        throw new ToolError(T('error.pastEnd', { offset, known: crib.length, size: bytes.length }));
       }
       candidates = knownPlaintextAt(bytes, crib, offset, maxLen);
     }
     if (!candidates.length) {
-      throw new ToolError(
-        everyOffset
-          ? 'No offset gives a repeating key shorter than the known text. Use a longer known text, or try Crack repeating key.'
-          : 'The known text is not consistent with any repeating key up to that length. Check the offset and the text, or raise the maximum key length.',
-      );
+      throw new ToolError(everyOffset ? T('error.noOffset') : T('error.inconsistent'));
     }
     const best = candidates[0]!;
     return [
       {
         type: 'bytes',
-        label: `Best guess · key ${keyText(best.key)}${everyOffset ? `, known text at offset ${best.extra}` : ''}`,
+        label: everyOffset
+          ? T('label.bestKnownAt', { key: keyText(best.key), offset: best.extra })
+          : T('label.bestKnown', { key: keyText(best.key) }),
         value: xorBytes(bytes, best.key),
         filename: 'xor-known.bin',
       },
       {
         type: 'kv',
-        label: 'Derived key',
-        entries: [...keyEntries(best.key), ['Offset', String(best.extra)]],
+        label: T('label.derived'),
+        entries: [...keyEntries(best.key), [T('kv.offset'), String(best.extra)]],
       },
       {
         type: 'table',
-        label: 'Candidates',
-        columns: ['Offset', 'Length', 'Key (text)', 'Key (hex)', 'Score', 'Preview'],
+        label: T('label.candidates'),
+        columns: [
+          T('kv.offset'),
+          T('col.length'),
+          T('kv.keyText'),
+          T('kv.keyHex'),
+          T('col.score'),
+          T('col.preview'),
+        ],
         rows: candidates
           .slice(0, 12)
           .map((c) => [

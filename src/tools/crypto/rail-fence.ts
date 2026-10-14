@@ -1,7 +1,10 @@
 import { defineTool, number, toggle } from '../../core/define';
 import { ToolError } from '../../core/errors';
+import { toolT } from '../../i18n/tool-text';
 import { preview } from './_classical';
 import { rankScore } from './_fitness';
+
+const T = toolT('rail-fence');
 
 /** Rail (0-based) of every position of a zigzag with `rails` rails, starting `offset` steps in. */
 function railPattern(length: number, rails: number, offset: number): number[] {
@@ -23,10 +26,10 @@ function railOrder(length: number, rails: number, offset: number): number[] {
 
 function checkParams(rails: number, offset: number): void {
   if (!Number.isInteger(rails) || rails < 2) {
-    throw new ToolError('Rails must be a whole number of at least 2.');
+    throw new ToolError(T('error.rails'));
   }
   if (!Number.isInteger(offset) || offset < 0) {
-    throw new ToolError('Offset must be a whole number of 0 or more.');
+    throw new ToolError(T('error.offset'));
   }
 }
 
@@ -95,7 +98,7 @@ export default defineTool({
     if (mode === 'decrypt') return [{ type: 'text', value: railFenceDecrypt(text, rails, offset) }];
     if (mode === 'encrypt') return [{ type: 'text', value: railFenceEncrypt(text, rails, offset) }];
     const len = [...text].length;
-    if (len < 4) throw new ToolError('Need at least 4 characters to brute-force a rail fence.');
+    if (len < 4) throw new ToolError(T('error.short'));
     const rows: { rails: number; offset: number; out: string; score: number }[] = [];
     const seen = new Set<string>();
     const maxRails = Math.min(20, len);
@@ -114,13 +117,13 @@ export default defineTool({
     return [
       {
         type: 'text',
-        label: `Best guess · ${best.rails} rails, offset ${best.offset}`,
+        label: T('label.best', { count: best.rails, offset: best.offset }),
         value: best.out,
       },
       {
         type: 'table',
-        label: `Rails 2–${maxRails} × every offset, most readable first (top 30 of ${ranked.length})`,
-        columns: ['Rails', 'Offset', 'Score', 'Result'],
+        label: T('label.all', { max: maxRails, total: ranked.length }),
+        columns: [T('col.rails'), T('col.offset'), T('col.score'), T('col.result')],
         rows: ranked
           .slice(0, 30)
           .map((r) => [r.rails, r.offset, r.score.toFixed(1), preview(r.out, 120)]),

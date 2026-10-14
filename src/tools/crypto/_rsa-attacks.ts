@@ -1,3 +1,4 @@
+import { toolT } from '../../i18n/tool-text';
 import {
   crt,
   egcd,
@@ -10,6 +11,9 @@ import {
   sievePrimes,
   sqrtModPrime,
 } from './_bigint';
+
+/** Failure reasons are shown in the RSA toolkit's "Attacks tried" table. */
+const T = toolT('rsa');
 
 /** Textbook attacks on RSA parameters. Each one is a pure function that verifies its own result. */
 
@@ -134,14 +138,14 @@ export function commonModulus(
   const i2 = b < 0n ? modInv(c2, n) : c2;
   if (i1 === null || i2 === null) {
     const factor = gcd(i1 === null ? c1 : c2, n);
-    return { ok: false, reason: 'a ciphertext is not invertible mod n', factor };
+    return { ok: false, reason: T('reason.notInvertible'), factor };
   }
   const mg = (modPow(i1, a < 0n ? -a : a, n) * modPow(i2, b < 0n ? -b : b, n)) % n;
   if (g === 1n) return { ok: true, m: mg };
-  if (g > 4096n) return { ok: false, reason: `gcd(e1, e2) = ${g} is too large to take a root` };
+  if (g > 4096n) return { ok: false, reason: T('reason.gcdTooLarge', { g: String(g) }) };
   const m = exactRoot(mg, Number(g));
   return m === null
-    ? { ok: false, reason: `gcd(e1, e2) = ${g} and m^${g} >= n, so no integer root` }
+    ? { ok: false, reason: T('reason.noIntegerRoot', { g: String(g) }) }
     : { ok: true, m };
 }
 

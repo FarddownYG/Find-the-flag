@@ -1,7 +1,10 @@
 import { bool, defineTool, text, toggle } from '../../core/define';
 import { ToolError } from '../../core/errors';
+import { toolT } from '../../i18n/tool-text';
 import { ALPHABET, flagForm, preview } from './_classical';
 import { rankScore } from './_fitness';
+
+const T = toolT('bacon');
 
 export type BaconVariant = '24' | '26';
 
@@ -52,8 +55,10 @@ export function extractSymbols(input: string): { stream: string[]; symbols: stri
   }
   const seen = [...new Set(input.replace(/\s+/g, ''))].sort();
   throw new ToolError(
-    `Found ${seen.length} different symbols (${seen.slice(0, 8).join(' ')}${seen.length > 8 ? ' …' : ''}); Bacon uses exactly two. ` +
-      'Remove the other characters, or use the Letter case mode if the A/B is carried by upper/lower case.',
+    T('error.symbols', {
+      count: seen.length,
+      symbols: `${seen.slice(0, 8).join(' ')}${seen.length > 8 ? ' …' : ''}`,
+    }),
   );
 }
 
@@ -113,23 +118,23 @@ function describe(
     notes.push({
       type: 'note',
       level: 'info',
-      text: `The ${other.variant}-letter variant reads much better (${other.text}). Switch the Alphabet option.`,
+      text: T('note.otherVariant', { variant: other.variant, text: other.text }),
     });
   }
   const flag = flagForm(best.text);
   return [
     {
       type: 'text' as const,
-      label: `Best guess · ${best.variant}-letter, A=${sym(best.zero)} B=${sym(best.one)}`,
+      label: T('label.best', { variant: best.variant, a: sym(best.zero), b: sym(best.one) }),
       value: best.text,
     },
-    ...(flag ? [{ type: 'text' as const, label: 'Flag form', value: flag }] : []),
+    ...(flag ? [{ type: 'text' as const, label: T('label.flag'), value: flag }] : []),
     {
       type: 'table' as const,
-      label: 'Every reading, most English first (I may be J, U may be V)',
-      columns: ['Alphabet', 'A', 'B', 'Score', 'Result'],
+      label: T('label.readings'),
+      columns: [T('col.alphabet'), 'A', 'B', T('col.score'), T('col.result')],
       rows: ranked.map((c) => [
-        `${c.variant}-letter`,
+        T('value.variant', { variant: c.variant }),
         sym(c.zero),
         sym(c.one),
         c.score.toFixed(1),
@@ -204,20 +209,18 @@ export default defineTool({
   detect({ text: t }) {
     const s = t?.replace(/\s+/g, '') ?? '';
     if (s.length < 15 || s.length % 5 !== 0 || !/^[AB]+$/i.test(s)) return null;
-    return /^[AB]+$/.test(s) || /^[ab]+$/.test(s)
-      ? { score: 0.8, reason: 'Only A and B, length a multiple of 5' }
-      : null;
+    return /^[AB]+$/.test(s) || /^[ab]+$/.test(s) ? { score: 0.8, reason: T('detect.ab') } : null;
   },
   run(input, { mode, variant, symbols, grouped }) {
-    if (!input.trim()) throw new ToolError('Paste the Bacon ciphertext (or text to encode).');
+    if (!input.trim()) throw new ToolError(T('error.empty'));
 
     if (mode === 'encode') {
       const syms = [...symbols];
       if (syms.length !== 2 || syms[0] === syms[1]) {
-        throw new ToolError('Symbols must be two different characters, for example AB or 01.');
+        throw new ToolError(T('error.symbolsOption'));
       }
       const bits = baconEncodeBits(input, variant);
-      if (!bits) throw new ToolError('Nothing to encode: the text has no letters (A-Z).');
+      if (!bits) throw new ToolError(T('error.noLetters'));
       const skipped = [...input].filter((c) => /[^A-Za-z\s]/.test(c)).length;
       const mapped = [...bits].map((b) => (b === '0' ? syms[0]! : syms[1]!));
       const groups: string[] = [];
@@ -229,7 +232,7 @@ export default defineTool({
               {
                 type: 'note' as const,
                 level: 'info' as const,
-                text: `${skipped} digit/punctuation character(s) were skipped: Bacon only encodes letters.`,
+                text: T('note.skipped', { count: skipped }),
               },
             ]
           : []),
@@ -242,9 +245,7 @@ export default defineTool({
     if (mode === 'case') {
       const letters = [...input].filter((c) => /[A-Za-z]/.test(c));
       if (letters.length < 5) {
-        throw new ToolError(
-          'Need at least 5 letters: each hidden letter uses 5 letters of cover text.',
-        );
+        throw new ToolError(T('error.fewLetters'));
       }
       const stream = letters.map((c) => (c === c.toUpperCase() ? 'U' : 'l'));
       const ranked = rank(decodeCandidates(stream, ['U', 'l'], variants));
@@ -254,26 +255,20 @@ export default defineTool({
         best,
         ranked,
         variant,
-        leftover
-          ? [`${leftover} trailing letter(s) do not make a full group of 5 and were ignored.`]
-          : [],
-        (s) => (s === 'l' ? 'lowercase' : 'UPPERCASE'),
+        leftover ? [T('note.trailingLetters', { count: leftover })] : [],
+        (s) => (s === 'l' ? T('value.lowercase') : T('value.uppercase')),
       );
     }
 
     const { stream, symbols: found } = extractSymbols(input);
-    if (stream.length < 5) throw new ToolError('Need at least 5 symbols (one letter) to decode.');
+    if (stream.length < 5) throw new ToolError(T('error.fewSymbols'));
     const ranked = rank(decodeCandidates(stream, found, variants));
     const best = ranked.find((c) => c.variant === variant)!;
     return describe(
       best,
       ranked,
       variant,
-      stream.length % 5
-        ? [
-            `${stream.length % 5} trailing symbol(s) do not make a full group of 5 and were ignored.`,
-          ]
-        : [],
+      stream.length % 5 ? [T('note.trailingSymbols', { count: stream.length % 5 })] : [],
       (s) => s,
     );
   },

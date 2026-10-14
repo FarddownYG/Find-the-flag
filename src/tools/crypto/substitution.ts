@@ -1,8 +1,11 @@
 import { defineTool, text, toggle } from '../../core/define';
 import { ToolError } from '../../core/errors';
+import { toolT } from '../../i18n/tool-text';
 import { ALPHABET, letterIndex, letterLike } from './_classical';
 import { toCodes } from './_fitness';
 import { solveCodes } from './_substitution';
+
+const T = toolT('substitution');
 
 const MIN_LETTERS = 15;
 
@@ -13,19 +16,20 @@ const MIN_LETTERS = 15;
  */
 export function parseSubstitutionKey(key: string): number[] {
   const trimmed = key.trim();
-  if (!trimmed)
-    throw new ToolError('Enter the key: a 26-letter cipher alphabet or pairs like a=q, b=w.');
+  if (!trimmed) throw new ToolError(T('error.emptyKey'));
   const cipherOf = new Array<number>(26).fill(-1);
   const plainOf = new Array<number>(26).fill(-1);
   const set = (p: number, c: number, shown: string) => {
     if (cipherOf[p] !== -1 && cipherOf[p] !== c) {
-      throw new ToolError(
-        `Plain letter ${ALPHABET[p]} is given two different cipher letters (${shown}).`,
-      );
+      throw new ToolError(T('error.twoCipher', { letter: ALPHABET[p]!, detail: shown }));
     }
     if (plainOf[c] !== -1 && plainOf[c] !== p) {
       throw new ToolError(
-        `Cipher letter ${ALPHABET[c]} is used for two plain letters (${ALPHABET[plainOf[c]!]} and ${ALPHABET[p]}): a substitution maps each letter once.`,
+        T('error.twoPlain', {
+          letter: ALPHABET[c]!,
+          first: ALPHABET[plainOf[c]!]!,
+          second: ALPHABET[p]!,
+        }),
       );
     }
     cipherOf[p] = c;
@@ -36,7 +40,7 @@ export function parseSubstitutionKey(key: string): number[] {
   if (compact.length === 26 && /^[A-Za-z_?.*-]+$/.test(compact) && !/[=:>]/.test(trimmed)) {
     [...compact].forEach((ch, p) => {
       const c = letterIndex(ch);
-      if (c >= 0) set(p, c, `position ${p + 1}`);
+      if (c >= 0) set(p, c, T('value.position', { position: p + 1 }));
     });
     return cipherOf;
   }
@@ -45,9 +49,7 @@ export function parseSubstitutionKey(key: string): number[] {
   for (const pair of pairs) {
     const m = /^([A-Za-z])\s*(?:=|:|->|>)\s*([A-Za-z])$/.exec(pair);
     if (!m) {
-      throw new ToolError(
-        `"${pair}" is not a valid pair. Use 26 letters for the whole cipher alphabet, or pairs like a=q, b=w (plain=cipher).`,
-      );
+      throw new ToolError(T('error.badPair', { pair }));
     }
     set(letterIndex(m[1]!), letterIndex(m[2]!), pair);
   }
@@ -114,9 +116,7 @@ export interface AutoSolution {
 export function autoSolve(cipherText: string): AutoSolution {
   const codes = toCodes(cipherText);
   if (codes.length < MIN_LETTERS) {
-    throw new ToolError(
-      `Only ${codes.length} letters: a substitution cipher needs about 50-100 letters or more to be solved automatically. Use Key mode to test your own guesses.`,
-    );
+    throw new ToolError(T('error.tooShort', { count: codes.length }));
   }
   const solution = solveCodes(codes);
   const present = new Set(codes);
@@ -197,7 +197,7 @@ export default defineTool({
     },
   ],
   run(input, { mode, direction, key }) {
-    if (!/[A-Za-z]/.test(input)) throw new ToolError('Paste some ciphertext with letters (A-Z).');
+    if (!/[A-Za-z]/.test(input)) throw new ToolError(T('error.noLetters'));
     if (mode === 'key') {
       const cipherOf = parseSubstitutionKey(key);
       const { text: out, mapped, unknown } = substitutionApply(input, cipherOf, direction);
@@ -205,10 +205,10 @@ export default defineTool({
         { type: 'text', value: out },
         {
           type: 'kv',
-          label: 'Key',
+          label: T('label.key'),
           entries: [
-            ['Plain alphabet', ALPHABET.toLowerCase()],
-            ['Cipher alphabet', alphabetOf(cipherOf)],
+            [T('kv.plain'), ALPHABET.toLowerCase()],
+            [T('kv.cipher'), alphabetOf(cipherOf)],
           ],
         },
         ...(mapped < 26
@@ -216,12 +216,13 @@ export default defineTool({
               {
                 type: 'note' as const,
                 level: 'info' as const,
+                // The appended case legend carries its own leading separator (none in Chinese).
                 text:
-                  `${mapped} of 26 letters are in the key.` +
+                  T('note.mapped', { count: mapped }) +
                   (unknown
                     ? direction === 'decrypt'
-                      ? ' lowercase = decrypted, UPPERCASE = not in the key yet.'
-                      : ' UPPERCASE = encrypted, lowercase = not in the key.'
+                      ? T('note.caseDecrypt')
+                      : T('note.caseEncrypt')
                     : ''),
               },
             ]
@@ -231,30 +232,28 @@ export default defineTool({
     const sol = autoSolve(input);
     const reliable = sol.letters >= 100 && sol.fitness > -5.4;
     return [
-      { type: 'text', label: 'Best guess', value: sol.text },
+      { type: 'text', label: T('label.best'), value: sol.text },
       {
         type: 'kv',
-        label: 'Recovered key',
+        label: T('label.recovered'),
         entries: [
-          ['Plain alphabet', ALPHABET.toLowerCase()],
-          ['Cipher alphabet', alphabetOf(sol.cipherOf)],
-          ['Letters used', String(sol.letters)],
-          ['Fit', `${sol.fitness.toFixed(2)} per quadgram (English text is about -4.3)`],
+          [T('kv.plain'), ALPHABET.toLowerCase()],
+          [T('kv.cipher'), alphabetOf(sol.cipherOf)],
+          [T('kv.letters'), String(sol.letters)],
+          [T('kv.fit'), T('value.fit', { fit: sol.fitness.toFixed(2) })],
         ],
       },
       reliable
         ? {
             type: 'note',
             level: 'success',
-            text: 'The result reads like English. Copy the cipher alphabet into Key mode to apply it elsewhere.',
+            text: T('note.reliable'),
           }
         : {
             type: 'note',
             level: 'warn',
             text:
-              sol.letters < 100
-                ? `Only ${sol.letters} letters: short ciphertexts have several plausible solutions and some letters may be wrong. Fix them with Key mode (pairs like a=q).`
-                : 'The result does not read like English: the text may not be a simple substitution, or it is not English.',
+              sol.letters < 100 ? T('note.short', { count: sol.letters }) : T('note.notEnglish'),
           },
     ];
   },
