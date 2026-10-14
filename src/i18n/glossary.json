@@ -57,7 +57,8 @@
     "Auto-decode",
     "Strings",
     "hashcat",
-    "John the Ripper"
+    "John the Ripper",
+    "T9"
   ],
   "exempt": {
     "tool.file-type.description": ["flag"],
