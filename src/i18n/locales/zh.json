@@ -598,7 +598,7 @@
   "tool.binary-analyzer.kv.highRegions": "高熵区域",
   "tool.binary-analyzer.kv.inf": "+Inf / −Inf",
   "tool.binary-analyzer.kv.interleave": "交错方式",
-  "tool.binary-analyzer.kv.lowHigh": "最低 / 最高的块",
+  "tool.binary-analyzer.kv.lowHigh": "块熵最低 / 最高",
   "tool.binary-analyzer.kv.max": "最大值",
   "tool.binary-analyzer.kv.mean": "平均值",
   "tool.binary-analyzer.kv.min": "最小值",

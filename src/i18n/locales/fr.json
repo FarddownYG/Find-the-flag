@@ -624,7 +624,7 @@
   "tool.binary-analyzer.kv.highRegions": "Zones à forte entropie",
   "tool.binary-analyzer.kv.inf": "+Inf / −Inf",
   "tool.binary-analyzer.kv.interleave": "Entrelacement",
-  "tool.binary-analyzer.kv.lowHigh": "Bloc le plus bas / le plus haut",
+  "tool.binary-analyzer.kv.lowHigh": "Entropie de bloc min. / max.",
   "tool.binary-analyzer.kv.max": "Max",
   "tool.binary-analyzer.kv.mean": "Moyenne",
   "tool.binary-analyzer.kv.min": "Min",
