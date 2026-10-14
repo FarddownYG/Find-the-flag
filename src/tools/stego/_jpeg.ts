@@ -1,4 +1,8 @@
+import { toolT } from '../../i18n/tool-text';
 import { latin1Decode, u16be, utf8Decode } from '../../lib/bytes';
+
+/** Text shown by Image structure and Image analyzer: it lives under the image-structure keys. */
+const T = toolT('image-structure');
 
 export interface JpegSegment {
   index: number;
@@ -47,18 +51,21 @@ export function markerName(m: number): string {
   return `0x${m.toString(16).toUpperCase()}`;
 }
 
-export const SOF_DESCRIPTIONS: Record<number, string> = {
-  0xc0: 'baseline DCT',
-  0xc1: 'extended sequential DCT',
-  0xc2: 'progressive DCT',
-  0xc3: 'lossless',
-  0xc5: 'differential sequential DCT',
-  0xc6: 'differential progressive DCT',
-  0xc7: 'differential lossless',
-  0xc9: 'arithmetic sequential DCT',
-  0xca: 'arithmetic progressive DCT',
-  0xcb: 'arithmetic lossless',
+const SOF_DESCRIPTIONS: Record<number, () => string> = {
+  0xc0: () => T('sof.c0'),
+  0xc1: () => T('sof.c1'),
+  0xc2: () => T('sof.c2'),
+  0xc3: () => T('sof.c3'),
+  0xc5: () => T('sof.c5'),
+  0xc6: () => T('sof.c6'),
+  0xc7: () => T('sof.c7'),
+  0xc9: () => T('sof.c9'),
+  0xca: () => T('sof.ca'),
+  0xcb: () => T('sof.cb'),
 };
+
+/** Coding process of a start-of-frame marker ("baseline DCT"...), or undefined. */
+export const sofDescription = (marker: number): string | undefined => SOF_DESCRIPTIONS[marker]?.();
 
 export const isSof = (m: number) =>
   m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc;
@@ -100,7 +107,7 @@ export function parseJpeg(b: Uint8Array): JpegParse | null {
       ) {
         next++;
       }
-      problems.push(`${next - off} stray byte(s) at offset ${off} where a marker should be.`);
+      problems.push(T('problem.jpegStray', { count: next - off, offset: off }));
       if (next + 1 >= b.length) break;
       off = next;
     }
@@ -118,13 +125,13 @@ export function parseJpeg(b: Uint8Array): JpegParse | null {
       continue;
     }
     if (off + 4 > b.length) {
-      problems.push(`File ends inside the ${markerName(marker)} marker at offset ${off}.`);
+      problems.push(T('problem.jpegEnds', { marker: markerName(marker), offset: off }));
       break;
     }
     const length = u16be(b, off + 2);
     if (length < 2 || off + 2 + length > b.length) {
       problems.push(
-        `${markerName(marker)} segment at offset ${off} claims ${length} bytes but the file is shorter (truncated or corrupt length).`,
+        T('problem.jpegLength', { marker: markerName(marker), offset: off, count: length }),
       );
       push(off, marker, b.length - off, off + 4, Math.max(0, b.length - off - 4));
       break;
@@ -148,8 +155,7 @@ export function parseJpeg(b: Uint8Array): JpegParse | null {
     push(off, marker, 2 + length, off + 4, length - 2);
     off += 2 + length;
   }
-  if (end === null)
-    problems.push('No end-of-image marker (FFD9): the file is truncated or damaged.');
+  if (end === null) problems.push(T('problem.jpegNoEoi'));
   return { segments, end, problems };
 }
 

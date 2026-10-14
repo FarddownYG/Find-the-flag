@@ -1,6 +1,7 @@
 import { defineTool, number, text, toggle } from '../../core/define';
 import { ToolError } from '../../core/errors';
 import type { Output, RgbaImage } from '../../core/types';
+import { signatureName, toolT } from '../../i18n/tool-text';
 import { latin1Decode, printableRatio, toHex, u32be, u32le } from '../../lib/bytes';
 import { identify, type Signature } from '../../lib/signatures';
 import { imageFileEnd } from './_carve';
@@ -13,6 +14,8 @@ import {
   parseChannels,
   parsePlanes,
 } from './_lsb-core';
+
+const T = toolT('lsb');
 
 /** zsteg -a style search space. */
 const CHANNEL_ORDERS = ['r', 'g', 'b', 'a', 'rgb', 'bgr', 'rgba', 'abgr'];
@@ -46,6 +49,8 @@ interface Hit {
   /** Where the interesting data starts in the extracted stream. */
   start: number;
   sig?: Signature;
+  /** Length-prefixed hits: the length the prefix announces. */
+  length?: number;
 }
 
 const strongSignature = (b: Uint8Array): Signature | undefined =>
@@ -69,7 +74,7 @@ function classify(b: Uint8Array, params: LsbParams): Hit | null {
       kind: 'flag',
       params,
       score: (flagAt === 0 ? 10000 : 0) + run,
-      what: flagAt === 0 ? 'flag-like text' : `flag-like text at byte ${flagAt}`,
+      what: flagAt === 0 ? T('what.flag') : T('what.flagAt', { offset: flagAt }),
       preview: preview(b.subarray(flagAt)),
       start: flagAt,
     };
@@ -80,7 +85,7 @@ function classify(b: Uint8Array, params: LsbParams): Hit | null {
       kind: 'file',
       params,
       score: sig.magic.length,
-      what: `${sig.name} (magic bytes)`,
+      what: T('what.file', { name: signatureName(sig) }),
       preview: toHex(b.subarray(0, 12), ' '),
       start: 0,
       sig,
@@ -99,9 +104,10 @@ function classify(b: Uint8Array, params: LsbParams): Hit | null {
         kind: 'prefixed',
         params,
         score: Math.min(len, run),
-        what: `length-prefixed text (${le ? 'u32 LE' : 'u32 BE'}, ${len} bytes)`,
+        what: T('what.prefixed', { endian: le ? 'u32 LE' : 'u32 BE', count: len }),
         preview: preview(payload),
         start: 4,
+        length: len,
       };
     }
   }
@@ -111,7 +117,7 @@ function classify(b: Uint8Array, params: LsbParams): Hit | null {
       kind: 'text',
       params,
       score: run,
-      what: `text (${run} printable chars)`,
+      what: T('what.text', { count: run }),
       preview: preview(b),
       start: 0,
     };
@@ -125,7 +131,7 @@ function classify(b: Uint8Array, params: LsbParams): Hit | null {
         kind: 'inner',
         params,
         score: r,
-        what: `text at byte ${i} (${r} chars)`,
+        what: T('what.inner', { offset: i, count: r }),
         preview: preview(b.subarray(i)),
         start: i,
       };
@@ -171,8 +177,7 @@ function carve(full: Uint8Array, hit: Hit): { bytes: Uint8Array; filename: strin
     };
   }
   if (hit.kind === 'prefixed') {
-    const len = hit.what.match(/(\d+) bytes/);
-    const n = len ? Number(len[1]) : from.length;
+    const n = hit.length ?? from.length;
     return { bytes: from.subarray(0, Math.min(n, from.length)), filename: 'lsb-extract.txt' };
   }
   return { bytes: from.subarray(0, printableRun(from)), filename: 'lsb-extract.txt' };
@@ -260,7 +265,7 @@ export default defineTool({
     },
   ],
   run({ image }, o) {
-    if (!image.width || !image.height) throw new ToolError('The image has no pixels.');
+    if (!image.width || !image.height) throw new ToolError(T('error.noPixels'));
     const out: Output[] = [];
 
     if (o.mode === 'manual') {
@@ -271,27 +276,30 @@ export default defineTool({
         bitOrder: o.bitOrder,
       };
       if (!Number.isInteger(o.skip) || o.skip < 0) {
-        throw new ToolError('"Skip bytes" must be a whole number, 0 or more.');
+        throw new ToolError(T('error.skip'));
       }
       if (!Number.isInteger(o.limit) || o.limit < 0) {
-        throw new ToolError('"Max bytes" must be a whole number, 0 (everything) or more.');
+        throw new ToolError(T('error.limit'));
       }
       const full = extractBits(image, params, o.limit ? o.skip + o.limit : Infinity);
       const bytes = full.subarray(o.skip);
       if (!bytes.length) {
         throw new ToolError(
-          `Nothing left to read: the image holds ${capacityBytes(image, params)} bytes with these settings and you skipped ${o.skip}.`,
+          T('error.nothingLeft', { count: capacityBytes(image, params), skip: o.skip }),
         );
       }
       out.push({
         type: 'kv',
-        label: 'Extraction',
+        label: T('label.extraction'),
         entries: [
-          ['Channels', channelsToString(params.channels)],
-          ['Bit planes', fmtPlanes(params.planes)],
-          ['Pixel order', o.order === 'row' ? 'row by row' : 'column by column'],
-          ['Bit order', o.bitOrder === 'msb' ? 'MSB first' : 'LSB first'],
-          ['Bytes extracted', `${bytes.length} (capacity ${capacityBytes(image, params)})`],
+          [T('kv.channels'), channelsToString(params.channels)],
+          [T('kv.planes'), fmtPlanes(params.planes)],
+          [T('kv.pixelOrder'), o.order === 'row' ? T('value.rowByRow') : T('value.colByCol')],
+          [T('kv.bitOrder'), o.bitOrder === 'msb' ? T('value.msb') : T('value.lsb')],
+          [
+            T('kv.extracted'),
+            T('value.extracted', { n: bytes.length, capacity: capacityBytes(image, params) }),
+          ],
         ],
       });
       const sig = strongSignature(bytes);
@@ -299,15 +307,15 @@ export default defineTool({
         out.push({
           type: 'note',
           level: 'success',
-          text: `The data starts with ${sig.name} magic bytes: download it and open it as .${sig.ext}.`,
+          text: T('note.magic', { name: signatureName(sig), ext: sig.ext }),
         });
       }
       if (printableRatio(bytes.subarray(0, 512)) > 0.9) {
-        out.push({ type: 'note', level: 'info', text: 'The data is mostly readable text.' });
+        out.push({ type: 'note', level: 'info', text: T('note.readable') });
       }
       out.push({
         type: 'bytes',
-        label: 'Extracted bytes',
+        label: T('label.extracted'),
         value: bytes,
         filename: sig ? `lsb-extract.${sig.ext}` : 'lsb-extract.bin',
       });
@@ -318,21 +326,21 @@ export default defineTool({
     out.push({
       type: 'note',
       level: 'info',
-      text: `Scanned ${tried} combinations (channel order x bit planes x pixel order x bit order), first ${SCAN_BYTES / 1024} KiB of each.`,
+      text: T('note.scanned', { count: tried, kib: SCAN_BYTES / 1024 }),
     });
     const best = hits[0];
     if (!best) {
       out.push({
         type: 'note',
         level: 'warn',
-        text: 'No readable text, flag or file signature found. Try Manual mode (other bit planes, a start offset), look at the Bit planes tool, or check whether the image is lossy (JPEG) so the bits are gone.',
+        text: T('note.nothing'),
       });
       return out;
     }
     out.push({
       type: 'table',
-      label: 'Hits',
-      columns: ['Parameters', 'What it is', 'Preview'],
+      label: T('label.hits'),
+      columns: [T('col.params'), T('col.what'), T('col.preview')],
       rows: hits.slice(0, MAX_ROWS).map((h) => [paramsLabel(h.params), h.what, h.preview]),
       highlight: [0],
     });
@@ -340,7 +348,7 @@ export default defineTool({
       out.push({
         type: 'note',
         level: 'info',
-        text: `${hits.length - MAX_ROWS} weaker hits not shown.`,
+        text: T('note.weaker', { count: hits.length - MAX_ROWS }),
       });
     }
     const full = extractBits(image, best.params, 1 << 26);
@@ -348,9 +356,9 @@ export default defineTool({
     out.push({
       type: 'note',
       level: best.kind === 'flag' || best.kind === 'file' ? 'success' : 'info',
-      text: `Best hit: ${paramsLabel(best.params)} (${best.what}).`,
+      text: T('note.best', { params: paramsLabel(best.params), what: best.what }),
     });
-    out.push({ type: 'bytes', label: 'Best hit', value: bytes, filename });
+    out.push({ type: 'bytes', label: T('label.best'), value: bytes, filename });
     return out;
   },
 });

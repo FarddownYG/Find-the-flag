@@ -1,10 +1,17 @@
+import { toolT } from '../../i18n/tool-text';
 import { latin1Decode, u16le, concatBytes } from '../../lib/bytes';
+
+/** Text shown by Image structure and Image analyzer: it lives under the image-structure keys. */
+const T = toolT('image-structure');
 
 export interface GifBlock {
   offset: number;
   /** Total bytes of the block. */
   length: number;
+  /** English block kind ("Comment", "Image 2"...): an identifier, compare against it. */
   kind: string;
+  /** The kind as shown to the user (translated). */
+  label: string;
   detail: string;
 }
 
@@ -70,12 +77,20 @@ export function parseGif(b: Uint8Array): GifParse | null {
     aspect: b[12]!,
     frames: 0,
     blocks: [
-      { offset: 0, length: 6, kind: 'Header', detail: version },
+      { offset: 0, length: 6, kind: 'Header', label: T('gif.header'), detail: version },
       {
         offset: 6,
         length: 7,
         kind: 'Logical screen',
-        detail: `${u16le(b, 6)}x${u16le(b, 8)}, ${gctSize / 3 || 'no'} global colours, background index ${b[11]}`,
+        label: T('gif.screen'),
+        detail: gctSize
+          ? T('gif.screenDetail', {
+              w: u16le(b, 6),
+              h: u16le(b, 8),
+              count: gctSize / 3,
+              bg: b[11]!,
+            })
+          : T('gif.screenDetailNoGct', { w: u16le(b, 6), h: u16le(b, 8), bg: b[11]! }),
       },
     ],
     comments: [],
@@ -92,7 +107,8 @@ export function parseGif(b: Uint8Array): GifParse | null {
       offset: pos,
       length: gctSize,
       kind: 'Global colour table',
-      detail: `${gctSize / 3} colours`,
+      label: T('gif.gct'),
+      detail: T('value.colours', { count: gctSize / 3 }),
     });
     pos += gctSize;
   }
@@ -100,7 +116,13 @@ export function parseGif(b: Uint8Array): GifParse | null {
     const start = pos;
     const introducer = b[pos]!;
     if (introducer === 0x3b) {
-      out.blocks.push({ offset: pos, length: 1, kind: 'Trailer', detail: 'end of GIF' });
+      out.blocks.push({
+        offset: pos,
+        length: 1,
+        kind: 'Trailer',
+        label: T('gif.trailer'),
+        detail: T('gif.trailerDetail'),
+      });
       out.trailerEnd = pos + 1;
       return out;
     }
@@ -111,7 +133,7 @@ export function parseGif(b: Uint8Array): GifParse | null {
       const sub = readSubBlocks(b, pos);
       pos = sub.next;
       const len = pos - start;
-      if (!sub.ok) out.problems.push(`Extension at offset ${start} is cut off.`);
+      if (!sub.ok) out.problems.push(T('problem.gifExtCut', { offset: start }));
       if (label === 0xf9 && sub.data.length >= 4) {
         const delay = u16le(sub.data, 1);
         out.delays.push(delay);
@@ -122,7 +144,11 @@ export function parseGif(b: Uint8Array): GifParse | null {
           offset: start,
           length: len,
           kind: 'Graphic control',
-          detail: `delay ${delay / 100}s, disposal ${disposal}${transparent !== null ? `, transparent index ${transparent}` : ''}`,
+          label: T('gif.gce'),
+          detail:
+            transparent !== null
+              ? T('gif.gceDetailTransparent', { delay: delay / 100, disposal, index: transparent })
+              : T('gif.gceDetail', { delay: delay / 100, disposal }),
         });
       } else if (label === 0xfe) {
         const text = latin1Decode(sub.data);
@@ -131,7 +157,11 @@ export function parseGif(b: Uint8Array): GifParse | null {
           offset: start,
           length: len,
           kind: 'Comment',
-          detail: `${sub.data.length} bytes: ${text.slice(0, 60).replace(/[^\x20-\x7e]/g, '·')}`,
+          label: T('gif.comment'),
+          detail: T('gif.commentDetail', {
+            count: sub.data.length,
+            text: text.slice(0, 60).replace(/[^\x20-\x7e]/g, '·'),
+          }),
         });
       } else if (label === 0xff) {
         const id = latin1Decode(sub.data.subarray(0, 8));
@@ -143,13 +173,15 @@ export function parseGif(b: Uint8Array): GifParse | null {
           offset: start,
           length: len,
           kind: 'Application',
-          detail: `${id}${auth} (${data.length} bytes)`,
+          label: T('gif.app'),
+          detail: T('gif.appDetail', { id: `${id}${auth}`, count: data.length }),
         });
       } else if (label === 0x01) {
         out.blocks.push({
           offset: start,
           length: len,
           kind: 'Plain text',
+          label: T('gif.plainText'),
           detail: latin1Decode(sub.data.subarray(12))
             .slice(0, 60)
             .replace(/[^\x20-\x7e]/g, '·'),
@@ -160,7 +192,8 @@ export function parseGif(b: Uint8Array): GifParse | null {
           offset: start,
           length: len,
           kind: `Extension 0x${label.toString(16)}`,
-          detail: `${sub.data.length} bytes`,
+          label: T('gif.ext', { id: label.toString(16) }),
+          detail: T('value.bytes', { count: sub.data.length }),
         });
       }
       if (!sub.ok) break;
@@ -181,10 +214,23 @@ export function parseGif(b: Uint8Array): GifParse | null {
         offset: start,
         length: pos - start,
         kind: `Image ${out.frames}`,
-        detail: `${w}x${h} at (${u16le(b, start + 1)},${u16le(b, start + 3)})${flags & 0x40 ? ', interlaced' : ''}${flags & 0x80 ? ', local colours' : ''}, ${sub.data.length} bytes of LZW data`,
+        label: T('gif.image', { n: out.frames }),
+        detail: T('gif.imageDetail', {
+          w,
+          h,
+          x: u16le(b, start + 1),
+          y: u16le(b, start + 3),
+          flags: [
+            ...(flags & 0x40 ? [T('gif.interlaced')] : []),
+            ...(flags & 0x80 ? [T('gif.localColours')] : []),
+          ]
+            .map((f) => `, ${f}`)
+            .join(''),
+          count: sub.data.length,
+        }),
       });
       if (!sub.ok) {
-        out.problems.push(`Image data at offset ${start} is cut off.`);
+        out.problems.push(T('problem.gifImageCut', { offset: start }));
         break;
       }
       continue;
@@ -196,15 +242,18 @@ export function parseGif(b: Uint8Array): GifParse | null {
         pos++;
         n++;
       }
-      out.blocks.push({ offset: start, length: n, kind: 'Padding', detail: `${n} zero byte(s)` });
+      out.blocks.push({
+        offset: start,
+        length: n,
+        kind: 'Padding',
+        label: T('gif.padding'),
+        detail: T('gif.paddingDetail', { count: n }),
+      });
       continue;
     }
-    out.problems.push(
-      `Unknown block 0x${introducer.toString(16)} at offset ${pos}: the rest is not parsed.`,
-    );
+    out.problems.push(T('problem.gifUnknown', { id: introducer.toString(16), offset: pos }));
     break;
   }
-  if (out.trailerEnd === null)
-    out.problems.push('No GIF trailer (0x3B): the file is truncated or has unparsed data.');
+  if (out.trailerEnd === null) out.problems.push(T('problem.gifNoTrailer'));
   return out;
 }

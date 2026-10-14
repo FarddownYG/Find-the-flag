@@ -1,5 +1,8 @@
 import { ToolError } from '../../core/errors';
 import type { RgbaImage } from '../../core/types';
+import { toolT } from '../../i18n/tool-text';
+
+const T = toolT('lsb');
 
 export type PixelOrder = 'row' | 'col';
 export type BitOrder = 'msb' | 'lsb';
@@ -23,14 +26,12 @@ export const channelsToString = (channels: number[]) =>
 export function parseChannels(text: string): number[] {
   const letters = [...text.toLowerCase().replace(/[\s,]/g, '')];
   if (!letters.length) {
-    throw new ToolError('Give at least one channel letter: r, g, b or a (for example "rgb").');
+    throw new ToolError(T('error.noChannel'));
   }
   return letters.map((l) => {
     const idx = CHANNEL_INDEX[l];
     if (idx === undefined) {
-      throw new ToolError(
-        `Unknown channel "${l}". Use only r, g, b, a (for example "rgb" or "bgr").`,
-      );
+      throw new ToolError(T('error.badChannel', { letter: l }));
     }
     return idx;
   });
@@ -41,29 +42,28 @@ export function parsePlanes(text: string): number[] {
   const set = new Set<number>();
   for (const part of text.split(/[\s,]+/).filter(Boolean)) {
     const m = /^(\d)(?:-(\d))?$/.exec(part);
-    if (!m)
-      throw new ToolError(`Bad bit list "${part}". Use numbers 0-7 like "0", "0,1" or "0-2".`);
+    if (!m) throw new ToolError(T('error.badBits', { part }));
     const lo = Number(m[1]);
     const hi = m[2] === undefined ? lo : Number(m[2]);
-    if (hi < lo)
-      throw new ToolError(`Bad bit range "${part}": the first number must be the smaller.`);
-    if (hi > 7) throw new ToolError(`Bit ${hi} does not exist: use 0 (lowest) to 7 (highest).`);
+    if (hi < lo) throw new ToolError(T('error.badRange', { part }));
+    if (hi > 7) throw new ToolError(T('error.noSuchBit', { bit: hi }));
     for (let b = lo; b <= hi; b++) set.add(b);
   }
-  if (!set.size)
-    throw new ToolError('Give at least one bit plane, for example "0" for the lowest bit.');
+  if (!set.size) throw new ToolError(T('error.noPlane'));
   return [...set].sort((a, b) => a - b);
 }
 
 export const planesLabel = (planes: number[]) =>
-  planes.length === 1 ? `bit ${planes[0]}` : `bits ${planes.join(',')}`;
+  planes.length === 1
+    ? T('value.bit', { bit: planes[0]! })
+    : T('value.bits', { bits: planes.join(',') });
 
 export const paramsLabel = (p: LsbParams) =>
   [
     channelsToString(p.channels),
     planesLabel(p.planes),
-    p.order === 'row' ? 'row-major' : 'column-major',
-    p.bitOrder === 'msb' ? 'MSB-first' : 'LSB-first',
+    p.order === 'row' ? T('value.rowMajor') : T('value.colMajor'),
+    p.bitOrder === 'msb' ? T('value.msbFirst') : T('value.lsbFirst'),
   ].join(', ');
 
 /**

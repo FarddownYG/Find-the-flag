@@ -1,6 +1,9 @@
 import { bool, defineTool, file, select } from '../../core/define';
 import { ToolError } from '../../core/errors';
 import type { RgbaImage } from '../../core/types';
+import { toolT } from '../../i18n/tool-text';
+
+const T = toolT('image-combine');
 
 type Op = 'xor' | 'diff' | 'add' | 'sub' | 'and' | 'or' | 'mask';
 
@@ -96,7 +99,7 @@ export default defineTool({
   ],
   run({ image }, { other, op, amplify }) {
     if (!other) {
-      throw new ToolError('Choose the second image with the "Second image" button above.');
+      throw new ToolError(T('error.noSecond'));
     }
     const r = combine(image, other.image, op, amplify);
     const sameSize = image.width === other.image.width && image.height === other.image.height;
@@ -107,25 +110,32 @@ export default defineTool({
             {
               type: 'note' as const,
               level: 'warn' as const,
-              text: `Sizes differ (${image.width}×${image.height} vs ${other.image.width}×${other.image.height}); compared the top-left ${r.image.width}×${r.image.height}.`,
+              text: T('note.sizes', {
+                aw: image.width,
+                ah: image.height,
+                bw: other.image.width,
+                bh: other.image.height,
+                w: r.image.width,
+                h: r.image.height,
+              }),
             },
           ]),
       {
         type: 'image',
-        label: `${op.toUpperCase()} result`,
+        label: T('label.result', { op: op.toUpperCase() }),
         image: r.image,
         filename: `combined-${op}.png`,
       },
       {
         type: 'kv',
-        label: 'Comparison',
+        label: T('label.comparison'),
         entries: [
-          ['Differing pixels', String(r.differing)],
+          [T('kv.differing'), String(r.differing)],
           [
-            'Bounding box',
+            T('kv.box'),
             r.box
-              ? `x ${r.box.minX}–${r.box.maxX}, y ${r.box.minY}–${r.box.maxY}`
-              : 'images are identical',
+              ? T('value.box', { x0: r.box.minX, x1: r.box.maxX, y0: r.box.minY, y1: r.box.maxY })
+              : T('value.identical'),
           ],
         ],
       },

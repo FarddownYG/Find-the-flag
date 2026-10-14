@@ -1,5 +1,8 @@
 import jsQR, { type QRCode } from 'jsqr';
 import type { RgbaImage } from '../../core/types';
+import { toolT } from '../../i18n/tool-text';
+
+const T = toolT('qr');
 
 /** A pixel buffer being fed to jsQR, with enough bookkeeping to map hits back to the original. */
 interface Pre {
@@ -16,6 +19,8 @@ export interface QrHit {
   code: QRCode;
   /** How the image had to be prepared, e.g. "inverted, binarized at 128, with margin". */
   how: string;
+  /** Read with light modules on dark (the colour to paint it out with depends on it). */
+  inverted: boolean;
   /** Centre of the code in the original image's pixel coordinates. */
   centre: { x: number; y: number };
   /** Side of the code in original pixels (approximate). */
@@ -203,10 +208,11 @@ function toHit(p: Pre, code: QRCode, invert: boolean): QrHit {
     c.topRightCorner.y - c.topLeftCorner.y,
   );
   const steps = [...p.steps];
-  if (invert) steps.unshift('inverted (light modules on dark)');
+  if (invert) steps.unshift(T('how.inverted'));
   return {
     code,
-    how: steps.length ? steps.join(', ') : 'as is',
+    how: steps.length ? steps.join(', ') : T('how.asIs'),
+    inverted: invert,
     centre: { x: Math.round((cx - p.pad) / p.scale), y: Math.round((cy - p.pad) / p.scale) },
     size: Math.round(side / p.scale),
   };
@@ -223,8 +229,8 @@ type Phase = 'core' | 'extra' | 'tile';
 function* candidates(img: RgbaImage, phase: Phase): Generator<Candidate> {
   const bases: { image: RgbaImage; steps: string[]; scale: number }[] = [];
   if (hasAlpha(img)) {
-    bases.push({ image: flatten(img, 255), steps: ['transparency flattened on white'], scale: 1 });
-    bases.push({ image: flatten(img, 0), steps: ['transparency flattened on black'], scale: 1 });
+    bases.push({ image: flatten(img, 255), steps: [T('how.flatWhite')], scale: 1 });
+    bases.push({ image: flatten(img, 0), steps: [T('how.flatBlack')], scale: 1 });
   } else {
     bases.push({ image: img, steps: [], scale: 1 });
   }
@@ -232,7 +238,7 @@ function* candidates(img: RgbaImage, phase: Phase): Generator<Candidate> {
   const big = side > 1600;
   if (big) {
     const { image, factor } = shrink(bases[0]!.image, 1600);
-    bases.push({ image, steps: [`shrunk x${factor}`], scale: 1 / factor });
+    bases.push({ image, steps: [T('how.shrunk', { factor })], scale: 1 / factor });
   }
 
   for (const [bi, base] of bases.entries()) {
@@ -243,7 +249,7 @@ function* candidates(img: RgbaImage, phase: Phase): Generator<Candidate> {
         : [1];
     for (const k of scales) {
       const scaled = k === 1 ? base.image : upscale(base.image, k);
-      const stepsK = [...base.steps, ...(k > 1 ? [`upscaled x${k}`] : [])];
+      const stepsK = [...base.steps, ...(k > 1 ? [T('how.upscaled', { k })] : [])];
       const m = Math.max(8, Math.round(Math.min(scaled.width, scaled.height) * 0.12));
       const make =
         (image: RgbaImage, extra: string[], margin: boolean) =>
@@ -255,7 +261,7 @@ function* candidates(img: RgbaImage, phase: Phase): Generator<Candidate> {
             data: framed.data,
             scale: base.scale * k,
             pad: margin ? m : 0,
-            steps: [...stepsK, ...extra, ...(margin ? ['with quiet-zone margin'] : [])],
+            steps: [...stepsK, ...extra, ...(margin ? [T('how.margin')] : [])],
           };
         };
       const otsuT = otsu(scaled);
@@ -270,19 +276,19 @@ function* candidates(img: RgbaImage, phase: Phase): Generator<Candidate> {
         yield { build: make(scaled, [], false) };
         if (huge) continue;
         yield { build: make(scaled, [], true) };
-        yield binarized(otsuT, 'Otsu threshold');
+        yield binarized(otsuT, T('how.otsu'));
         continue;
       }
       // extra
       if (huge) continue;
       if (k === 1) {
         for (const t of [64, 128, 192]) {
-          if (Math.abs(t - otsuT) > 8) yield binarized(t, `binarized at ${t}`);
+          if (Math.abs(t - otsuT) > 8) yield binarized(t, T('how.binarized', { t }));
         }
       } else {
         yield { build: make(scaled, [], false) };
         yield { build: make(scaled, [], true) };
-        if (k <= 2) yield binarized(otsuT, 'Otsu threshold');
+        if (k <= 2) yield binarized(otsuT, T('how.otsu'));
       }
     }
   }
@@ -400,16 +406,10 @@ function scanWithBudget(img: RgbaImage, maxCodes: number, depth: number, budget:
       const first: QrHit = {
         ...hit,
         centre,
-        how: `${hit.how}, found by splitting the image into tiles`,
+        how: T('how.tiles', { how: hit.how }),
       };
       const half = hit.size * 0.75;
-      const masked = paintSquare(
-        img,
-        centre.x,
-        centre.y,
-        half,
-        hit.how.startsWith('inverted') ? 0 : 255,
-      );
+      const masked = paintSquare(img, centre.x, centre.y, half, hit.inverted ? 0 : 255);
       const rest = scanWithBudget(masked, maxCodes - 1, depth + 1, budget);
       return { hits: [first, ...rest.hits], tried: tried + rest.tried };
     }

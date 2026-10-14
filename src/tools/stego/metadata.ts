@@ -1,6 +1,7 @@
 import { defineTool } from '../../core/define';
 import { ToolError } from '../../core/errors';
 import type { Output } from '../../core/types';
+import { toolT } from '../../i18n/tool-text';
 import { formatSize, latin1Decode } from '../../lib/bytes';
 import {
   bytesOfLike,
@@ -19,18 +20,21 @@ import { parsePng, pngTexts, pngTime } from './_png';
 
 export { decodeUserComment } from './_exif';
 
-const GROUP_TITLES: Record<string, string> = {
-  ifd0: 'IFD0 (main image)',
-  ifd1: 'IFD1 (thumbnail)',
-  exif: 'EXIF',
-  gps: 'GPS',
-  interop: 'Interoperability',
-  xmp: 'XMP',
-  iptc: 'IPTC',
-  icc: 'ICC profile',
-  jfif: 'JFIF',
-  ihdr: 'PNG header / text',
-  tiff: 'TIFF',
+const T = toolT('metadata');
+
+/** Group titles; the bare format names (EXIF, GPS, XMP...) are not translated. */
+const GROUP_TITLES: Record<string, () => string> = {
+  ifd0: () => T('group.ifd0'),
+  ifd1: () => T('group.ifd1'),
+  exif: () => 'EXIF',
+  gps: () => 'GPS',
+  interop: () => T('group.interop'),
+  xmp: () => 'XMP',
+  iptc: () => 'IPTC',
+  icc: () => T('group.icc'),
+  jfif: () => 'JFIF',
+  ihdr: () => T('group.ihdr'),
+  tiff: () => 'TIFF',
 };
 const GROUP_ORDER = Object.keys(GROUP_TITLES);
 
@@ -126,7 +130,7 @@ function xmpPackets(bytes: Uint8Array): string[] {
   return found
     .slice(0, 3)
     .map((p) =>
-      p.length > 12000 ? `${p.slice(0, 12000)}\n… (${p.length - 12000} more characters)` : p,
+      p.length > 12000 ? `${p.slice(0, 12000)}\n${T('text.more', { count: p.length - 12000 })}` : p,
     );
 }
 
@@ -146,7 +150,7 @@ const kvOf = (label: string, entries: [string, string][]): Output[] =>
 /** A map for a usable position (not 0, 0, which is what an empty fix looks like). */
 const mapOf = (lat: number | null, lon: number | null): Output[] =>
   lat !== null && lon !== null && positionProblem(lat, lon) === null
-    ? [{ type: 'map', label: 'GPS position', lat, lon, zoom: 16 }]
+    ? [{ type: 'map', label: T('label.gpsMap'), lat, lon, zoom: 16 }]
     : [];
 
 function analysePdf(bytes: Uint8Array): Output[] {
@@ -159,27 +163,30 @@ function analysePdf(bytes: Uint8Array): Output[] {
   const rows: [string, string][] = entries.map((e) => {
     const n = (seen.get(e.key) ?? 0) + 1;
     seen.set(e.key, n);
-    return [total.get(e.key)! > 1 ? `${e.key} #${n} (offset ${e.offset})` : e.key, e.value];
+    return [
+      total.get(e.key)! > 1 ? T('kv.pdfRepeat', { key: e.key, n, offset: e.offset }) : e.key,
+      e.value,
+    ];
   });
-  if (header) rows.unshift(['PDF version', header[1]!]);
+  if (header) rows.unshift([T('kv.pdfVersion'), header[1]!]);
   const eofs = latin1Decode(bytes).split('%%EOF').length - 1;
-  out.push(...kvOf('PDF document information', rows));
+  out.push(...kvOf(T('label.pdfInfo'), rows));
   if (!entries.length) {
     out.push({
       type: 'note',
       level: 'info',
-      text: 'No readable Title/Author/Producer strings. The Info dictionary may sit inside a compressed object stream; try the XMP block below or a PDF-specific tool.',
+      text: T('note.pdfNoInfo'),
     });
   }
   if (eofs > 1) {
     out.push({
       type: 'note',
       level: 'warn',
-      text: `${eofs} end-of-file markers (%%EOF): the PDF was saved incrementally, so earlier versions of the content (and older metadata above) may still be inside the file.`,
+      text: T('note.pdfEof', { count: eofs }),
     });
   }
   for (const [i, p] of xmpPackets(bytes).entries()) {
-    out.push({ type: 'text', label: `XMP packet ${i + 1}`, value: p });
+    out.push({ type: 'text', label: T('label.xmpPacket', { n: i + 1 }), value: p });
   }
   return out;
 }
@@ -222,7 +229,7 @@ export default defineTool({
     },
   ],
   async run({ bytes }) {
-    if (!bytes.length) throw new ToolError('Drop a photo (JPEG, TIFF, PNG, WebP, HEIC) or a PDF.');
+    if (!bytes.length) throw new ToolError(T('error.empty'));
     if (latin1Decode(bytes.subarray(0, 1024)).includes('%PDF-')) return analysePdf(bytes);
 
     const out: Output[] = [];
@@ -251,7 +258,7 @@ export default defineTool({
         {
           type: 'note',
           level: 'warn',
-          text: 'This does not look like an image or a PDF. Metadata extraction works on JPEG, TIFF, PNG, WebP, HEIC/AVIF, GIF and PDF files; use "File type" to find out what it is.',
+          text: T('note.notImage'),
         },
       ];
     }
@@ -292,7 +299,7 @@ export default defineTool({
     const gpsEntries: [string, string][] = [];
     if (lat !== null && lon !== null) {
       // Degrees/minutes/seconds and the map links are on the map block below.
-      gpsEntries.push(['Latitude, longitude', `${lat.toFixed(6)}, ${lon.toFixed(6)}`]);
+      gpsEntries.push([T('kv.latLon'), `${lat.toFixed(6)}, ${lon.toFixed(6)}`]);
     }
     const skipGps = new Set([
       'GPSLatitude',
@@ -309,14 +316,14 @@ export default defineTool({
       out.push({
         type: 'note',
         level: 'warn',
-        text: `The EXIF reader could not parse this file: ${parseError}.`,
+        text: T('note.parseError', { error: parseError }),
       });
     }
     if (gpsEntries.length && lat !== null) {
       out.push({
         type: 'note',
         level: 'info',
-        text: `GPS position embedded: ${lat.toFixed(6)}, ${lon!.toFixed(6)}.`,
+        text: T('note.gps', { lat: lat.toFixed(6), lon: lon!.toFixed(6) }),
       });
     }
     const messageHits = entries.filter((e) => MESSAGE_FIELDS.includes(tagOf(e)) && e.value.trim());
@@ -324,18 +331,18 @@ export default defineTool({
       out.push({
         type: 'note',
         level: 'info',
-        text: `Free-text fields worth reading: ${[...new Set(messageHits.map(tagOf))].join(', ')}.`,
+        text: T('note.messages', { fields: [...new Set(messageHits.map(tagOf))].join(', ') }),
       });
     }
 
     // ---- grouped blocks
     out.push(
       ...kvOf(
-        'Camera and image',
+        T('label.camera'),
         pick((e) => ['ifd0', 'exif'].includes(e.group) && CAMERA.has(tagOf(e))),
       ),
       ...kvOf(
-        'Dates',
+        T('label.dates'),
         pick(
           (e) =>
             DATE_KEY.test(tagOf(e)) &&
@@ -348,7 +355,7 @@ export default defineTool({
       ...kvOf('GPS', gpsEntries),
       ...mapOf(lat, lon),
       ...kvOf(
-        'Software and text',
+        T('label.software'),
         pick((e) => TEXT_FIELDS.has(tagOf(e))),
       ),
       ...kvOf(
@@ -360,7 +367,7 @@ export default defineTool({
         pick((e) => e.group === 'iptc'),
       ),
       ...kvOf(
-        'ICC profile',
+        T('label.icc'),
         pick((e) => e.group === 'icc'),
       ),
     );
@@ -370,35 +377,35 @@ export default defineTool({
       const texts = pngTexts(bytes, png.chunks);
       out.push(
         ...kvOf(
-          'PNG text chunks',
+          T('label.pngText'),
           texts.map((t) => [`${t.chunk}${t.keyword ? ` ${t.keyword}` : ''}`, t.text]),
         ),
       );
       const time = pngTime(bytes, png.chunks);
-      if (time) out.push({ type: 'kv', label: 'PNG modification time', entries: [['tIME', time]] });
+      if (time) out.push({ type: 'kv', label: T('label.pngTime'), entries: [['tIME', time]] });
     }
     if (jpeg) {
       jpegComments(bytes, jpeg).forEach((c, i) => {
-        out.push({ type: 'text', label: `JPEG comment ${i + 1}`, value: c });
+        out.push({ type: 'text', label: T('label.jpegComment', { n: i + 1 }), value: c });
       });
     }
     if (gif) {
       gif.comments.forEach((c, i) => {
-        out.push({ type: 'text', label: `GIF comment ${i + 1}`, value: c });
+        out.push({ type: 'text', label: T('label.gifComment', { n: i + 1 }), value: c });
       });
     }
     for (const [i, p] of xmpPackets(bytes).entries()) {
-      out.push({ type: 'text', label: `XMP packet ${i + 1} (raw)`, value: p });
+      out.push({ type: 'text', label: T('label.xmpRaw', { n: i + 1 }), value: p });
     }
 
     // ---- everything
     if (entries.length) {
       out.push({
         type: 'table',
-        label: 'All tags',
-        columns: ['Group', 'Tag', 'Value'],
+        label: T('label.allTags'),
+        columns: [T('col.group'), T('col.tag'), T('col.value')],
         rows: entries.map((e) => [
-          GROUP_TITLES[e.group] ?? e.group,
+          GROUP_TITLES[e.group]?.() ?? e.group,
           e.key,
           e.value.length > 300 ? `${e.value.slice(0, 300)}…` : e.value,
         ]),
@@ -407,7 +414,7 @@ export default defineTool({
       out.push({
         type: 'note',
         level: 'info',
-        text: 'No EXIF, XMP, IPTC or ICC metadata found. The file may have been stripped; look at "Image structure" for chunks, comments and appended data.',
+        text: T('note.noMeta'),
       });
     }
 
@@ -419,19 +426,19 @@ export default defineTool({
       out.push({
         type: 'note',
         level: 'info',
-        text: `Thumbnail could not be read: ${e instanceof Error ? e.message : String(e)}`,
+        text: T('note.thumbError', { error: e instanceof Error ? e.message : String(e) }),
       });
     }
     if (thumb && thumb.length) {
       const data = Uint8Array.from(thumb);
       out.push({
         type: 'files',
-        label: 'Embedded thumbnail',
+        label: T('label.thumb'),
         files: [
           {
             name: 'thumbnail.jpg',
             data,
-            note: `${thumbnailInfo(data)}. Compare it with the main image: an edited or cropped photo often keeps the original in its thumbnail.`,
+            note: T('text.thumb', { info: thumbnailInfo(data) }),
           },
         ],
       });
@@ -442,19 +449,18 @@ export default defineTool({
     const head = latin1Decode(bytes.subarray(0, 1 << 16));
     if (bytes[0] === 0xff && bytes[1] === 0xd8) {
       return head.includes('Exif\0\0')
-        ? { score: 0.7, reason: 'JPEG with EXIF data' }
-        : { score: 0.3, reason: 'JPEG: check comments and XMP' };
+        ? { score: 0.7, reason: T('detect.jpegExif') }
+        : { score: 0.3, reason: T('detect.jpeg') };
     }
-    if (head.startsWith('%PDF-'))
-      return { score: 0.4, reason: 'PDF: read the document information' };
+    if (head.startsWith('%PDF-')) return { score: 0.4, reason: T('detect.pdf') };
     if (
       (bytes[0] === 0x49 && bytes[1] === 0x49 && bytes[2] === 0x2a) ||
       (bytes[0] === 0x4d && bytes[1] === 0x4d && bytes[3] === 0x2a)
     ) {
-      return { score: 0.6, reason: 'TIFF image tags' };
+      return { score: 0.6, reason: T('detect.tiff') };
     }
     if (bytes[0] === 0x89 && bytes[1] === 0x50 && /tEXt|zTXt|iTXt|eXIf/.test(head)) {
-      return { score: 0.45, reason: 'PNG with text or EXIF chunks' };
+      return { score: 0.45, reason: T('detect.png') };
     }
     return null;
   },

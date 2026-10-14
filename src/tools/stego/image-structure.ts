@@ -2,8 +2,9 @@ import { defineTool } from '../../core/define';
 import { decodeImageExact } from '../../core/decode-image';
 import { ToolError } from '../../core/errors';
 import type { Output } from '../../core/types';
+import { signatureName, toolT } from '../../i18n/tool-text';
 import { formatSize, latin1Decode, printableRatio, toHex, u16be, u32be } from '../../lib/bytes';
-import { identify } from '../../lib/signatures';
+import { identify, type Signature } from '../../lib/signatures';
 import { parseGif } from './_gif';
 import {
   appIdentifier,
@@ -11,12 +12,12 @@ import {
   isSof,
   type JpegParse,
   parseJpeg,
-  SOF_DESCRIPTIONS,
+  sofDescription,
 } from './_jpeg';
 import {
   bruteForceIhdr,
   chunkKind,
-  COLOR_TYPE_NAMES,
+  colorTypeName,
   decodeTextChunk,
   expectedRawSize,
   type Ihdr,
@@ -31,9 +32,13 @@ import {
   withIhdr,
 } from './_png';
 
+const T = toolT('image-structure');
+
 type FileEntry = { name: string; data: Uint8Array; note?: string };
 
 const hex8 = (n: number) => n.toString(16).padStart(8, '0');
+const fileSize = (b: Uint8Array) =>
+  T('value.fileSize', { size: formatSize(b.length), count: b.length });
 const at = (n: number) => `${n} (0x${n.toString(16)})`;
 /** Chunks that carry readable data: worth a look even though they are standard. */
 const TEXT_CHUNKS = new Set(['tEXt', 'zTXt', 'iTXt', 'eXIf']);
@@ -47,7 +52,7 @@ function baseName(name: string | undefined, fallback: string): string {
 }
 
 function previewOf(b: Uint8Array, max = 48): string {
-  if (!b.length) return '(empty)';
+  if (!b.length) return T('value.empty');
   if (printableRatio(b.subarray(0, 256)) > 0.9) {
     const s = latin1Decode(b.subarray(0, max)).replace(/[^\x20-\x7e]/g, '·');
     return `"${s}"${b.length > max ? '…' : ''}`;
@@ -55,13 +60,36 @@ function previewOf(b: Uint8Array, max = 48): string {
   return `${toHex(b.subarray(0, 16), ' ')}${b.length > 16 ? ' …' : ''}`;
 }
 
-/** Name the kind of data glued onto the end of an image, and the file extension to give it. */
-export function describeTail(tail: Uint8Array): { label: string; ext: string } {
+type TailKind =
+  | { kind: 'file'; sig: Signature; ext: string }
+  | { kind: 'zeros' | 'text' | 'unknown'; ext: string };
+
+function classifyTail(tail: Uint8Array): TailKind {
   const sig = identify(tail).find((s) => !s.weak);
-  if (sig) return { label: sig.name, ext: sig.ext };
-  if (tail.every((x) => x === 0)) return { label: 'zero padding', ext: 'bin' };
-  if (printableRatio(tail.subarray(0, 512)) > 0.9) return { label: 'plain text', ext: 'txt' };
-  return { label: 'unidentified data', ext: 'bin' };
+  if (sig) return { kind: 'file', sig, ext: sig.ext };
+  if (tail.every((x) => x === 0)) return { kind: 'zeros', ext: 'bin' };
+  if (printableRatio(tail.subarray(0, 512)) > 0.9) return { kind: 'text', ext: 'txt' };
+  return { kind: 'unknown', ext: 'bin' };
+}
+
+/**
+ * Name the kind of data glued onto the end of an image, and the file extension to give it.
+ * The label is English (other tools compare it and translate it themselves).
+ */
+export function describeTail(tail: Uint8Array): { label: string; ext: string } {
+  const t = classifyTail(tail);
+  if (t.kind === 'file') return { label: t.sig.name, ext: t.ext };
+  if (t.kind === 'zeros') return { label: 'zero padding', ext: t.ext };
+  if (t.kind === 'text') return { label: 'plain text', ext: t.ext };
+  return { label: 'unidentified data', ext: t.ext };
+}
+
+/** describeTail's label in the user's language. */
+function tailText(t: TailKind): string {
+  if (t.kind === 'file') return signatureName(t.sig);
+  if (t.kind === 'zeros') return T('tail.zeros');
+  if (t.kind === 'text') return T('tail.text');
+  return T('tail.unknown');
 }
 
 function trailingOutputs(
@@ -71,18 +99,20 @@ function trailingOutputs(
   stem: string,
   files: FileEntry[],
 ): Output[] {
-  const { label, ext } = describeTail(tail);
+  const t = classifyTail(tail);
+  const label = tailText(t);
   files.push({
-    name: `${stem}-after-${after}.${ext}`,
+    name: `${stem}-after-${after}.${t.ext}`,
     data: tail,
-    note: `${label}, from offset ${offset}`,
+    note: T('file.tail', { label, offset }),
   });
-  const padding = label === 'zero padding' || tail.every((x) => x === 0x0a || x === 0x0d);
+  const padding = t.kind === 'zeros' || tail.every((x) => x === 0x0a || x === 0x0d);
+  const params = { size: formatSize(tail.length), count: tail.length, offset, label };
   return [
     {
       type: 'note',
       level: padding ? 'info' : 'warn',
-      text: `${formatSize(tail.length)} (${tail.length} bytes) follow the end of the image at offset ${offset}: ${label}. ${padding ? 'Only padding.' : 'Hidden data is often appended like this; it is extracted below.'}`,
+      text: padding ? T('note.tailPadding', params) : T('note.tailHidden', params),
     },
   ];
 }
@@ -92,36 +122,43 @@ function trailingOutputs(
 function pngDetails(bytes: Uint8Array, c: PngChunk, ihdr: Ihdr | null): string {
   const d = bytes.subarray(c.dataStart, c.dataStart + c.length);
   switch (c.type) {
-    case 'IHDR':
-      return ihdr
-        ? `${ihdr.width}x${ihdr.height}, ${ihdr.bitDepth}-bit ${COLOR_TYPE_NAMES[ihdr.colorType] ?? `colour type ${ihdr.colorType}`}${ihdr.interlace ? ', interlaced' : ''}`
-        : '';
+    case 'IHDR': {
+      if (!ihdr) return '';
+      const p = {
+        w: ihdr.width,
+        h: ihdr.height,
+        depth: ihdr.bitDepth,
+        colour: colorTypeName(ihdr.colorType) ?? T('detail.colourType', { type: ihdr.colorType }),
+      };
+      return ihdr.interlace ? T('detail.ihdrInterlaced', p) : T('detail.ihdr', p);
+    }
     case 'PLTE':
-      return `${Math.floor(c.length / 3)} colours`;
+      return T('value.colours', { count: Math.floor(c.length / 3) });
     case 'tIME':
       return c.length === 7
         ? `${u16be(d, 0)}-${String(d[2]).padStart(2, '0')}-${String(d[3]).padStart(2, '0')} ${String(d[4]).padStart(2, '0')}:${String(d[5]).padStart(2, '0')}:${String(d[6]).padStart(2, '0')}`
         : '';
     case 'pHYs':
-      return c.length === 9
-        ? `${u32be(d, 0)} x ${u32be(d, 4)} pixels per ${d[8] === 1 ? 'metre' : 'unknown unit'}`
-        : '';
+      if (c.length !== 9) return '';
+      return d[8] === 1
+        ? T('detail.physMetre', { x: u32be(d, 0), y: u32be(d, 4) })
+        : T('detail.physUnknown', { x: u32be(d, 0), y: u32be(d, 4) });
     case 'gAMA':
-      return c.length === 4 ? `gamma ${u32be(d, 0) / 100000}` : '';
+      return c.length === 4 ? T('detail.gamma', { gamma: u32be(d, 0) / 100000 }) : '';
     case 'tEXt':
     case 'zTXt':
     case 'iTXt': {
       const t = decodeTextChunk(c.type, d);
       return t
         ? `${t.keyword}: ${t.text.replace(/\s+/g, ' ').slice(0, 60)}`
-        : 'unreadable text chunk';
+        : T('detail.unreadableText');
     }
     case 'eXIf':
-      return 'EXIF data (open it in the EXIF / metadata tool)';
+      return T('detail.exif');
     case 'iCCP':
       return latin1Decode(d.subarray(0, Math.max(0, d.indexOf(0))));
     case 'acTL':
-      return c.length === 8 ? `animated PNG, ${u32be(d, 0)} frames` : '';
+      return c.length === 8 ? T('detail.apng', { count: u32be(d, 0) }) : '';
     case 'IDAT':
     case 'IEND':
       return '';
@@ -157,7 +194,7 @@ function groupChunks(chunks: PngChunk[]): Group[] {
 
 function analysePng(bytes: Uint8Array, name: string | undefined): Output[] {
   const parsed = parsePng(bytes);
-  if (!parsed) throw new ToolError('Not a PNG file.');
+  if (!parsed) throw new ToolError(T('error.notPng'));
   const stem = baseName(name, 'image');
   const { chunks } = parsed;
   const files: FileEntry[] = [];
@@ -172,43 +209,38 @@ function analysePng(bytes: Uint8Array, name: string | undefined): Output[] {
   };
 
   if (!parsed.signatureOk) {
-    warn(
-      'The 8-byte PNG signature is damaged (expected 89 50 4E 47 0D 0A 1A 0A). Fix it in a hex editor; the chunks below were still read.',
-    );
+    warn(T('note.badSignature'));
   }
   if (parsed.problem) warn(parsed.problem, 'error');
-  if (!ihdrChunk) warn('There is no IHDR chunk.', 'error');
-  else if (chunks[0] !== ihdrChunk) warn('IHDR must be the first chunk.');
+  if (!ihdrChunk) warn(T('note.noIhdr'), 'error');
+  else if (chunks[0] !== ihdrChunk) warn(T('note.ihdrFirst'));
   if (ihdrChunk && ihdrChunk.length !== 13) {
-    warn(`IHDR is ${ihdrChunk.length} bytes long; it must be exactly 13.`, 'error');
+    warn(T('note.ihdrLength', { count: ihdrChunk.length }), 'error');
   }
   const badTypes = chunks.filter((c) => !c.validType);
   if (badTypes.length) {
-    warn(
-      `${badTypes.length} chunk(s) have an invalid type name (must be 4 ASCII letters), which usually means a corrupted length field before it.`,
-    );
+    warn(T('note.badTypes', { count: badTypes.length }));
   }
   const idatIdx = chunks.map((c, i) => (c.type === 'IDAT' ? i : -1)).filter((i) => i >= 0);
   if (idatIdx.length && idatIdx[idatIdx.length - 1]! - idatIdx[0]! + 1 !== idatIdx.length) {
-    warn('IDAT chunks are not consecutive: something is stored between the image data chunks.');
+    warn(T('note.idatGap'));
   }
-  if (!idatIdx.length && ihdrChunk) warn('There is no IDAT chunk: the file has no image data.');
-  if (parsed.iendEnd === null && !parsed.problem)
-    warn('There is no IEND chunk: the file is truncated.');
+  if (!idatIdx.length && ihdrChunk) warn(T('note.noIdat'));
+  if (parsed.iendEnd === null && !parsed.problem) warn(T('note.noIend'));
 
   // --- CRC problems and IHDR repair
   const badCrc = chunks.filter((c) => !c.crcOk);
   const otherBad = badCrc.filter((c) => c !== ihdrChunk);
   if (otherBad.length) {
     warn(
-      `${otherBad.length} chunk(s) have a wrong CRC: ${otherBad.map((c) => c.type).join(', ')}. Either the data was edited or the CRC bytes were damaged.`,
+      T('note.badCrc', { count: otherBad.length, types: otherBad.map((c) => c.type).join(', ') }),
     );
   }
 
   const idat = idatData(bytes, chunks);
   const rawSize = idat.length && idat.length < 1 << 26 ? inflatedSize(idat) : null;
   if (idat.length && rawSize === null && idat.length < 1 << 26) {
-    warn('The image data (IDAT) is not a valid zlib stream: it is damaged or tampered with.');
+    warn(T('note.badZlib'));
   }
   const expected = ihdr ? expectedRawSize(ihdr) : null;
   const rowBytes = ihdr ? rowSize(ihdr) : null;
@@ -229,10 +261,22 @@ function analysePng(bytes: Uint8Array, name: string | undefined): Output[] {
       repair = {
         ihdr: best.ihdr,
         fromCrc: true,
-        how: `brute force on the stored CRC (${best.kind === 'fields' ? 'other header fields' : best.kind === 'both' ? 'width and height' : best.kind})`,
+        how:
+          best.kind === 'fields'
+            ? T('how.crcFields')
+            : best.kind === 'both'
+              ? T('how.crcBoth')
+              : best.kind === 'height'
+                ? T('how.crcHeight')
+                : T('how.crcWidth'),
       };
       warn(
-        `The IHDR chunk CRC is wrong, so the header was edited. Only ${best.ihdr.width}x${best.ihdr.height} reproduces the stored CRC (the file says ${ihdr.width}x${ihdr.height}). A repaired PNG is below.`,
+        T('note.crcRepair', {
+          w: best.ihdr.width,
+          h: best.ihdr.height,
+          fileW: ihdr.width,
+          fileH: ihdr.height,
+        }),
       );
     } else if (
       rawSize !== null &&
@@ -243,16 +287,12 @@ function analysePng(bytes: Uint8Array, name: string | undefined): Output[] {
       repair = {
         ihdr: { ...ihdr, height: rawSize / rowBytes },
         fromCrc: false,
-        how: 'height taken from the amount of image data, CRC recomputed',
+        how: T('how.fromData'),
       };
-      warn(
-        `The IHDR chunk CRC is wrong and no size reproduces it, but the image data holds ${rawSize / rowBytes} rows (the header says ${ihdr.height}). A repaired PNG is below.`,
-      );
+      warn(T('note.crcRows', { count: rawSize / rowBytes, height: ihdr.height }));
     } else {
-      repair = { ihdr, fromCrc: false, how: 'CRC recomputed, size unchanged' };
-      warn(
-        'The IHDR chunk CRC is wrong but no other size fits it, and the image data matches the header. Probably only the CRC bytes are damaged; a PNG with a recomputed CRC is below.',
-      );
+      repair = { ihdr, fromCrc: false, how: T('how.crcOnly') };
+      warn(T('note.crcOnly'));
     }
   } else if (
     ihdrChunk &&
@@ -266,19 +306,13 @@ function analysePng(bytes: Uint8Array, name: string | undefined): Output[] {
       repair = {
         ihdr: { ...ihdr, height: rows },
         fromCrc: false,
-        how: 'height taken from the amount of image data, CRC recomputed',
+        how: T('how.fromData'),
       };
-      warn(
-        `The image data holds ${rows} rows but the header says ${ihdr.height}: the picture was cropped by editing IHDR (with a recomputed CRC). A repaired PNG is below.`,
-      );
+      warn(T('note.cropped', { count: rows, height: ihdr.height }));
     } else if (rawSize > expected) {
-      warn(
-        `The image data inflates to ${rawSize} bytes but the header only accounts for ${expected}: extra data is hidden after the pixels.`,
-      );
+      warn(T('note.extraData', { count: rawSize, expected }));
     } else if (rawSize < expected) {
-      warn(
-        `The image data inflates to ${rawSize} bytes but the header promises ${expected}: the file is truncated or the header is wrong.`,
-      );
+      warn(T('note.shortData', { count: rawSize, expected }));
     }
   }
 
@@ -291,29 +325,40 @@ function analysePng(bytes: Uint8Array, name: string | undefined): Output[] {
     });
     extras.push({
       type: 'kv',
-      label: 'IHDR repair',
+      label: T('label.repair'),
       entries: [
-        ['Stored size', `${ihdr!.width}x${ihdr!.height}`],
-        ['Recovered size', `${repair.ihdr.width}x${repair.ihdr.height}`],
-        ['Method', repair.how],
+        [T('kv.storedSize'), `${ihdr!.width}x${ihdr!.height}`],
+        [T('kv.recoveredSize'), `${repair.ihdr.width}x${repair.ihdr.height}`],
+        [T('kv.method'), repair.how],
         [
-          'Fits the image data',
+          T('kv.fits'),
           rawSize === null || expectedRawSize(repair.ihdr) === null
-            ? 'unknown'
+            ? T('value.unknown')
             : expectedRawSize(repair.ihdr) === rawSize
-              ? 'yes'
-              : 'no',
+              ? T('value.yes')
+              : T('value.no'),
         ],
       ],
     });
     if (candidates.length > 1) {
+      const foundBy = {
+        fields: T('value.byFields'),
+        height: T('value.byHeight'),
+        width: T('value.byWidth'),
+        both: T('value.byBoth'),
+      };
       extras.push({
         type: 'table',
-        label: 'Other sizes with the same CRC',
-        columns: ['Width', 'Height', 'Found by', 'Fits the image data'],
+        label: T('label.otherSizes'),
+        columns: [T('col.width'), T('col.height'), T('col.foundBy'), T('col.fits')],
         rows: candidates
           .slice(0, 10)
-          .map((c) => [c.ihdr.width, c.ihdr.height, c.kind, c.fits ? 'yes' : 'no']),
+          .map((c) => [
+            c.ihdr.width,
+            c.ihdr.height,
+            foundBy[c.kind],
+            c.fits ? T('value.yes') : T('value.no'),
+          ]),
         highlight: [0],
       });
     }
@@ -322,7 +367,7 @@ function analysePng(bytes: Uint8Array, name: string | undefined): Output[] {
       if (image) {
         extras.push({
           type: 'image',
-          label: 'Repaired image',
+          label: T('label.repaired'),
           image,
           filename: `${stem}-fixed.png`,
         });
@@ -331,7 +376,7 @@ function analysePng(bytes: Uint8Array, name: string | undefined): Output[] {
       extras.push({
         type: 'note',
         level: 'warn',
-        text: `The repaired PNG does not decode: ${e instanceof Error ? e.message : String(e)}`,
+        text: T('note.repairFail', { error: e instanceof Error ? e.message : String(e) }),
       });
     }
   }
@@ -349,7 +394,7 @@ function analysePng(bytes: Uint8Array, name: string | undefined): Output[] {
       files.push({
         name: `${stem}-unparsed.bin`,
         data: bytes.subarray(from),
-        note: `bytes that could not be read as chunks, from offset ${from}`,
+        note: T('file.unparsed', { offset: from }),
       });
     }
   }
@@ -360,7 +405,7 @@ function analysePng(bytes: Uint8Array, name: string | undefined): Output[] {
     ? [
         {
           type: 'kv',
-          label: 'Text chunks',
+          label: T('label.texts'),
           entries: texts.map((t) => [
             `${t.chunk}${t.keyword ? ` ${t.keyword}` : ''}${t.note ? ` (${t.note})` : ''}`,
             t.text,
@@ -380,7 +425,7 @@ function analysePng(bytes: Uint8Array, name: string | undefined): Output[] {
     const kind = chunkKind(first);
     const many = g.chunks.length > 1;
     const total = g.chunks.reduce((n, c) => n + c.length, 0);
-    const noteParts: string[] = [many ? `${g.chunks.length} chunks, all CRCs OK` : ''];
+    const noteParts: string[] = [many ? T('value.groupOk', { count: g.chunks.length }) : ''];
     if (!many) noteParts.push(kind.known ? kind.description : kind.description.toUpperCase());
     noteParts.push(many ? '' : pngDetails(bytes, first, ihdr));
     if (!kind.known && first.validType && first.length > 0 && unknownFiles < MAX_UNKNOWN_FILES) {
@@ -388,7 +433,7 @@ function analysePng(bytes: Uint8Array, name: string | undefined): Output[] {
       files.push({
         name: `${stem}-chunk-${first.type}-${first.offset}.bin`,
         data: bytes.subarray(first.dataStart, first.dataStart + first.length),
-        note: `payload of the ${kind.description.toLowerCase()} "${first.type}"`,
+        note: T('file.chunkPayload', { kind: kind.description.toLowerCase(), type: first.type }),
       });
     }
     if (!first.crcOk || !kind.known || TEXT_CHUNKS.has(first.type)) highlight.push(rows.length);
@@ -397,9 +442,9 @@ function analysePng(bytes: Uint8Array, name: string | undefined): Output[] {
       at(first.offset),
       many ? `${first.type} x${g.chunks.length}` : first.type,
       total,
-      many ? 'OK' : hex8(first.crcStored),
+      many ? T('value.ok') : hex8(first.crcStored),
       many ? '' : hex8(first.crcComputed),
-      first.crcOk ? 'OK' : 'BAD',
+      first.crcOk ? T('value.ok') : T('value.bad'),
       noteParts.filter(Boolean).join(' · '),
     ]);
   }
@@ -407,7 +452,7 @@ function analysePng(bytes: Uint8Array, name: string | undefined): Output[] {
     notes.push({
       type: 'note',
       level: 'info',
-      text: `Chunk table cut at ${MAX_ROWS} rows (${groups.length} total).`,
+      text: T('note.tableCut', { max: MAX_ROWS, total: groups.length }),
     });
   }
   const unknown = chunks.filter((c) => !chunkKind(c).known);
@@ -415,32 +460,38 @@ function analysePng(bytes: Uint8Array, name: string | undefined): Output[] {
     notes.push({
       type: 'note',
       level: 'info',
-      text: `Non-standard chunk(s): ${[...new Set(unknown.map((c) => c.type))].join(', ')}. Their payloads are extracted below; custom chunks are a common hiding place.`,
+      text: T('note.nonStandard', { types: [...new Set(unknown.map((c) => c.type))].join(', ') }),
     });
   }
 
-  const kv: [string, string][] = [['Format', 'PNG']];
-  kv.push(['File size', `${formatSize(bytes.length)} (${bytes.length} bytes)`]);
+  const kv: [string, string][] = [[T('kv.format'), 'PNG']];
+  kv.push([T('kv.fileSize'), fileSize(bytes)]);
   if (ihdr) {
     kv.push(
-      ['Dimensions', `${ihdr.width}x${ihdr.height}`],
-      ['Bit depth', String(ihdr.bitDepth)],
-      ['Colour type', `${ihdr.colorType} (${COLOR_TYPE_NAMES[ihdr.colorType] ?? 'invalid'})`],
+      [T('kv.dimensions'), `${ihdr.width}x${ihdr.height}`],
+      [T('kv.bitDepth'), String(ihdr.bitDepth)],
       [
-        'Interlace',
+        T('kv.colourType'),
+        `${ihdr.colorType} (${colorTypeName(ihdr.colorType) ?? T('value.invalid')})`,
+      ],
+      [
+        T('kv.interlace'),
         ihdr.interlace === 0
-          ? 'none'
+          ? T('value.none')
           : ihdr.interlace === 1
             ? 'Adam7'
-            : `invalid (${ihdr.interlace})`,
+            : T('value.invalidN', { n: ihdr.interlace }),
       ],
     );
   }
-  kv.push(['Chunks', String(chunks.length)]);
+  kv.push([T('kv.chunks'), String(chunks.length)]);
   if (idatIdx.length) {
+    const sizes = { count: idatIdx.length, compressed: formatSize(idat.length) };
     kv.push([
-      'Image data',
-      `${idatIdx.length} IDAT chunk(s), ${formatSize(idat.length)} compressed${rawSize !== null ? `, ${formatSize(rawSize)} inflated` : ''}`,
+      T('kv.imageData'),
+      rawSize !== null
+        ? T('value.idatInflated', { ...sizes, inflated: formatSize(rawSize) })
+        : T('value.idat', sizes),
     ]);
   }
 
@@ -449,7 +500,7 @@ function analysePng(bytes: Uint8Array, name: string | undefined): Output[] {
     head.push({
       type: 'note',
       level: 'success',
-      text: 'The PNG structure is sound: every CRC matches, IEND is the last chunk and nothing is appended.',
+      text: T('note.pngOk'),
     });
   }
   return [
@@ -461,31 +512,38 @@ function analysePng(bytes: Uint8Array, name: string | undefined): Output[] {
     ...tailOutputs,
     {
       type: 'table',
-      label: 'Chunks',
-      columns: ['#', 'Offset', 'Type', 'Length', 'CRC stored', 'CRC computed', 'CRC', 'Notes'],
+      label: T('label.chunks'),
+      columns: [
+        '#',
+        T('col.offset'),
+        T('col.type'),
+        T('col.length'),
+        T('col.crcStored'),
+        T('col.crcComputed'),
+        'CRC',
+        T('col.notes'),
+      ],
       rows,
       highlight,
     },
-    ...(files.length
-      ? [{ type: 'files', label: 'Extracted and repaired files', files } as Output]
-      : []),
+    ...(files.length ? [{ type: 'files', label: T('label.filesRepaired'), files } as Output] : []),
   ];
 }
 
 // ---------------------------------------------------------------- JPEG
 
-const KNOWN_APP: Record<string, string> = {
-  JFIF: 'JFIF header',
-  JFXX: 'JFIF extension (thumbnail)',
-  Exif: 'EXIF metadata (open it in the EXIF / metadata tool)',
-  'http://ns.adobe.com/xap/1.0/': 'XMP metadata',
-  ICC_PROFILE: 'ICC colour profile',
-  MPF: 'Multi-picture format (extra images)',
-  'Photoshop 3.0': 'Photoshop resources (IPTC, thumbnails)',
-  Adobe: 'Adobe colour transform',
-  Ducky: 'Photoshop "Save for Web" quality',
-  FPXR: 'FlashPix',
-  Meta: 'Kodak metadata',
+const KNOWN_APP: Record<string, () => string> = {
+  JFIF: () => T('app.jfif'),
+  JFXX: () => T('app.jfxx'),
+  Exif: () => T('app.exif'),
+  'http://ns.adobe.com/xap/1.0/': () => T('app.xmp'),
+  ICC_PROFILE: () => T('app.icc'),
+  MPF: () => T('app.mpf'),
+  'Photoshop 3.0': () => T('app.photoshop'),
+  Adobe: () => T('app.adobe'),
+  Ducky: () => T('app.ducky'),
+  FPXR: () => 'FlashPix',
+  Meta: () => T('app.meta'),
 };
 
 function jpegDetails(
@@ -493,30 +551,41 @@ function jpegDetails(
   s: JpegParse['segments'][number],
 ): { text: string; odd: boolean } {
   const d = bytes.subarray(s.dataStart, s.dataStart + s.dataLength);
-  if (s.marker === 0xfe) return { text: `comment: ${previewOf(d, 60)}`, odd: true };
+  if (s.marker === 0xfe)
+    return { text: T('detail.comment', { text: previewOf(d, 60) }), odd: true };
   if (s.marker >= 0xe0 && s.marker <= 0xef) {
     const id = appIdentifier(bytes, s);
     const known = KNOWN_APP[id] ?? Object.entries(KNOWN_APP).find(([k]) => id.startsWith(k))?.[1];
     if (id === 'JFIF' && d.length >= 9) {
       return {
-        text: `JFIF ${d[5]}.${String(d[6]).padStart(2, '0')}, density ${u16be(d, 8)}x${u16be(d, 10)}`,
+        text: T('detail.jfif', {
+          version: `${d[5]}.${String(d[6]).padStart(2, '0')}`,
+          x: u16be(d, 8),
+          y: u16be(d, 10),
+        }),
         odd: false,
       };
     }
     return known
-      ? { text: `"${id}" ${known}`, odd: false }
-      : { text: `unknown application data "${id || previewOf(d, 20)}"`, odd: true };
+      ? { text: `"${id}" ${known()}`, odd: false }
+      : { text: T('detail.unknownApp', { id: id || previewOf(d, 20) }), odd: true };
   }
   if (isSof(s.marker) && d.length >= 6) {
     return {
-      text: `${SOF_DESCRIPTIONS[s.marker] ?? 'frame'}, ${u16be(d, 3)}x${u16be(d, 1)}, ${d[0]}-bit, ${d[5]} component(s)`,
+      text: T('detail.sof', {
+        coding: sofDescription(s.marker) ?? T('value.frame'),
+        w: u16be(d, 3),
+        h: u16be(d, 1),
+        bits: d[0]!,
+        count: d[5]!,
+      }),
       odd: false,
     };
   }
   if (s.marker === 0xdb) {
     let tables = 0;
     for (let i = 0; i < d.length; i += d[i]! >> 4 ? 129 : 65) tables++;
-    return { text: `${tables} quantisation table(s)`, odd: false };
+    return { text: T('detail.dqt', { count: tables }), odd: false };
   }
   if (s.marker === 0xc4) {
     let tables = 0;
@@ -527,22 +596,22 @@ function jpegDetails(
       i += 17 + n;
       tables++;
     }
-    return { text: `${tables} Huffman table(s)`, odd: false };
+    return { text: T('detail.dht', { count: tables }), odd: false };
   }
   if (s.marker === 0xda) {
     return {
-      text: `${d[0]} component(s), ${formatSize(s.scanLength)} of compressed data`,
+      text: T('detail.sos', { count: d[0]!, size: formatSize(s.scanLength) }),
       odd: false,
     };
   }
   if (s.marker === 0xdd && d.length >= 2)
-    return { text: `restart interval ${u16be(d, 0)}`, odd: false };
+    return { text: T('detail.dri', { n: u16be(d, 0) }), odd: false };
   return { text: '', odd: false };
 }
 
 function analyseJpeg(bytes: Uint8Array, name: string | undefined): Output[] {
   const parsed = parseJpeg(bytes);
-  if (!parsed) throw new ToolError('Not a JPEG file (it must start with FF D8).');
+  if (!parsed) throw new ToolError(T('error.notJpeg'));
   const stem = baseName(name, 'image');
   const out: Output[] = [];
   const files: FileEntry[] = [];
@@ -575,55 +644,55 @@ function analyseJpeg(bytes: Uint8Array, name: string | undefined): Output[] {
   const sofData = sof ? bytes.subarray(sof.dataStart, sof.dataStart + sof.dataLength) : null;
   const scans = parsed.segments.filter((s) => s.marker === 0xda).length;
   const kv: [string, string][] = [
-    ['Format', 'JPEG'],
-    ['File size', `${formatSize(bytes.length)} (${bytes.length} bytes)`],
+    [T('kv.format'), 'JPEG'],
+    [T('kv.fileSize'), fileSize(bytes)],
   ];
   if (sof && sofData && sofData.length >= 6) {
     kv.push(
-      ['Dimensions', `${u16be(sofData, 3)}x${u16be(sofData, 1)}`],
-      ['Encoding', SOF_DESCRIPTIONS[sof.marker] ?? `SOF${sof.marker - 0xc0}`],
-      ['Components', String(sofData[5])],
+      [T('kv.dimensions'), `${u16be(sofData, 3)}x${u16be(sofData, 1)}`],
+      [T('kv.encoding'), sofDescription(sof.marker) ?? `SOF${sof.marker - 0xc0}`],
+      [T('kv.components'), String(sofData[5])],
     );
   } else {
     notes.push({
       type: 'note',
       level: 'warn',
-      text: 'No start-of-frame segment: the image header is missing.',
+      text: T('note.noSof'),
     });
   }
-  kv.push(['Scans', String(scans)], ['Segments', String(parsed.segments.length)]);
+  kv.push([T('kv.scans'), String(scans)], [T('kv.segments'), String(parsed.segments.length)]);
   const apps = parsed.segments.filter((s) => s.marker >= 0xe0 && s.marker <= 0xef);
   if (apps.length)
     kv.push([
-      'Application segments',
+      T('kv.apps'),
       apps.map((s) => `${s.name} ${appIdentifier(bytes, s) || '?'}`).join(', '),
     ]);
-  if (comments.length) kv.push(['Comments', String(comments.length)]);
+  if (comments.length) kv.push([T('kv.comments'), String(comments.length)]);
 
   const tailOutputs: Output[] = [];
   if (parsed.end !== null && parsed.end < bytes.length) {
     const tail = bytes.subarray(parsed.end);
     issues.push('data after EOI');
     tailOutputs.push(...trailingOutputs(tail, parsed.end, 'eoi', stem, files));
-    kv.push(['Data after FFD9', `${tail.length} bytes`]);
+    kv.push([T('kv.afterEoi'), T('value.bytes', { count: tail.length })]);
   }
   const commentOutputs: Output[] = comments.map((c, i) => ({
     type: 'text',
-    label: `JPEG comment ${i + 1}`,
+    label: T('label.jpegComment', { n: i + 1 }),
     value: c,
   }));
   if (apps.some((s) => appIdentifier(bytes, s) === 'Exif')) {
     notes.push({
       type: 'note',
       level: 'info',
-      text: 'This JPEG carries EXIF data: open the EXIF / metadata tool for the tags, GPS position and embedded thumbnail.',
+      text: T('note.jpegExif'),
     });
   }
   if (!issues.length && !highlight.length) {
     out.push({
       type: 'note',
       level: 'success',
-      text: 'The JPEG structure is sound and nothing is appended after the end-of-image marker.',
+      text: T('note.jpegOk'),
     });
   }
   return [
@@ -634,12 +703,19 @@ function analyseJpeg(bytes: Uint8Array, name: string | undefined): Output[] {
     ...tailOutputs,
     {
       type: 'table',
-      label: 'Segments',
-      columns: ['#', 'Offset', 'Marker', 'Segment', 'Length', 'Details'],
+      label: T('label.segments'),
+      columns: [
+        '#',
+        T('col.offset'),
+        T('col.marker'),
+        T('col.segment'),
+        T('col.length'),
+        T('col.details'),
+      ],
       rows,
       highlight,
     },
-    ...(files.length ? [{ type: 'files', label: 'Extracted files', files } as Output] : []),
+    ...(files.length ? [{ type: 'files', label: T('label.files'), files } as Output] : []),
   ];
 }
 
@@ -647,7 +723,7 @@ function analyseJpeg(bytes: Uint8Array, name: string | undefined): Output[] {
 
 function analyseGif(bytes: Uint8Array, name: string | undefined): Output[] {
   const g = parseGif(bytes);
-  if (!g) throw new ToolError('Not a GIF file.');
+  if (!g) throw new ToolError(T('error.notGif'));
   const stem = baseName(name, 'image');
   const files: FileEntry[] = [];
   const notes: Output[] = [];
@@ -657,25 +733,24 @@ function analyseGif(bytes: Uint8Array, name: string | undefined): Output[] {
     notes.push({ type: 'note', level: 'warn', text: p });
   }
   const kv: [string, string][] = [
-    ['Format', `GIF (${g.version})`],
-    ['File size', `${formatSize(bytes.length)} (${bytes.length} bytes)`],
-    ['Dimensions', `${g.width}x${g.height}`],
-    ['Frames', String(g.frames)],
-    ['Global palette', g.gctSize ? `${g.gctSize} colours` : 'none'],
-    ['Background index', String(g.background)],
+    [T('kv.format'), `GIF (${g.version})`],
+    [T('kv.fileSize'), fileSize(bytes)],
+    [T('kv.dimensions'), `${g.width}x${g.height}`],
+    [T('kv.frames'), String(g.frames)],
+    [T('kv.palette'), g.gctSize ? T('value.colours', { count: g.gctSize }) : T('value.none')],
+    [T('kv.background'), String(g.background)],
   ];
-  if (g.loops !== null) kv.push(['Loop count', g.loops === 0 ? 'forever' : String(g.loops)]);
-  if (g.transparentIndex !== null) kv.push(['Transparent index', String(g.transparentIndex)]);
+  if (g.loops !== null) {
+    kv.push([T('kv.loops'), g.loops === 0 ? T('value.forever') : String(g.loops)]);
+  }
+  if (g.transparentIndex !== null) kv.push([T('kv.transparent'), String(g.transparentIndex)]);
   if (g.delays.length > 1) {
-    kv.push([
-      'Frame delays (1/100 s)',
-      g.delays.slice(0, 80).join(' ') + (g.delays.length > 80 ? ' …' : ''),
-    ]);
+    kv.push([T('kv.delays'), g.delays.slice(0, 80).join(' ') + (g.delays.length > 80 ? ' …' : '')]);
     if (new Set(g.delays).size > 1) {
       notes.push({
         type: 'note',
         level: 'info',
-        text: 'The frame delays are not all equal. Delays are sometimes used to carry data (binary, Morse or ASCII codes); read them in the list above.',
+        text: T('note.delays'),
       });
     }
   }
@@ -687,11 +762,11 @@ function analyseGif(bytes: Uint8Array, name: string | undefined): Output[] {
     ) {
       highlight.push(i);
     }
-    return [i + 1, at(b.offset), b.kind, b.length, b.detail];
+    return [i + 1, at(b.offset), b.label, b.length, b.detail];
   });
   const commentOutputs: Output[] = g.comments.map((c, i) => ({
     type: 'text',
-    label: `GIF comment ${i + 1}`,
+    label: T('label.gifComment', { n: i + 1 }),
     value: c,
   }));
   g.apps.forEach((a, i) => {
@@ -699,7 +774,7 @@ function analyseGif(bytes: Uint8Array, name: string | undefined): Output[] {
     files.push({
       name: `${stem}-app-${a.id.trim() || i}.bin`,
       data: a.data,
-      note: `payload of the application extension "${a.id}${a.auth}"`,
+      note: T('file.appPayload', { id: `${a.id}${a.auth}` }),
     });
   });
   const tailOutputs: Output[] = [];
@@ -708,7 +783,7 @@ function analyseGif(bytes: Uint8Array, name: string | undefined): Output[] {
     tailOutputs.push(
       ...trailingOutputs(bytes.subarray(g.trailerEnd), g.trailerEnd, 'trailer', stem, files),
     );
-    kv.push(['Data after trailer', `${bytes.length - g.trailerEnd} bytes`]);
+    kv.push([T('kv.afterTrailer'), T('value.bytes', { count: bytes.length - g.trailerEnd })]);
   }
   const head: Output[] =
     !issues.length && !highlight.length
@@ -716,7 +791,7 @@ function analyseGif(bytes: Uint8Array, name: string | undefined): Output[] {
           {
             type: 'note',
             level: 'success',
-            text: 'The GIF structure is sound and nothing is appended after the trailer.',
+            text: T('note.gifOk'),
           },
         ]
       : [];
@@ -728,12 +803,12 @@ function analyseGif(bytes: Uint8Array, name: string | undefined): Output[] {
     ...tailOutputs,
     {
       type: 'table',
-      label: 'Blocks',
-      columns: ['#', 'Offset', 'Block', 'Length', 'Details'],
+      label: T('label.blocks'),
+      columns: ['#', T('col.offset'), T('col.block'), T('col.length'), T('col.details')],
       rows,
       highlight,
     },
-    ...(files.length ? [{ type: 'files', label: 'Extracted files', files } as Output] : []),
+    ...(files.length ? [{ type: 'files', label: T('label.files'), files } as Output] : []),
   ];
 }
 
@@ -791,14 +866,12 @@ export default defineTool({
     },
   ],
   run({ bytes, name }) {
-    if (!bytes.length) throw new ToolError('Drop a PNG, JPEG or GIF file.');
+    if (!bytes.length) throw new ToolError(T('error.empty'));
     if (isPngLike(bytes)) return analysePng(bytes, name);
     if (isJpeg(bytes)) return analyseJpeg(bytes, name);
     if (isGif(bytes)) return analyseGif(bytes, name);
     const sig = identify(bytes).find((s) => !s.weak);
-    throw new ToolError(
-      `${sig ? `This looks like ${sig.name}, but this` : 'This'} tool reads the structure of PNG, JPEG and GIF files only. Use "File type" or "Carve" for other formats.`,
-    );
+    throw new ToolError(sig ? T('error.otherSig', { name: signatureName(sig) }) : T('error.other'));
   },
   detect({ bytes }) {
     const n = bytes.length;
@@ -806,19 +879,19 @@ export default defineTool({
       const iend = [0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82];
       const clean = iend.every((v, i) => bytes[n - 8 + i] === v);
       return clean
-        ? { score: 0.5, reason: 'PNG: check chunks and CRCs' }
-        : { score: 0.8, reason: 'PNG that does not end with IEND (appended data or damage)' };
+        ? { score: 0.5, reason: T('detect.png') }
+        : { score: 0.8, reason: T('detect.pngTail') };
     }
     if (isJpeg(bytes)) {
       const clean = bytes[n - 2] === 0xff && bytes[n - 1] === 0xd9;
       return clean
-        ? { score: 0.45, reason: 'JPEG: list segments and comments' }
-        : { score: 0.75, reason: 'JPEG that does not end with FFD9 (appended data or damage)' };
+        ? { score: 0.45, reason: T('detect.jpeg') }
+        : { score: 0.75, reason: T('detect.jpegTail') };
     }
     if (isGif(bytes)) {
       return bytes[n - 1] === 0x3b
-        ? { score: 0.45, reason: 'GIF: list blocks and comments' }
-        : { score: 0.75, reason: 'GIF that does not end with its trailer' };
+        ? { score: 0.45, reason: T('detect.gif') }
+        : { score: 0.75, reason: T('detect.gifTail') };
     }
     return null;
   },

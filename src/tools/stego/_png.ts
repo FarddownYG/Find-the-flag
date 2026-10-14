@@ -1,6 +1,10 @@
 import { Unzlib } from 'fflate';
+import { toolT } from '../../i18n/tool-text';
 import { concatBytes, latin1Decode, u32be, utf8Decode } from '../../lib/bytes';
 import { crc32 } from './_crc32';
+
+/** Text shown by Image structure and Image analyzer: it lives under the image-structure keys. */
+const T = toolT('image-structure');
 
 export const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 
@@ -46,7 +50,7 @@ export function parsePng(bytes: Uint8Array): PngParse | null {
   let off = 8;
   while (off < bytes.length) {
     if (off + 12 > bytes.length) {
-      problem = `Only ${bytes.length - off} byte(s) left at offset ${off}, not enough for a chunk.`;
+      problem = T('problem.pngShort', { count: bytes.length - off, offset: off });
       break;
     }
     const length = u32be(bytes, off);
@@ -54,7 +58,12 @@ export function parsePng(bytes: Uint8Array): PngParse | null {
     const type = latin1Decode(typeBytes);
     const validType = typeBytes.every(isLetter);
     if (length > 0x7fffffff || off + 12 + length > bytes.length) {
-      problem = `Chunk "${type}" at offset ${off} claims ${length} bytes but only ${Math.max(0, bytes.length - off - 12)} remain (length field corrupt or file truncated).`;
+      problem = T('problem.pngLength', {
+        type,
+        offset: off,
+        count: length,
+        remain: Math.max(0, bytes.length - off - 12),
+      });
       break;
     }
     const dataStart = off + 8;
@@ -102,13 +111,15 @@ export function readIhdr(bytes: Uint8Array, dataStart: number): Ihdr {
   };
 }
 
-export const COLOR_TYPE_NAMES: Record<number, string> = {
-  0: 'grayscale',
-  2: 'RGB',
-  3: 'indexed (palette)',
-  4: 'grayscale + alpha',
-  6: 'RGBA',
-};
+/** Name of a PNG colour type ("RGBA", "indexed (palette)"...), or undefined if it is invalid. */
+export function colorTypeName(colorType: number): string | undefined {
+  if (colorType === 0) return T('color.gray');
+  if (colorType === 2) return 'RGB';
+  if (colorType === 3) return T('color.indexed');
+  if (colorType === 4) return T('color.grayAlpha');
+  if (colorType === 6) return 'RGBA';
+  return undefined;
+}
 
 const SAMPLES: Record<number, number> = { 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 };
 const DEPTHS: Record<number, number[]> = {
@@ -208,7 +219,14 @@ function indexOfZero(b: Uint8Array, from: number): number {
 export function decodeTextChunk(type: string, data: Uint8Array): PngText | null {
   if (type === 'tEXt') {
     const z = indexOfZero(data, 0);
-    if (z < 0) return { chunk: 'tEXt', keyword: '', text: latin1Decode(data), note: 'no keyword' };
+    if (z < 0) {
+      return {
+        chunk: 'tEXt',
+        keyword: '',
+        text: latin1Decode(data),
+        note: T('textNote.noKeyword'),
+      };
+    }
     return {
       chunk: 'tEXt',
       keyword: latin1Decode(data.subarray(0, z)),
@@ -223,9 +241,7 @@ export function decodeTextChunk(type: string, data: Uint8Array): PngText | null 
       chunk: 'zTXt',
       keyword: latin1Decode(data.subarray(0, z)),
       text: latin1Decode(inflated.data),
-      note: inflated.truncated
-        ? 'compressed data damaged or very large, text is partial'
-        : undefined,
+      note: inflated.truncated ? T('textNote.zPartial') : undefined,
     };
   }
   if (type === 'iTXt') {
@@ -245,8 +261,8 @@ export function decodeTextChunk(type: string, data: Uint8Array): PngText | null 
       text: utf8Decode(inflated ? inflated.data : body),
       note:
         [
-          lang ? `language ${lang}` : '',
-          inflated?.truncated ? 'compressed data damaged, text is partial' : '',
+          lang ? T('textNote.language', { lang }) : '',
+          inflated?.truncated ? T('textNote.iPartial') : '',
         ]
           .filter(Boolean)
           .join(', ') || undefined,
@@ -277,41 +293,42 @@ export function pngTime(bytes: Uint8Array, chunks: PngChunk[]): string | null {
 
 // ---------- chunk catalogue ----------
 
-export const KNOWN_CHUNKS: Record<string, string> = {
-  IHDR: 'Image header',
-  PLTE: 'Palette',
-  IDAT: 'Image data',
-  IEND: 'End of image',
-  tRNS: 'Transparency',
-  gAMA: 'Gamma',
-  cHRM: 'Chromaticities',
-  sRGB: 'sRGB rendering intent',
-  iCCP: 'ICC colour profile',
-  sBIT: 'Significant bits',
-  bKGD: 'Background colour',
-  hIST: 'Palette histogram',
-  pHYs: 'Physical pixel size',
-  sPLT: 'Suggested palette',
-  tIME: 'Last modification time',
-  tEXt: 'Text (Latin-1)',
-  zTXt: 'Compressed text',
-  iTXt: 'International text (UTF-8)',
-  eXIf: 'EXIF metadata',
-  cICP: 'Colour code points',
-  mDCV: 'Mastering display colour volume',
-  cLLI: 'Content light level',
-  acTL: 'APNG animation control',
-  fcTL: 'APNG frame control',
-  fdAT: 'APNG frame data',
-  oFFs: 'Image offset',
-  pCAL: 'Pixel calibration',
-  sCAL: 'Physical scale',
-  sTER: 'Stereo layout',
-  gIFg: 'GIF graphic control',
-  gIFx: 'GIF application extension',
-  CgBI: 'Apple optimised PNG',
-  iDOT: 'Apple multi-threaded decode hint',
-  vpAg: 'Virtual page (ImageMagick)',
+/** Known chunk types and their (translated) description. */
+export const KNOWN_CHUNKS: Record<string, () => string> = {
+  IHDR: () => T('chunk.IHDR'),
+  PLTE: () => T('chunk.PLTE'),
+  IDAT: () => T('chunk.IDAT'),
+  IEND: () => T('chunk.IEND'),
+  tRNS: () => T('chunk.tRNS'),
+  gAMA: () => T('chunk.gAMA'),
+  cHRM: () => T('chunk.cHRM'),
+  sRGB: () => T('chunk.sRGB'),
+  iCCP: () => T('chunk.iCCP'),
+  sBIT: () => T('chunk.sBIT'),
+  bKGD: () => T('chunk.bKGD'),
+  hIST: () => T('chunk.hIST'),
+  pHYs: () => T('chunk.pHYs'),
+  sPLT: () => T('chunk.sPLT'),
+  tIME: () => T('chunk.tIME'),
+  tEXt: () => T('chunk.tEXt'),
+  zTXt: () => T('chunk.zTXt'),
+  iTXt: () => T('chunk.iTXt'),
+  eXIf: () => T('chunk.eXIf'),
+  cICP: () => T('chunk.cICP'),
+  mDCV: () => T('chunk.mDCV'),
+  cLLI: () => T('chunk.cLLI'),
+  acTL: () => T('chunk.acTL'),
+  fcTL: () => T('chunk.fcTL'),
+  fdAT: () => T('chunk.fdAT'),
+  oFFs: () => T('chunk.oFFs'),
+  pCAL: () => T('chunk.pCAL'),
+  sCAL: () => T('chunk.sCAL'),
+  sTER: () => T('chunk.sTER'),
+  gIFg: () => T('chunk.gIFg'),
+  gIFx: () => T('chunk.gIFx'),
+  CgBI: () => T('chunk.CgBI'),
+  iDOT: () => T('chunk.iDOT'),
+  vpAg: () => T('chunk.vpAg'),
 };
 
 /** Check the 'safe' naming bits and printable-ness of a chunk type. */
@@ -323,12 +340,12 @@ export function chunkKind(c: PngChunk): {
   const known = c.type in KNOWN_CHUNKS;
   const ancillary = (c.type.charCodeAt(0) & 0x20) !== 0;
   const description = known
-    ? KNOWN_CHUNKS[c.type]!
+    ? KNOWN_CHUNKS[c.type]!()
     : !c.validType
-      ? 'Invalid chunk type'
+      ? T('chunk.invalid')
       : (c.type.charCodeAt(1) & 0x20) !== 0
-        ? 'Private chunk (not in the PNG spec)'
-        : 'Unknown chunk';
+        ? T('chunk.private')
+        : T('chunk.unknown');
   return { known, ancillary, description };
 }
 

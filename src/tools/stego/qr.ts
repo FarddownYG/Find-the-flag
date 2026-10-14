@@ -1,8 +1,11 @@
 import { defineTool } from '../../core/define';
 import { ToolError } from '../../core/errors';
 import type { Output } from '../../core/types';
+import { toolT } from '../../i18n/tool-text';
 import { isValidUtf8, printableRatio, toHex, utf8Decode } from '../../lib/bytes';
 import { scanQr } from './_qr-scan';
+
+const T = toolT('qr');
 
 /** Control characters other than tab, newline and carriage return. */
 function hasControlChars(s: string): boolean {
@@ -31,20 +34,20 @@ export default defineTool({
     },
   ],
   run({ image }) {
-    if (!image.width || !image.height) throw new ToolError('The image has no pixels.');
+    if (!image.width || !image.height) throw new ToolError(T('error.noPixels'));
     const { hits, tried } = scanQr(image);
     if (!hits.length) {
       return [
         {
           type: 'note',
           level: 'warn',
-          text: `No QR code found after ${tried} attempts (as is, inverted, with a margin, binarized, rescaled). Crop tightly around the code, make sure it is flat and sharp, or look for it first with the Bit planes tool if it may be hidden in the pixels.`,
+          text: T('note.none', { count: tried }),
         },
       ];
     }
     const out: Output[] = [];
     if (hits.length > 1) {
-      out.push({ type: 'note', level: 'info', text: `${hits.length} QR codes found.` });
+      out.push({ type: 'note', level: 'info', text: T('note.count', { count: hits.length }) });
     }
     hits.forEach((hit, i) => {
       const { code } = hit;
@@ -55,34 +58,42 @@ export default defineTool({
       const modules = 17 + 4 * code.version;
       out.push({
         type: 'kv',
-        label: `QR code${tag}`,
+        label: T('label.code', { tag }),
         entries: [
-          ['Version', `${code.version} (${modules}x${modules} modules)`],
-          ['Payload', `${bytes.length} bytes, ${isText ? 'text' : 'binary'}`],
+          [T('kv.version'), T('value.version', { version: code.version, modules })],
           [
-            'Encoding',
-            [...new Set(code.chunks.map((c) => String(c.type)))].join(', ') || 'unknown',
+            T('kv.payload'),
+            isText
+              ? T('value.payloadText', { count: bytes.length })
+              : T('value.payloadBinary', { count: bytes.length }),
           ],
-          ['Read after', hit.how],
-          ['Position', `around (${hit.centre.x}, ${hit.centre.y}), about ${hit.size} px wide`],
+          [
+            T('kv.encoding'),
+            [...new Set(code.chunks.map((c) => String(c.type)))].join(', ') || T('value.unknown'),
+          ],
+          [T('kv.readAfter'), hit.how],
+          [
+            T('kv.position'),
+            T('value.position', { x: hit.centre.x, y: hit.centre.y, size: hit.size }),
+          ],
         ],
       });
       if (isText) {
-        out.push({ type: 'text', label: `Decoded text${tag}`, value: utf8Decode(bytes) });
+        out.push({ type: 'text', label: T('label.decoded', { tag }), value: utf8Decode(bytes) });
       } else {
         out.push({
           type: 'note',
           level: 'info',
-          text: `The payload is not plain text (starts with ${toHex(bytes.subarray(0, 16), ' ')}). Download the raw bytes below and identify them with File type.`,
+          text: T('note.binary', { hex: toHex(bytes.subarray(0, 16), ' ') }),
         });
         out.push({
           type: 'bytes',
-          label: `Raw bytes${tag}`,
+          label: T('label.raw', { tag }),
           value: bytes,
           filename: `qr-data${tag.trim() ? `-${i + 1}` : ''}.bin`,
         });
         if (code.data && printableRatio(new TextEncoder().encode(code.data)) > 0.9) {
-          out.push({ type: 'text', label: `jsQR text view${tag}`, value: code.data });
+          out.push({ type: 'text', label: T('label.jsqr', { tag }), value: code.data });
         }
       }
     });
