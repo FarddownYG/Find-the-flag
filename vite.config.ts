@@ -8,5 +8,7 @@ export default defineConfig({
   test: {
     include: ['src/**/*.test.ts'],
     environment: 'node',
+    // The registry is an import.meta.glob: a cached transform would hide newly added tools.
+    fsModuleCache: false,
   },
 });
