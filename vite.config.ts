@@ -10,6 +10,9 @@ export default defineConfig({
   test: {
     include: ['src/**/*.test.ts'],
     environment: 'node',
+    // Some suites stream tens of MiB or run every reference case: seconds on a quiet machine,
+    // more on a shared CI runner. Speed budgets are asserted explicitly where they matter.
+    testTimeout: 30_000,
     // The registry is an import.meta.glob: a cached transform would hide newly added tools.
     fsModuleCache: false,
   },
