@@ -4,11 +4,12 @@ import { h } from './dom';
 
 const TILES = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
 
-function dms(v: number, pos: string, neg: string): string {
-  const a = Math.abs(v);
-  const d = Math.floor(a);
-  const m = Math.floor((a - d) * 60);
-  const s = ((a - d) * 60 - m) * 60;
+/** Degrees-minutes-seconds; the total is rounded first so 59.999″ never prints as "60″". */
+export function dms(v: number, pos: string, neg: string): string {
+  const total = Math.round(Math.abs(v) * 360000) / 100;
+  const d = Math.floor(total / 3600);
+  const m = Math.floor((total - d * 3600) / 60);
+  const s = total - d * 3600 - m * 60;
   return `${d}° ${m}′ ${s.toFixed(2)}″ ${v < 0 ? neg : pos}`;
 }
 
@@ -37,6 +38,8 @@ export function mapBlock(o: Extract<Output, { type: 'map' }>): HTMLElement {
             [o.lat, o.lon],
             o.zoom ?? 15,
           );
+          // The default prefix is a bare link to leafletjs.com; keep the attribution text only.
+          map.attributionControl.setPrefix(false);
           L.tileLayer(TILES, {
             maxZoom: 19,
             attribution: '© OpenStreetMap contributors',
