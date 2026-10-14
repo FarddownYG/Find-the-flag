@@ -2,8 +2,11 @@
  * TAR reading for the Archive tool: ustar, GNU long names (L/K), pax headers (x), old v7 tars.
  * Names are text only, nothing is written anywhere.
  */
+import { toolT } from '../../i18n/tool-text';
 import { utf8Decode } from '../../lib/bytes';
 import { tarHeaderValid } from '../../lib/signatures';
+
+const T = toolT('archive');
 
 export interface TarEntry {
   name: string;
@@ -88,7 +91,7 @@ export function parseTar(b: Uint8Array): TarInfo | null {
       break;
     }
     if (!tarHeaderValid(b, p)) {
-      stopped = `offset ${p} is not a valid TAR header`;
+      stopped = T('tar.badHeader', { offset: p });
       break;
     }
     const typeflag = b[p + 156] === 0 ? '0' : String.fromCharCode(b[p + 156]!);
@@ -124,7 +127,7 @@ export function parseTar(b: Uint8Array): TarInfo | null {
     }
     name = pax.path ?? longName ?? name;
     const notes: string[] = [];
-    if (carriesData && dataStart + size > b.length) notes.push('data is cut off');
+    if (carriesData && dataStart + size > b.length) notes.push(T('tar.cutOff'));
     const mtimeRaw = pax.mtime ? Math.floor(parseFloat(pax.mtime)) : octal(b, p + 136, 12);
     entries.push({
       name,

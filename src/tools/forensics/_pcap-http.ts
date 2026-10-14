@@ -1,6 +1,9 @@
 import { Decompress } from 'fflate';
+import { toolT } from '../../i18n/tool-text';
 import { indexOfBytes, latin1Decode, latin1Encode } from '../../lib/bytes';
 import { joinBytes } from './_pcap-addr';
+
+const T = toolT('pcap');
 
 export interface HttpMessage {
   kind: 'request' | 'response';
@@ -204,12 +207,12 @@ export function parseHttpStream(
       raw = c.body;
       next = c.next;
       notes.push('chunked');
-      if (!c.complete) notes.push('body cut off');
+      if (!c.complete) notes.push(T('http.cutOff'));
     } else if (cl !== undefined && /^\d+$/.test(cl)) {
       const want = Number(cl);
       next = Math.min(bodyStart + want, data.length);
       raw = data.subarray(bodyStart, next);
-      if (raw.length < want) notes.push('body cut off');
+      if (raw.length < want) notes.push(T('http.cutOff'));
     } else if (kind === 'request') {
       raw = new Uint8Array(0);
       next = bodyStart;
@@ -221,10 +224,10 @@ export function parseHttpStream(
     if (raw.length && /gzip|deflate|x-gzip/.test(enc)) {
       const plain = inflate(raw);
       if (plain) {
-        notes.push(enc.includes('gzip') ? 'gunzipped' : 'inflated');
+        notes.push(enc.includes('gzip') ? T('http.gunzipped') : T('http.inflated'));
         raw = plain;
       } else {
-        notes.push(`${enc} body could not be decompressed`);
+        notes.push(T('http.notDecompressed', { encoding: enc }));
       }
     }
     msg.body = raw;

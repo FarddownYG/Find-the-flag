@@ -1,17 +1,20 @@
 import { defineTool } from '../../core/define';
 import type { Output } from '../../core/types';
 import { formatSize, indexOfBytes, latin1Decode, printableRatio, toHex } from '../../lib/bytes';
+import { signatureName, toolT } from '../../i18n/tool-text';
 import { identify, SIGNATURES, type Signature } from '../../lib/signatures';
 
+const T = toolT('file-type');
+
 /** ZIP-based formats are told apart by the names of their entries. */
-const ZIP_FLAVOURS: [string, string][] = [
-  ['word/', 'Word document (docx)'],
-  ['xl/', 'Excel workbook (xlsx)'],
-  ['ppt/', 'PowerPoint deck (pptx)'],
-  ['AndroidManifest.xml', 'Android package (apk)'],
-  ['META-INF/MANIFEST.MF', 'Java archive (jar)'],
-  ['mimetypeapplication/vnd.oasis', 'OpenDocument (odt/ods/odp)'],
-  ['mimetypeapplication/epub', 'EPUB e-book'],
+const ZIP_FLAVOURS: [string, () => string][] = [
+  ['word/', () => T('flavour.docx')],
+  ['xl/', () => T('flavour.xlsx')],
+  ['ppt/', () => T('flavour.pptx')],
+  ['AndroidManifest.xml', () => T('flavour.apk')],
+  ['META-INF/MANIFEST.MF', () => T('flavour.jar')],
+  ['mimetypeapplication/vnd.oasis', () => T('flavour.odf')],
+  ['mimetypeapplication/epub', () => T('flavour.epub')],
 ];
 
 /** Signatures whose first bytes are within 1-2 bit-flips/bytes of this header: likely tampered. */
@@ -57,29 +60,33 @@ export default defineTool({
     const head = toHex(bytes.subarray(0, 16), ' ');
     const entries: [string, string][] = [
       [
-        'Type',
-        best ? best.name : printableRatio(bytes) > 0.95 ? 'Plain text (no magic)' : 'Unknown',
+        T('kv.type'),
+        best
+          ? signatureName(best)
+          : printableRatio(bytes) > 0.95
+            ? T('value.plainText')
+            : T('value.unknown'),
       ],
     ];
-    if (best) entries.push(['Extension', `.${best.ext}`]);
-    if (best?.mime) entries.push(['MIME', best.mime]);
+    if (best) entries.push([T('kv.extension'), `.${best.ext}`]);
+    if (best?.mime) entries.push([T('kv.mime'), best.mime]);
     if (best?.id === 'zip') {
       const names = latin1Decode(bytes.subarray(0, Math.min(bytes.length, 1 << 20)));
       const flavour = ZIP_FLAVOURS.find(([needle]) => names.includes(needle));
-      if (flavour) entries.push(['ZIP flavour', flavour[1]]);
+      if (flavour) entries.push([T('kv.zipFlavour'), flavour[1]()]);
     }
     entries.push(
-      ['Size', `${formatSize(bytes.length)} (${bytes.length} bytes)`],
-      ['First bytes', head],
+      [T('kv.size'), T('value.size', { size: formatSize(bytes.length), count: bytes.length })],
+      [T('kv.firstBytes'), head],
     );
-    out.push({ type: 'kv', label: 'Identification', entries });
+    out.push({ type: 'kv', label: T('label.identification'), entries });
 
     const ext = name?.includes('.') ? name.split('.').pop()!.toLowerCase() : null;
     if (best && ext && ext !== best.ext && !matches.some((m) => m.ext === ext)) {
       out.push({
         type: 'note',
         level: 'warn',
-        text: `Extension ".${ext}" does not match the content (${best.name}). Rename it to .${best.ext}.`,
+        text: T('note.wrongExt', { ext, name: signatureName(best), expected: best.ext }),
       });
     }
     if (!best || best.weak) {
@@ -87,16 +94,22 @@ export default defineTool({
         out.push({
           type: 'note',
           level: 'warn',
-          text: `Looks like a damaged ${sig.name} header (${diff} byte${diff > 1 ? 's' : ''} off). Expected ${sig.magic.map((m) => (m === null ? '??' : m.toString(16).padStart(2, '0'))).join(' ')} — fix it in a hex editor.`,
+          text: T('note.damaged', {
+            name: signatureName(sig),
+            count: diff,
+            magic: sig.magic
+              .map((m) => (m === null ? '??' : m.toString(16).padStart(2, '0')))
+              .join(' '),
+          }),
         });
       }
     }
     if (matches.length > 1) {
       out.push({
         type: 'table',
-        label: 'All matching signatures',
-        columns: ['Type', 'Ext', 'Magic length'],
-        rows: matches.map((m) => [m.name, m.ext, m.magic.length]),
+        label: T('label.allMatches'),
+        columns: [T('col.type'), T('col.ext'), T('col.magicLength')],
+        rows: matches.map((m) => [signatureName(m), m.ext, m.magic.length]),
       });
     }
     // Something else glued after/inside? Point at the carving tool.
@@ -105,7 +118,7 @@ export default defineTool({
       out.push({
         type: 'note',
         level: 'info',
-        text: `A ZIP header also appears at offset ${embedded}. Use Carve to extract embedded files.`,
+        text: T('note.embeddedZip', { offset: embedded }),
       });
     }
     return out;
@@ -113,6 +126,6 @@ export default defineTool({
   detect({ bytes, text }) {
     if (text !== null && printableRatio(bytes) > 0.95) return null;
     const best = identify(bytes)[0];
-    return best ? { score: best.weak ? 0.4 : 0.9, reason: best.name } : { score: 0.3 };
+    return best ? { score: best.weak ? 0.4 : 0.9, reason: signatureName(best) } : { score: 0.3 };
   },
 });

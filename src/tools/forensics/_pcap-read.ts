@@ -1,6 +1,9 @@
 import { gunzipSync } from 'fflate';
 import { ToolError } from '../../core/errors';
+import { toolT } from '../../i18n/tool-text';
 import { u16be, u16le, u32be, u32le } from '../../lib/bytes';
+
+const T = toolT('pcap');
 
 /** One captured frame, still undecoded. */
 export interface RawPacket {
@@ -59,13 +62,11 @@ export function readCapture(input: Uint8Array): Capture {
       bytes = gunzipSync(bytes);
       gz = true;
     } catch {
-      throw new ToolError('The file is gzip-compressed but could not be decompressed (damaged?).');
+      throw new ToolError(T('error.gzip'));
     }
   }
   if (bytes.length < 12) {
-    throw new ToolError(
-      'Input is too short to be a capture. Open a .pcap or .pcapng file (not pasted text).',
-    );
+    throw new ToolError(T('error.tooShort'));
   }
   const magic = u32le(bytes, 0);
   const cap =
@@ -75,22 +76,22 @@ export function readCapture(input: Uint8Array): Capture {
         ? readPcap(bytes, PCAP_MAGICS[magic]!)
         : null;
   if (!cap) {
-    throw new ToolError(
-      'Not a pcap or pcapng file (bad magic bytes). Use File type to check the file, or ' +
-        'export the capture from Wireshark as "Wireshark/tcpdump - pcap".',
-    );
+    throw new ToolError(T('error.badMagic'));
   }
-  if (gz) cap.format += ', gzip-compressed';
+  if (gz) cap.format = T('format.gzip', { format: cap.format });
   return cap;
 }
 
 function readPcap(b: Uint8Array, kind: { le: boolean; ns: boolean }): Capture {
   const u32 = kind.le ? u32le : u32be;
-  if (b.length < 24) throw new ToolError('The pcap global header is cut off (needs 24 bytes).');
+  if (b.length < 24) throw new ToolError(T('error.globalHeader'));
   const link = u32(b, 20) & 0xffff;
   const snaplen = u32(b, 16);
   const cap: Capture = {
-    format: `pcap (${kind.le ? 'little' : 'big'}-endian, ${kind.ns ? 'nanosecond' : 'microsecond'})`,
+    format: T('format.pcap', {
+      order: kind.le ? T('format.little') : T('format.big'),
+      unit: kind.ns ? T('format.nanosecond') : T('format.microsecond'),
+    }),
     packets: [],
     linkTypes: [link],
     truncated: 0,
@@ -199,7 +200,9 @@ function readPcapng(b: Uint8Array): Capture {
     const bodyEnd = o + len - 4;
     switch (type) {
       case PCAPNG_SHB:
-        if (sections === 1) cap.format = `pcapng (${le ? 'little' : 'big'}-endian)`;
+        if (sections === 1) {
+          cap.format = T('format.pcapng', { order: le ? T('format.little') : T('format.big') });
+        }
         break;
       case 1: {
         // Interface Description Block

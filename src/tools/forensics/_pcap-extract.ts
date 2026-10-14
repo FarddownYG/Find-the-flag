@@ -1,9 +1,12 @@
 import { buildFlagRegex, findFlags } from '../../core/flags';
+import { toolT } from '../../i18n/tool-text';
 import { fromBase64, fromHex, latin1Decode, latin1Encode, printableRatio } from '../../lib/bytes';
 import { joinBytes } from './_pcap-addr';
 import type { Analysis } from './_pcap-analyze';
 import { headerOf, parseMultipart } from './_pcap-http';
 import type { Stream } from './_pcap-streams';
+
+const T = toolT('pcap');
 
 // ---------- flag hunting ----------
 
@@ -36,34 +39,43 @@ export function findFlagHits(a: Analysis, custom?: string): FlagHit[] {
       hits.push({ flag: f.value, where });
     }
   };
-  const label = (s: Stream) =>
-    `${s.transport} stream ${s.index} (${s.clientIp}:${s.clientPort} to ${s.serverIp}:${s.serverPort})`;
+  const ends = (s: Stream) => ({
+    transport: s.transport,
+    index: s.index,
+    client: `${s.clientIp}:${s.clientPort}`,
+    server: `${s.serverIp}:${s.serverPort}`,
+  });
   for (const s of a.streams) {
-    scan(latin1Decode(s.c2s), `${label(s)}, client to server`);
-    scan(latin1Decode(s.s2c), `${label(s)}, server to client`);
+    scan(latin1Decode(s.c2s), T('where.c2s', ends(s)));
+    scan(latin1Decode(s.s2c), T('where.s2c', ends(s)));
   }
   for (const x of a.http()) {
     for (const m of [x.request, x.response]) {
       if (!m) continue;
-      const who = `HTTP ${m.kind === 'request' ? `${m.method} ${m.uri}` : m.startLine}, stream ${x.stream}`;
-      scan(latin1Decode(m.body), `${who} (body)`);
-      if (m.kind === 'request') scan(urlDecode(m.uri), `${who} (URL)`);
+      const who = {
+        message: m.kind === 'request' ? `${m.method} ${m.uri}` : m.startLine,
+        stream: x.stream,
+      };
+      scan(latin1Decode(m.body), T('where.httpBody', who));
+      if (m.kind === 'request') scan(urlDecode(m.uri), T('where.httpUrl', who));
     }
   }
   for (const p of a.pkts) {
     if (p.transport === 'icmp' && p.icmp?.isEcho && p.payload.length) {
-      scan(latin1Decode(p.payload), `ICMP packet ${p.no}`);
+      scan(latin1Decode(p.payload), T('where.icmp', { no: p.no }));
     } else if (p.transport === 'udp' && p.stream < 0 && p.payload.length) {
-      scan(latin1Decode(p.payload), `${p.proto} packet ${p.no}`);
+      scan(latin1Decode(p.payload), T('where.udp', { proto: p.proto, no: p.no }));
     }
   }
   for (const e of a.dns()) {
-    for (const q of e.msg.questions) scan(q.name, `DNS name in packet ${e.no}`);
-    for (const r of e.msg.answers) scan(r.data, `DNS answer in packet ${e.no}`);
+    for (const q of e.msg.questions) scan(q.name, T('where.dnsName', { no: e.no }));
+    for (const r of e.msg.answers) scan(r.data, T('where.dnsAnswer', { no: e.no }));
   }
   for (const g of [...icmpExfil(a, false), ...dnsExfil(a, 2)]) {
-    scan(latin1Decode(g.data), `${g.label} (joined)`);
-    for (const d of g.decodings) scan(latin1Decode(d.data), `${g.label} (${d.name})`);
+    scan(latin1Decode(g.data), T('where.joined', { group: g.label }));
+    for (const d of g.decodings) {
+      scan(latin1Decode(d.data), T('where.decoded', { group: g.label, decoding: d.name }));
+    }
   }
   return hits.slice(0, MAX_FLAGS);
 }
@@ -133,9 +145,11 @@ function decodingCandidates(data: Uint8Array): { name: string; data: Uint8Array 
     }
   };
   try {
-    if (/^[0-9a-f]+$/i.test(text) && text.length % 2 === 0) keep('decoded from hex', fromHex(text));
-    if (/^[A-Za-z2-7]+=*$/.test(text)) keep('decoded from base32', fromBase32(text));
-    if (/^[A-Za-z0-9+/_-]+=*$/.test(text)) keep('decoded from base64', fromBase64(text));
+    if (/^[0-9a-f]+$/i.test(text) && text.length % 2 === 0) {
+      keep(T('decoding.hex'), fromHex(text));
+    }
+    if (/^[A-Za-z2-7]+=*$/.test(text)) keep(T('decoding.base32'), fromBase32(text));
+    if (/^[A-Za-z0-9+/_-]+=*$/.test(text)) keep(T('decoding.base64'), fromBase64(text));
   } catch {
     return out; // fromHex/fromBase64 reject malformed input: keep what decoded so far
   }
@@ -157,6 +171,7 @@ function isPingPadding(p: Uint8Array): boolean {
 /** Echo-request payloads concatenated per source/destination pair, in capture order. */
 export function icmpExfil(a: Analysis, sortBySeq: boolean): ExfilGroup[] {
   const groups = new Map<string, { seq: number; data: Uint8Array }[]>();
+  const ends = new Map<string, { src: string; dst: string }>();
   for (const p of a.pkts) {
     if (p.transport !== 'icmp' || !p.icmp?.isEcho || !p.icmp.isRequest || !p.payload.length)
       continue;
@@ -164,6 +179,7 @@ export function icmpExfil(a: Analysis, sortBySeq: boolean): ExfilGroup[] {
     const list = groups.get(key) ?? [];
     list.push({ seq: p.icmp.seq, data: p.payload });
     groups.set(key, list);
+    ends.set(key, { src: p.src, dst: p.dst });
   }
   const out: ExfilGroup[] = [];
   for (const [key, list] of groups) {
@@ -172,13 +188,11 @@ export function icmpExfil(a: Analysis, sortBySeq: boolean): ExfilGroup[] {
     const padding = list.every((x) => isPingPadding(x.data));
     out.push({
       kind: 'ICMP',
-      label: `ICMP echo requests ${key}`,
+      label: T('exfil.icmp', ends.get(key)!),
       packets: list.length,
       data,
       decodings: decodingCandidates(data),
-      note: padding
-        ? 'Looks like ordinary ping padding (incrementing bytes), probably not exfiltration.'
-        : '',
+      note: padding ? T('exfil.padding') : '',
     });
   }
   return out.sort(
@@ -211,7 +225,7 @@ export function dnsExfil(a: Analysis, domainLabels: number): ExfilGroup[] {
     const data = latin1Encode(g.chunks.join(''));
     out.push({
       kind: 'DNS',
-      label: `DNS subdomain labels under ${domain}`,
+      label: T('exfil.dns', { domain }),
       packets: g.names.length,
       data,
       decodings: decodingCandidates(data),
@@ -294,7 +308,14 @@ export function exportObjects(a: Analysis): ExportedFile[] {
       add(
         nameFromUri(req?.uri ?? '/', type),
         res.body,
-        `HTTP ${res.status} ${type.split(';')[0]!.trim() || 'no content type'} from ${where}, stream ${x.stream}, ${res.body.length} bytes${notes}`,
+        T('export.response', {
+          status: res.status,
+          type: type.split(';')[0]!.trim() || T('export.noType'),
+          where,
+          stream: x.stream,
+          count: res.body.length,
+          notes,
+        }),
       );
     }
     if (req && req.body.length && req.method !== 'GET') {
@@ -306,14 +327,25 @@ export function exportObjects(a: Analysis): ExportedFile[] {
           add(
             safeName(p.filename!.split(/[\\/]/).pop() ?? '') || 'upload.bin',
             p.data,
-            `${req.method} upload (field "${p.name}") to ${where}, stream ${x.stream}, ${p.data.length} bytes`,
+            T('export.upload', {
+              method: req.method,
+              field: p.name,
+              where,
+              stream: x.stream,
+              count: p.data.length,
+            }),
           );
         }
       } else {
         add(
           `${req.method.toLowerCase()}-${nameFromUri(req.uri, type)}`,
           req.body,
-          `${req.method} body to ${where}, stream ${x.stream}, ${req.body.length} bytes`,
+          T('export.body', {
+            method: req.method,
+            where,
+            stream: x.stream,
+            count: req.body.length,
+          }),
         );
       }
     }
@@ -325,21 +357,27 @@ export function exportObjects(a: Analysis): ExportedFile[] {
     add(
       isList ? 'ftp-listing.txt' : safeName(t.name.split('/').pop() ?? '') || 'ftp-file.bin',
       bigger,
-      `FTP-DATA ${t.upload ? 'upload' : isList ? 'listing' : 'download'} on stream ${t.data.index}, ${bigger.length} bytes`,
+      t.upload
+        ? T('export.ftpUpload', { stream: t.data.index, count: bigger.length })
+        : isList
+          ? T('export.ftpListing', { stream: t.data.index, count: bigger.length })
+          : T('export.ftpDownload', { stream: t.data.index, count: bigger.length }),
     );
   }
   for (const s of a.streams) {
     if (s.transport !== 'TCP' || s.proto !== 'TCP') continue;
     for (const [dir, data] of [
-      ['client to server', s.c2s],
-      ['server to client', s.s2c],
+      ['c2s', s.c2s],
+      ['s2c', s.s2c],
     ] as const) {
       const ext = magicExtension(data);
       if (ext)
         add(
           `stream-${s.index}.${ext}`,
           data,
-          `raw TCP stream ${s.index} (${dir}), ${data.length} bytes`,
+          dir === 'c2s'
+            ? T('export.rawC2s', { stream: s.index, count: data.length })
+            : T('export.rawS2c', { stream: s.index, count: data.length }),
         );
     }
   }

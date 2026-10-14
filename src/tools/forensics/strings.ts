@@ -2,7 +2,10 @@ import { bool, defineTool, number, text, toggle } from '../../core/define';
 import { ToolError } from '../../core/errors';
 import { DEFAULT_FLAG_PATTERN } from '../../core/flags';
 import type { Output } from '../../core/types';
+import { toolT } from '../../i18n/tool-text';
 import { latin1Decode, printableRatio } from '../../lib/bytes';
+
+const T = toolT('strings');
 
 const MAX_RESULTS = 20_000;
 /** Safety valve while scanning: random data can hold millions of tiny strings. */
@@ -114,9 +117,7 @@ function makeFilter(raw: string): ((s: string) => boolean) | null {
     try {
       re = new RegExp(m[1]!, m[2]);
     } catch (e) {
-      throw new ToolError(
-        `The filter ${t} is not a valid regular expression (${(e as Error).message}). Write it like /pass(word)?/i, or use plain text.`,
-      );
+      throw new ToolError(T('error.badRegex', { filter: t, message: (e as Error).message }));
     }
     return (s) => re.test(s);
   }
@@ -185,7 +186,7 @@ export default defineTool({
     },
   ],
   run({ bytes }, { min, encoding, filter, offsets }) {
-    if (bytes.length === 0) throw new ToolError('The input is empty: drop a file to scan.');
+    if (bytes.length === 0) throw new ToolError(T('error.empty'));
     const encs: Encoding[] = encoding === 'all' ? ['ascii', 'utf16le', 'utf16be'] : [encoding];
     const test = makeFilter(filter);
     const flagRe = new RegExp(DEFAULT_FLAG_PATTERN);
@@ -204,16 +205,16 @@ export default defineTool({
       out.push({
         type: 'note',
         level: 'info',
-        text: test
-          ? `${scanned} string${scanned === 1 ? '' : 's'} found, none matches the filter.`
-          : `No string of at least ${min} characters in the selected encoding. Lower "Minimum length" or try "All".`,
+        text: test ? T('note.noMatch', { count: scanned }) : T('note.none', { min }),
       });
       return out;
     }
     out.push({
       type: 'table',
-      label: `Strings (${strings.length}${flagged.length ? `, ${flagged.length} flag-like first` : ''})`,
-      columns: ['Offset', 'Encoding', 'String'],
+      label: flagged.length
+        ? T('label.tableFlagged', { total: strings.length, flagged: flagged.length })
+        : T('label.table', { total: strings.length }),
+      columns: [T('col.offset'), T('col.encoding'), T('col.string')],
       rows: shown.map((s) => [hexOffset(s.offset), s.encoding, shorten(s.text)]),
       highlight: flagged.slice(0, MAX_RESULTS).map((_, i) => i),
     });
@@ -221,7 +222,7 @@ export default defineTool({
     const inOrder = [...shown].sort((a, c) => a.offset - c.offset);
     out.push({
       type: 'text',
-      label: 'All strings, one per line',
+      label: T('label.list'),
       value: inOrder
         .map((s) => (offsets ? `${s.offset.toString(16).padStart(8, '0')} ${s.text}` : s.text))
         .join('\n'),
@@ -230,13 +231,13 @@ export default defineTool({
       out.push({
         type: 'note',
         level: 'warn',
-        text: `Showing ${MAX_RESULTS} of ${ordered.length} strings (flag-like ones first). Raise the minimum length or add a filter to narrow it down.`,
+        text: T('note.capped', { max: MAX_RESULTS, count: ordered.length }),
       });
     }
     return out;
   },
   detect({ bytes, text: sample }) {
     if (sample !== null || bytes.length < 64) return null;
-    return printableRatio(bytes) < 0.9 ? { score: 0.3, reason: 'Binary data' } : null;
+    return printableRatio(bytes) < 0.9 ? { score: 0.3, reason: T('detect.binary') } : null;
   },
 });

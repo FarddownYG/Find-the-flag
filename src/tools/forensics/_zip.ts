@@ -4,9 +4,12 @@
  * Pure functions over bytes: nothing here touches a file system, names are only ever text.
  */
 import { inflateSync } from 'fflate';
+import { toolT } from '../../i18n/tool-text';
 import { isValidUtf8, u16le, u32le, utf8Decode } from '../../lib/bytes';
 import { crc32, deflateScan } from '../../lib/signatures';
 import { checkByteMatches, zipCryptoDecrypt, ZIPCRYPTO_HEADER } from './_zipcrypto';
+
+const T = toolT('archive');
 
 const LOCAL = 0x04034b50;
 const CENTRAL = 0x02014b50;
@@ -148,13 +151,19 @@ export function describeExtra(fields: ExtraField[], junk: Uint8Array): string {
     const preview = printable
       ? `"${utf8Decode(f.data.subarray(0, 80))}"`
       : hex(f.data.subarray(0, 16)) + (f.data.length > 16 ? '…' : '');
+    const id = `0x${f.id.toString(16).padStart(4, '0')}`;
     parts.push(
-      `unknown 0x${f.id.toString(16).padStart(4, '0')} (${f.data.length} bytes${f.data.length ? `: ${preview}` : ''})`,
+      f.data.length
+        ? T('extra.unknown', { id, count: f.data.length, preview })
+        : T('extra.unknownEmpty', { id }),
     );
   }
   if (junk.length)
     parts.push(
-      `${junk.length} stray bytes: ${hex(junk.subarray(0, 16))}${junk.length > 16 ? '…' : ''}`,
+      T('extra.stray', {
+        count: junk.length,
+        hex: `${hex(junk.subarray(0, 16))}${junk.length > 16 ? '…' : ''}`,
+      }),
     );
   return parts.join(', ');
 }
@@ -361,12 +370,14 @@ function readCentral(b: Uint8Array, e: Eocd, base: number): ZipEntry[] {
     const local = readLocal(b, lhOffset);
     const notes: string[] = [];
     if (!local) {
-      notes.push('local header not found where the central directory says it is');
+      notes.push(T('zip.noLocal'));
     } else {
       if (local.nameLen !== nameLen || hex(local.name) !== hex(nameRaw)) {
-        notes.push(`local header names it "${utf8Decode(local.name)}"`);
+        notes.push(T('zip.localName', { name: utf8Decode(local.name) }));
       }
-      if (local.method !== u16le(b, p + 10)) notes.push(`local header says method ${local.method}`);
+      if (local.method !== u16le(b, p + 10)) {
+        notes.push(T('zip.localMethod', { method: local.method }));
+      }
     }
     out.push(
       build(
@@ -407,16 +418,12 @@ function recoverLocal(b: Uint8Array, from: number): ZipEntry[] {
       // Sizes unknown (data descriptor): a deflate stream tells where it ends.
       const scan = l.method === 8 ? deflateScan(b, l.dataStart) : null;
       if (!scan) {
-        out.push(
-          build(localToRaw(l, p, 0), [
-            'size unknown (data descriptor) and not deflate: data not recovered',
-          ]),
-        );
+        out.push(build(localToRaw(l, p, 0), [T('zip.notRecovered')]));
         break;
       }
       csize = scan.end - l.dataStart;
     }
-    const entry = build(localToRaw(l, p, csize), ['recovered from the local header']);
+    const entry = build(localToRaw(l, p, csize), [T('zip.recovered')]);
     out.push(entry);
     p = l.dataStart + csize;
     if (l.flags & 8) {
@@ -461,8 +468,8 @@ function findGaps(entries: ZipEntry[], e: Eocd): Gap[] {
         size,
         where:
           i + 1 < sorted.length
-            ? `between "${cur.name}" and "${sorted[i + 1]!.name}"`
-            : 'between the last entry and the central directory',
+            ? T('gap.between', { a: cur.name, b: sorted[i + 1]!.name })
+            : T('gap.beforeCentral'),
       });
     }
   }
@@ -472,7 +479,7 @@ function findGaps(entries: ZipEntry[], e: Eocd): Gap[] {
       gaps.push({
         offset: cdEnd,
         size: e.pos - cdEnd,
-        where: 'between the central directory and the end record',
+        where: T('gap.beforeEnd'),
       });
     }
   }
@@ -578,25 +585,23 @@ export function extractZipEntry(
   e: ZipEntry,
   password: Uint8Array | null,
 ): Extracted {
-  if (e.dataStart < 0) return fail('no local header: the data cannot be located');
+  if (e.dataStart < 0) return fail(T('problem.noLocal'));
   let raw = b.subarray(e.dataStart, Math.min(b.length, e.dataStart + e.csize));
   const truncated = raw.length < e.csize;
   if (e.aes) {
     const bits =
       e.aes.strength === 1 ? 128 : e.aes.strength === 2 ? 192 : e.aes.strength === 3 ? 256 : 0;
-    return fail(
-      `WinZip AES${bits ? `-${bits}` : ''} encryption is not supported yet. Open it with 7-Zip: 7z x -p<password> file.zip`,
-    );
+    return fail(T('problem.aes', { aes: bits ? `AES-${bits}` : 'AES' }));
   }
   let decrypted = false;
   if (e.encrypted) {
     if (!password) {
-      return fail('encrypted with ZipCrypto: enter the password in the options');
+      return fail(T('problem.locked'));
     }
-    if (raw.length < ZIPCRYPTO_HEADER) return fail('encrypted data is too short');
+    if (raw.length < ZIPCRYPTO_HEADER) return fail(T('problem.tooShort'));
     const dec = zipCryptoDecrypt(raw, password);
     if (!checkByteMatches(dec.header, e.crc, e.dosTime, e.hasDescriptor)) {
-      return fail('wrong password (the check byte does not match)');
+      return fail(T('problem.wrongCheck'));
     }
     raw = dec.data;
     decrypted = true;
@@ -606,15 +611,15 @@ export function extractZipEntry(
     data = raw;
   } else if (e.method === 8) {
     const problem = decrypted
-      ? 'wrong password (the decrypted data is not a valid deflate stream)'
+      ? T('problem.wrongDeflate')
       : truncated
-        ? 'the archive is cut off in the middle of this entry'
-        : 'the deflate data is corrupted';
+        ? T('problem.cutOff')
+        : T('problem.corrupt');
     // Walk the stream first: it is cheap, and tells the unpacked size before any memory is spent.
     const scan = deflateScan(raw, 0);
     if (!scan) return fail(problem);
     if (scan.size > MAX_OUTPUT) {
-      return fail(`it would expand to ${scan.size} bytes, more than the browser can hold here`);
+      return fail(T('problem.tooBig', { count: scan.size }));
     }
     try {
       data = inflateSync(raw.subarray(0, scan.end));
@@ -622,18 +627,16 @@ export function extractZipEntry(
       return fail(problem);
     }
   } else {
-    const name = METHOD_NAMES[e.method] ?? `method ${e.method}`;
-    return fail(
-      `compression method ${e.method} (${name}) is not supported: only stored and deflate`,
-    );
+    const name = METHOD_NAMES[e.method] ?? T('zip.methodNumber', { method: e.method });
+    return fail(T('problem.method', { method: e.method, name }));
   }
   let crcOk: boolean | null = null;
-  let note: string | null = truncated ? 'archive is cut off: data may be incomplete' : null;
+  let note: string | null = truncated ? T('problem.truncated') : null;
   if (e.crc !== 0 || data.length === 0) {
     crcOk = crc32(data) === e.crc;
     if (!crcOk) {
-      if (decrypted) return fail('wrong password (CRC-32 of the result does not match)');
-      note = 'CRC-32 mismatch: the data is damaged or was modified';
+      if (decrypted) return fail(T('problem.wrongCrc'));
+      note = T('problem.crcMismatch');
     }
   }
   return { data, problem: null, note, crcOk, decrypted };

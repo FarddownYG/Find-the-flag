@@ -1,8 +1,11 @@
 import { bool, defineTool, number, select, text } from '../../core/define';
 import { ToolError } from '../../core/errors';
+import { toolT } from '../../i18n/tool-text';
 import { analyze } from './_pcap-analyze';
 import { looksLikeCapture } from './_pcap-read';
 import { render } from './_pcap-render';
+
+const T = toolT('pcap');
 
 const inMode = (values: Record<string, unknown>, ...modes: string[]) =>
   modes.includes(String(values.mode));
@@ -119,7 +122,7 @@ export default defineTool({
   ],
   run({ bytes }, opts) {
     if (!bytes.length) {
-      throw new ToolError('Drop a .pcap or .pcapng file here (a binary capture, not pasted text).');
+      throw new ToolError(T('error.empty'));
     }
     const analysis = analyze(bytes);
     return render(analysis, {
@@ -133,6 +136,6 @@ export default defineTool({
     });
   },
   detect({ bytes }) {
-    return looksLikeCapture(bytes) ? { score: 0.95, reason: 'pcap/pcapng capture' } : null;
+    return looksLikeCapture(bytes) ? { score: 0.95, reason: T('detect.capture') } : null;
   },
 });

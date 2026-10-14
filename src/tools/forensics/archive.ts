@@ -2,6 +2,7 @@ import { inflateSync } from 'fflate';
 import { bool, defineTool, text } from '../../core/define';
 import { ToolError } from '../../core/errors';
 import type { Output } from '../../core/types';
+import { toolT } from '../../i18n/tool-text';
 import {
   formatSize,
   isValidUtf8,
@@ -28,6 +29,8 @@ import {
   type ZipEntry,
   type ZipInfo,
 } from './_zip';
+
+const T = toolT('archive');
 
 const MAX_DEPTH = 6;
 /** Total extracted bytes we are willing to hold (a zip bomb guard). */
@@ -63,28 +66,54 @@ type Summary = [string, string][];
 
 // ---------- recognising archives ----------
 
-const UNSUPPORTED: [string, (b: Uint8Array) => boolean][] = [
-  ['7-Zip archive', (b) => b[0] === 0x37 && b[1] === 0x7a && b[2] === 0xbc && b[3] === 0xaf],
-  ['RAR archive', (b) => b[0] === 0x52 && b[1] === 0x61 && b[2] === 0x72 && b[3] === 0x21],
-  ['BZIP2 stream', (b) => b[0] === 0x42 && b[1] === 0x5a && b[2] === 0x68 && (b[3] ?? 0) >= 0x31],
-  ['XZ stream', (b) => b[0] === 0xfd && b[1] === 0x37 && b[2] === 0x7a && b[3] === 0x58],
-  ['Zstandard stream', (b) => b[0] === 0x28 && b[1] === 0xb5 && b[2] === 0x2f && b[3] === 0xfd],
-  ['Microsoft Cabinet', (b) => b[0] === 0x4d && b[1] === 0x53 && b[2] === 0x43 && b[3] === 0x46],
-  ['ar / deb archive', (b) => b[0] === 0x21 && b[1] === 0x3c && b[2] === 0x61 && b[3] === 0x72],
+interface Unsupported {
+  /** Display name of the format. */
+  name: () => string;
+  /** Command that unpacks it on a computer. */
+  help: string;
+  test: (b: Uint8Array) => boolean;
+}
+
+const UNSUPPORTED: Unsupported[] = [
+  {
+    name: () => T('format.7z'),
+    help: '7z x file.7z',
+    test: (b) => b[0] === 0x37 && b[1] === 0x7a && b[2] === 0xbc && b[3] === 0xaf,
+  },
+  {
+    name: () => T('format.rar'),
+    help: 'unrar x file.rar',
+    test: (b) => b[0] === 0x52 && b[1] === 0x61 && b[2] === 0x72 && b[3] === 0x21,
+  },
+  {
+    name: () => T('format.bzip2'),
+    help: 'bunzip2 file.bz2',
+    test: (b) => b[0] === 0x42 && b[1] === 0x5a && b[2] === 0x68 && (b[3] ?? 0) >= 0x31,
+  },
+  {
+    name: () => T('format.xz'),
+    help: 'unxz file.xz',
+    test: (b) => b[0] === 0xfd && b[1] === 0x37 && b[2] === 0x7a && b[3] === 0x58,
+  },
+  {
+    name: () => T('format.zstd'),
+    help: 'unzstd file.zst',
+    test: (b) => b[0] === 0x28 && b[1] === 0xb5 && b[2] === 0x2f && b[3] === 0xfd,
+  },
+  {
+    name: () => T('format.cab'),
+    help: 'cabextract file.cab',
+    test: (b) => b[0] === 0x4d && b[1] === 0x53 && b[2] === 0x43 && b[3] === 0x46,
+  },
+  {
+    name: () => T('format.ar'),
+    help: 'ar x file.deb',
+    test: (b) => b[0] === 0x21 && b[1] === 0x3c && b[2] === 0x61 && b[3] === 0x72,
+  },
 ];
 
-const UNSUPPORTED_HELP: Record<string, string> = {
-  '7-Zip archive': '7z x file.7z',
-  'RAR archive': 'unrar x file.rar',
-  'BZIP2 stream': 'bunzip2 file.bz2',
-  'XZ stream': 'unxz file.xz',
-  'Zstandard stream': 'unzstd file.zst',
-  'Microsoft Cabinet': 'cabextract file.cab',
-  'ar / deb archive': 'ar x file.deb',
-};
-
-function unsupportedName(b: Uint8Array): string | null {
-  return UNSUPPORTED.find(([, test]) => test(b))?.[0] ?? null;
+function unsupportedFormat(b: Uint8Array): Unsupported | null {
+  return UNSUPPORTED.find((u) => u.test(b)) ?? null;
 }
 
 function zlibHeaderOk(b: Uint8Array): boolean {
@@ -145,7 +174,10 @@ function isTextual(b: Uint8Array): boolean {
 }
 
 function note(ctx: Ctx, prefix: string, level: Acc['notes'][number]['level'], msg: string): void {
-  ctx.acc.notes.push({ level, text: prefix ? `${prefix.replace(/\/$/, '')}: ${msg}` : msg });
+  ctx.acc.notes.push({
+    level,
+    text: prefix ? T('note.prefixed', { path: prefix.replace(/\/$/, ''), message: msg }) : msg,
+  });
 }
 
 /** Keep an extracted file: list it, preview text, and deal with archives inside it. */
@@ -160,25 +192,19 @@ function addFile(
   if (acc.bytes + data.length > MAX_TOTAL) {
     if (!acc.stopped) {
       acc.stopped = true;
-      note(
-        ctx,
-        '',
-        'warn',
-        `Stopped extracting after ${formatSize(MAX_TOTAL)}: the archive expands to more than this tool keeps in memory.`,
-      );
+      note(ctx, '', 'warn', T('note.stopped', { size: formatSize(MAX_TOTAL) }));
     }
     return null;
   }
   acc.bytes += data.length;
   const { name, unsafe } = safeName(path);
   const inner = sniff(data, true);
-  const unsupported = inner ? null : unsupportedName(data);
+  const unsupported = inner ? null : unsupportedFormat(data);
   const notes: string[] = [];
   if (extraNote) notes.push(extraNote);
-  if (unsafe)
-    notes.push('path goes outside the folder (../ or absolute): shown as-is, extracted nowhere');
-  if (inner) notes.push('another archive: send it to Archive extractor');
-  if (unsupported) notes.push(`${unsupported}: not supported here`);
+  if (unsafe) notes.push(T('file.unsafe'));
+  if (inner) notes.push(T('file.archive'));
+  if (unsupported) notes.push(T('file.unsupported', { format: unsupported.name() }));
   // A view of the input would drag the whole input along when the result crosses a worker.
   const own = data.byteLength === data.buffer.byteLength ? data : data.slice();
   acc.files.push({ name, data: own, note: notes.join(' · ') || undefined });
@@ -191,16 +217,14 @@ function addFile(
         unpackAny(ctx, data, `${path}/`, depth + 1, path.split('/').pop());
       } catch (e) {
         if (!(e instanceof ToolError)) throw e;
-        note(ctx, path, 'warn', `could not be opened as an archive: ${e.message}`);
+        note(ctx, path, 'warn', T('note.notAnArchive', { message: e.message }));
       }
     } else {
-      acc.hints.push(
-        `"${path}" contains another archive: send it to Archive extractor (or turn on "Unpack nested archives").`,
-      );
+      acc.hints.push(T('hint.nested', { path }));
     }
   } else if (unsupported) {
     acc.hints.push(
-      `"${path}" is a ${unsupported}, which the browser cannot unpack yet. Try: ${UNSUPPORTED_HELP[unsupported]}`,
+      T('hint.unsupported', { path, format: unsupported.name(), command: unsupported.help }),
     );
   }
   return name;
@@ -225,33 +249,48 @@ function extractWith(b: Uint8Array, e: ZipEntry, ctx: Ctx): Extracted {
   return last ?? extractZipEntry(b, e, null);
 }
 
+const entriesText = (total: number, files: number, dirs: number) =>
+  T('value.entries', {
+    total,
+    files: T('value.files', { count: files }),
+    folders: T('value.folders', { count: dirs }),
+  });
+
+const sizeText = (packed: number, unpacked: number) =>
+  T('value.packedUnpacked', { packed: formatSize(packed), unpacked: formatSize(unpacked) });
+
 function zipSummary(info: ZipInfo, b: Uint8Array): Summary {
   const files = info.entries.filter((e) => e.kind === 'file').length;
   const dirs = info.entries.filter((e) => e.kind === 'dir').length;
   const packed = info.entries.reduce((n, e) => n + e.csize, 0);
   const unpacked = info.entries.reduce((n, e) => n + e.usize, 0);
   const out: Summary = [
-    ['Format', `ZIP archive${info.zip64 ? ' (zip64)' : ''}`],
-    [
-      'Entries',
-      `${info.entries.length} (${files} file${files === 1 ? '' : 's'}, ${dirs} folder${dirs === 1 ? '' : 's'})`,
-    ],
-    ['Size', `${formatSize(packed)} packed, ${formatSize(unpacked)} unpacked`],
+    [T('kv.format'), info.zip64 ? T('value.zip64') : T('value.zip')],
+    [T('kv.entries'), entriesText(info.entries.length, files, dirs)],
+    [T('kv.size'), sizeText(packed, unpacked)],
   ];
-  if (info.comment) out.push(['Archive comment', info.comment]);
+  if (info.comment) out.push([T('kv.comment'), info.comment]);
   if (info.start > 0) {
     out.push([
-      'ZIP starts at',
-      `offset ${info.start} (0x${info.start.toString(16)}): ${info.start} bytes of other data come first`,
+      T('kv.zipStart'),
+      T('value.zipStart', {
+        offset: info.start,
+        hex: `0x${info.start.toString(16)}`,
+        count: info.start,
+      }),
     ]);
   }
   if (info.centralDirectory === 'missing') {
-    out.push(['Central directory', 'missing: entries were recovered from the local headers']);
+    out.push([T('kv.centralDirectory'), T('value.centralMissing')]);
   }
   if (b.length > info.end) {
     out.push([
-      'After the archive',
-      `${b.length - info.end} more bytes from offset ${info.end} (0x${info.end.toString(16)})`,
+      T('kv.after'),
+      T('value.after', {
+        count: b.length - info.end,
+        offset: info.end,
+        hex: `0x${info.end.toString(16)}`,
+      }),
     ]);
   }
   return out;
@@ -259,10 +298,7 @@ function zipSummary(info: ZipInfo, b: Uint8Array): Summary {
 
 function unpackZip(ctx: Ctx, b: Uint8Array, prefix: string, depth: number): Summary {
   const info = parseZip(b);
-  if (!info)
-    throw new ToolError(
-      'No ZIP structure found: neither an end-of-central-directory record nor a local file header.',
-    );
+  if (!info) throw new ToolError(T('error.noZip'));
   const acc = ctx.acc;
   let locked = 0;
   let wrong = 0;
@@ -271,10 +307,10 @@ function unpackZip(ctx: Ctx, b: Uint8Array, prefix: string, depth: number): Summ
     const notes = [...e.notes];
     const shown = `${prefix}${e.name}`;
     const { unsafe } = safeName(e.name);
-    if (unsafe) notes.push('unsafe path (../ or absolute): shown only, nothing is written');
-    if (e.nameFrom === 'unicode-extra') notes.push('name from the Unicode Path extra field');
+    if (unsafe) notes.push(T('row.unsafe'));
+    if (e.nameFrom === 'unicode-extra') notes.push(T('row.unicodeName'));
     let data: Uint8Array | null = null;
-    let enc = 'no';
+    let enc = T('value.no');
     if (e.aes) enc = aesLabel(e);
     else if (e.encrypted) enc = 'ZipCrypto';
     let crcCell = e.dataStart < 0 && e.crc === 0 ? '-' : hex8(e.crc);
@@ -287,14 +323,14 @@ function unpackZip(ctx: Ctx, b: Uint8Array, prefix: string, depth: number): Summ
         else if (e.encrypted) wrong++;
       } else if (r.data) {
         data = r.data;
-        if (r.decrypted) enc = 'ZipCrypto (decrypted)';
+        if (r.decrypted) enc = T('value.decrypted');
         if (r.crcOk) crcCell += ' ok';
         if (r.note) notes.push(r.note);
       }
     }
     const ex = describeExtra(e.extra, e.extraJunk);
-    if (ex) notes.push(`extra: ${ex}`);
-    if (e.kind === 'symlink' && data) notes.push(`links to ${utf8Decode(data)}`);
+    if (ex) notes.push(T('row.extra', { fields: ex }));
+    if (e.kind === 'symlink' && data) notes.push(T('row.linksTo', { target: utf8Decode(data) }));
     acc.rows.push([
       `${shown}${e.kind === 'dir' && !shown.endsWith('/') ? '/' : ''}`,
       e.usize,
@@ -315,34 +351,24 @@ function unpackZip(ctx: Ctx, b: Uint8Array, prefix: string, depth: number): Summ
       ctx,
       prefix,
       'warn',
-      `${g.size} bytes at offset ${g.offset} (0x${g.offset.toString(16)}) ${g.where} belong to no entry: hidden data? Look at them with Hexdump (start ${g.offset}, length ${g.size}).`,
+      T('note.gap', {
+        count: g.size,
+        offset: g.offset,
+        hex: `0x${g.offset.toString(16)}`,
+        where: g.where,
+      }),
     );
   }
   if (locked > 0) {
-    note(
-      ctx,
-      prefix,
-      'warn',
-      `${locked} encrypted entr${locked === 1 ? 'y' : 'ies'} (ZipCrypto). Type the password in the options to decrypt. Look for it in other files, the archive comment or the challenge text.`,
-    );
+    note(ctx, prefix, 'warn', T('note.locked', { count: locked }));
   }
   if (wrong > 0) {
-    note(
-      ctx,
-      prefix,
-      'error',
-      `Wrong password: ${wrong} encrypted entr${wrong === 1 ? 'y' : 'ies'} could not be decrypted.`,
-    );
+    note(ctx, prefix, 'error', T('note.wrongPassword', { count: wrong }));
   }
   if (aes > 0) {
-    note(
-      ctx,
-      prefix,
-      'warn',
-      `${aes} entr${aes === 1 ? 'y uses' : 'ies use'} WinZip AES encryption, which is not supported yet. Use 7-Zip: 7z x -p<password> file.zip`,
-    );
+    note(ctx, prefix, 'warn', T('note.aes', { count: aes }));
   }
-  if (info.entries.length === 0) note(ctx, prefix, 'info', 'The archive has no entries.');
+  if (info.entries.length === 0) note(ctx, prefix, 'info', T('note.empty'));
   return zipSummary(info, b);
 }
 
@@ -351,15 +377,15 @@ function unpackZip(ctx: Ctx, b: Uint8Array, prefix: string, depth: number): Summ
 function tarKindLabel(e: TarEntry): string {
   switch (e.kind) {
     case 'file':
-      return 'file';
+      return T('tarKind.file');
     case 'dir':
-      return 'folder';
+      return T('tarKind.dir');
     case 'symlink':
-      return 'symlink';
+      return T('tarKind.symlink');
     case 'hardlink':
-      return 'hard link';
+      return T('tarKind.hardlink');
     default:
-      return `type ${JSON.stringify(e.typeflag)}`;
+      return T('tarKind.other', { flag: JSON.stringify(e.typeflag) });
   }
 }
 
@@ -371,14 +397,13 @@ function unpackTar(
   format: string,
 ): Summary {
   const info = parseTar(b);
-  if (!info)
-    throw new ToolError('Not a TAR archive: the first 512-byte header has a wrong checksum.');
+  if (!info) throw new ToolError(T('error.notTar'));
   let files = 0;
   let dirs = 0;
   for (const e of info.entries) {
     const notes = [...e.notes];
     const { unsafe } = safeName(e.name);
-    if (unsafe) notes.push('unsafe path (../ or absolute): shown only, nothing is written');
+    if (unsafe) notes.push(T('row.unsafe'));
     if (e.kind === 'symlink' || e.kind === 'hardlink') notes.push(`-> ${e.link}`);
     notes.push(`${tarKindLabel(e)} ${e.mode} ${e.owner}`);
     ctx.acc.rows.push([
@@ -398,21 +423,18 @@ function unpackTar(
       addFile(ctx, `${prefix}${e.name}`, e.data, depth);
     }
   }
-  if (info.stopped) note(ctx, prefix, 'warn', `Reading stopped early: ${info.stopped}.`);
+  if (info.stopped) note(ctx, prefix, 'warn', T('note.tarStopped', { reason: info.stopped }));
   if (b.length > info.end && !info.stopped) {
     note(
       ctx,
       prefix,
       'info',
-      `${b.length - info.end} bytes follow the end of the TAR (offset ${info.end}): padding, or hidden data.`,
+      T('note.tarTrailing', { count: b.length - info.end, offset: info.end }),
     );
   }
   return [
-    ['Format', format],
-    [
-      'Entries',
-      `${info.entries.length} (${files} file${files === 1 ? '' : 's'}, ${dirs} folder${dirs === 1 ? '' : 's'})`,
-    ],
+    [T('kv.format'), format],
+    [T('kv.entries'), entriesText(info.entries.length, files, dirs)],
   ];
 }
 
@@ -423,7 +445,6 @@ const GZIP_OS: Record<number, string> = {
   3: 'Unix',
   7: 'Macintosh',
   11: 'NTFS',
-  255: 'unknown',
 };
 
 interface GzipMember {
@@ -455,9 +476,7 @@ function readGzipMember(b: Uint8Array, s: number): GzipMember | null {
   const scan = deflateScan(b, p);
   if (!scan || scan.end + 8 > b.length) return null;
   if (scan.size > MAX_TOTAL) {
-    throw new ToolError(
-      `This GZIP expands to ${formatSize(scan.size)}, more than the browser can hold here. Use gunzip on your machine.`,
-    );
+    throw new ToolError(T('error.gzipTooBig', { size: formatSize(scan.size) }));
   }
   let data: Uint8Array;
   try {
@@ -485,44 +504,43 @@ function unpackGzip(ctx: Ctx, b: Uint8Array, prefix: string, depth: number, name
     p = m.end;
   }
   if (members.length === 0) {
-    throw new ToolError(
-      'The GZIP header is fine but the data inside is damaged or cut off, so nothing could be decompressed.',
-    );
+    throw new ToolError(T('error.gzipDamaged'));
   }
   const first = members[0]!;
   const data = members.length === 1 ? first.data : concat(members.map((m) => m.data));
   const out: Summary = [
-    ['Format', members.length > 1 ? `GZIP (${members.length} members)` : 'GZIP'],
+    [
+      T('kv.format'),
+      members.length > 1 ? T('value.gzipMembers', { count: members.length }) : 'GZIP',
+    ],
   ];
-  if (first.name) out.push(['Original name', first.name]);
-  if (first.comment) out.push(['Comment', first.comment]);
+  if (first.name) out.push([T('kv.originalName'), first.name]);
+  if (first.comment) out.push([T('kv.gzipComment'), first.comment]);
   if (first.mtime)
     out.push([
-      'Modified',
+      T('kv.modified'),
       `${new Date(first.mtime * 1000).toISOString().slice(0, 19).replace('T', ' ')}Z`,
     ]);
-  out.push(['Made on', GZIP_OS[first.os] ?? `OS ${first.os}`]);
-  out.push(['Size', `${formatSize(p)} packed, ${formatSize(data.length)} unpacked`]);
+  out.push([
+    T('kv.madeOn'),
+    first.os === 255 ? T('value.unknown') : (GZIP_OS[first.os] ?? `OS ${first.os}`),
+  ]);
+  out.push([T('kv.size'), sizeText(p, data.length)]);
   if (members.some((m) => !m.crcOk || !m.sizeOk)) {
-    note(
-      ctx,
-      prefix,
-      'warn',
-      'The CRC-32 or size in the GZIP trailer does not match the data: it was damaged or modified.',
-    );
+    note(ctx, prefix, 'warn', T('note.gzipTrailer'));
   }
   if (b.length > p) {
     note(
       ctx,
       prefix,
       'warn',
-      `${b.length - p} bytes follow the GZIP stream (offset ${p}, 0x${p.toString(16)}): trailing data. Look at it with Hexdump or Carve.`,
+      T('note.gzipTrailing', { count: b.length - p, offset: p, hex: `0x${p.toString(16)}` }),
     );
   }
   // A .tar.gz: show the tar's entries instead of one opaque file.
   if (tarHeaderValid(data, 0)) {
-    const tar = unpackTar(ctx, data, prefix, depth, 'TAR.GZ (tar inside gzip)');
-    return [...tar.slice(0, 1), ...out.filter(([k]) => k !== 'Format'), ...tar.slice(1)];
+    const tar = unpackTar(ctx, data, prefix, depth, T('value.tarGz'));
+    return [...tar.slice(0, 1), ...out.filter(([k]) => k !== T('kv.format')), ...tar.slice(1)];
   }
   const inner = first.name ?? name;
   ctx.acc.rows.push([
@@ -531,7 +549,7 @@ function unpackGzip(ctx: Ctx, b: Uint8Array, prefix: string, depth: number, name
     p,
     'deflate (gzip)',
     first.crcOk ? `${hex8(crc32(data))} ok` : hex8(crc32(data)),
-    'no',
+    T('value.no'),
     first.mtime ? new Date(first.mtime * 1000).toISOString().slice(0, 19).replace('T', ' ') : '-',
     first.comment ?? '',
     '',
@@ -552,48 +570,35 @@ function concat(parts: Uint8Array[]): Uint8Array {
 
 function unpackZlib(ctx: Ctx, b: Uint8Array, prefix: string, depth: number, name: string): Summary {
   const scan = zlibHeaderOk(b) ? deflateScan(b, 2) : null;
-  if (!scan) throw new ToolError('Not a valid zlib stream (header or deflate data is wrong).');
+  if (!scan) throw new ToolError(T('error.badZlib'));
   if (scan.size > MAX_TOTAL)
-    throw new ToolError(
-      `This stream expands to ${formatSize(scan.size)}, more than the browser can hold here.`,
-    );
+    throw new ToolError(T('error.streamTooBig', { size: formatSize(scan.size) }));
   let data: Uint8Array;
   try {
     data = inflateSync(b.subarray(2, scan.end));
   } catch {
-    throw new ToolError('The zlib data is damaged and cannot be decompressed.');
+    throw new ToolError(T('error.zlibDamaged'));
   }
   const ok = scan.end + 4 <= b.length && adler32(data) === u32be(b, scan.end);
   const end = Math.min(b.length, scan.end + 4);
-  if (!ok)
-    note(
-      ctx,
-      prefix,
-      'warn',
-      'The Adler-32 checksum at the end does not match: the data was damaged or modified.',
-    );
+  if (!ok) note(ctx, prefix, 'warn', T('note.adler'));
   if (b.length > end)
-    note(
-      ctx,
-      prefix,
-      'warn',
-      `${b.length - end} bytes follow the zlib stream (offset ${end}): trailing data.`,
-    );
+    note(ctx, prefix, 'warn', T('note.zlibTrailing', { count: b.length - end, offset: end }));
   ctx.acc.rows.push([
     `${prefix}${name}`,
     data.length,
     end,
     'deflate (zlib)',
     hex8(crc32(data)),
-    'no',
+    T('value.no'),
     '-',
     '',
-    ok ? 'Adler-32 ok' : 'Adler-32 mismatch',
+    ok ? T('value.adlerOk') : T('value.adlerMismatch'),
   ]);
   addFile(ctx, `${prefix}${name}`, data, depth);
   return [
-    ['Format', 'zlib stream'],
-    ['Size', `${formatSize(end)} packed, ${formatSize(data.length)} unpacked`],
+    [T('kv.format'), T('value.zlib')],
+    [T('kv.size'), sizeText(end, data.length)],
   ];
 }
 
@@ -605,18 +610,16 @@ function unpackDeflate(
   name: string,
 ): Summary {
   const scan = deflateScan(b, 0);
-  if (!scan) throw new ToolError('Not a valid raw deflate stream.');
+  if (!scan) throw new ToolError(T('error.badDeflate'));
   if (scan.size > MAX_TOTAL)
-    throw new ToolError(
-      `This stream expands to ${formatSize(scan.size)}, more than the browser can hold here.`,
-    );
+    throw new ToolError(T('error.streamTooBig', { size: formatSize(scan.size) }));
   const data = inflateSync(b.subarray(0, scan.end));
   if (b.length > scan.end)
     note(
       ctx,
       prefix,
       'warn',
-      `${b.length - scan.end} bytes follow the deflate stream (offset ${scan.end}): trailing data.`,
+      T('note.deflateTrailing', { count: b.length - scan.end, offset: scan.end }),
     );
   ctx.acc.rows.push([
     `${prefix}${name}`,
@@ -624,15 +627,15 @@ function unpackDeflate(
     scan.end,
     'deflate (raw)',
     hex8(crc32(data)),
-    'no',
+    T('value.no'),
     '-',
     '',
     '',
   ]);
   addFile(ctx, `${prefix}${name}`, data, depth);
   return [
-    ['Format', 'raw deflate stream (no header)'],
-    ['Size', `${formatSize(scan.end)} packed, ${formatSize(data.length)} unpacked`],
+    [T('kv.format'), T('value.deflate')],
+    [T('kv.size'), sizeText(scan.end, data.length)],
   ];
 }
 
@@ -653,7 +656,7 @@ function unpackAny(
     case 'zip-embedded':
       return unpackZip(ctx, b, prefix, depth);
     case 'tar':
-      return unpackTar(ctx, b, prefix, depth, 'TAR archive');
+      return unpackTar(ctx, b, prefix, depth, T('value.tar'));
     case 'gzip':
       return unpackGzip(ctx, b, prefix, depth, base);
     case 'zlib':
@@ -743,7 +746,7 @@ export default defineTool({
     },
   ],
   run({ bytes, name }, { password, recursive }) {
-    if (bytes.length === 0) throw new ToolError('The input is empty: drop an archive.');
+    if (bytes.length === 0) throw new ToolError(T('error.empty'));
     const ctx: Ctx = {
       passwords: passwordCandidates(password),
       recursive,
@@ -752,33 +755,29 @@ export default defineTool({
     const label = name ? name.split(/[\\/]/).pop()! : 'data';
     const summary = unpackAny(ctx, bytes, '', 0, label);
     if (!summary) {
-      const other = unsupportedName(bytes);
+      const other = unsupportedFormat(bytes);
       if (other) {
-        throw new ToolError(
-          `This is a ${other}, which this tool cannot open yet. Extract it on your machine: ${UNSUPPORTED_HELP[other]}`,
-        );
+        throw new ToolError(T('error.unsupported', { format: other.name(), command: other.help }));
       }
-      throw new ToolError(
-        'Not a ZIP, GZIP, TAR, zlib or deflate stream. If it is something glued inside another file, try Carve embedded files; to see what it is, try File type.',
-      );
+      throw new ToolError(T('error.notArchive'));
     }
     const { acc } = ctx;
-    const out: Output[] = [{ type: 'kv', label: 'Archive', entries: summary }];
+    const out: Output[] = [{ type: 'kv', label: T('label.archive'), entries: summary }];
     for (const n of acc.notes) out.push({ type: 'note', level: n.level, text: n.text });
     if (acc.rows.length > 0) {
       out.push({
         type: 'table',
-        label: 'Contents',
+        label: T('label.contents'),
         columns: [
-          'Name',
-          'Size',
-          'Packed',
-          'Method',
-          'CRC-32',
-          'Encrypted',
-          'Modified',
-          'Comment',
-          'Notes',
+          T('col.name'),
+          T('col.size'),
+          T('col.packed'),
+          T('col.method'),
+          T('col.crc'),
+          T('col.encrypted'),
+          T('col.modified'),
+          T('col.comment'),
+          T('col.notes'),
         ],
         rows: acc.rows,
       });
@@ -794,23 +793,25 @@ export default defineTool({
       }
       out.push({
         type: 'text',
-        label: acc.previews.length === 1 ? `Content of ${acc.previews[0]!.name}` : 'Text files',
+        label:
+          acc.previews.length === 1
+            ? T('label.content', { name: acc.previews[0]!.name })
+            : T('label.textFiles'),
         value: blocks.join('\n\n'),
       });
     }
     if (acc.files.length > 0)
-      out.push({ type: 'files', label: 'Extracted files', files: acc.files });
+      out.push({ type: 'files', label: T('label.extracted'), files: acc.files });
     for (const h of acc.hints) out.push({ type: 'note', level: 'info', text: h });
     return out;
   },
   detect({ bytes }) {
     const kind = sniff(bytes);
     if (kind === 'zip' || kind === 'gzip')
-      return { score: 0.9, reason: kind === 'zip' ? 'ZIP archive' : 'GZIP stream' };
-    if (kind === 'tar') return { score: 0.85, reason: 'TAR archive' };
-    if (kind === 'zip-embedded')
-      return { score: 0.7, reason: 'A ZIP archive is attached after other data' };
-    if (kind === 'zlib') return { score: 0.6, reason: 'zlib stream' };
+      return { score: 0.9, reason: kind === 'zip' ? T('detect.zip') : T('detect.gzip') };
+    if (kind === 'tar') return { score: 0.85, reason: T('detect.tar') };
+    if (kind === 'zip-embedded') return { score: 0.7, reason: T('detect.zipEmbedded') };
+    if (kind === 'zlib') return { score: 0.6, reason: T('detect.zlib') };
     return null;
   },
 });
