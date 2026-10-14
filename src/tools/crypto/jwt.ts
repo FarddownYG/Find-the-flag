@@ -253,8 +253,8 @@ async function securityNotes(t: Token): Promise<Output[]> {
       if (found !== null) {
         notes.push({
           type: 'note',
-          level: 'error',
-          text: `Weak secret: this token is signed with "${found}". Anyone can forge tokens: use Sign mode.`,
+          level: 'success',
+          text: `Weak secret found: this token is signed with "${found}". Anyone can forge tokens: use Sign mode.`,
         });
       }
     }
