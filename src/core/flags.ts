@@ -6,13 +6,16 @@
 /** prefix{...} — covers flag{}, CTF{}, picoCTF{}, HTB{}, RM{}, FLAG{}... */
 export const DEFAULT_FLAG_PATTERN = String.raw`[A-Za-z][A-Za-z0-9_\-]{1,24}\{[^{}\s]{2,200}\}`;
 
+/** The default alternative is a named group, so findFlags knows when the user's pattern matched. */
+const DEFAULT_GROUP = `(?<ftfdefault>${DEFAULT_FLAG_PATTERN})`;
+
 export function buildFlagRegex(custom?: string): RegExp {
-  const parts = [DEFAULT_FLAG_PATTERN];
-  if (custom?.trim()) parts.unshift(custom.trim());
+  const parts = [DEFAULT_GROUP];
+  if (custom?.trim()) parts.unshift(`(?:${custom.trim()})`);
   try {
     return new RegExp(parts.join('|'), 'g');
   } catch {
-    return new RegExp(DEFAULT_FLAG_PATTERN, 'g');
+    return new RegExp(DEFAULT_GROUP, 'g');
   }
 }
 
@@ -31,12 +34,27 @@ export function findFlags(text: string, re: RegExp, limit = 50): FlagSpan[] {
       re.lastIndex++;
       continue;
     }
-    out.push({ start: m.index, end: m.index + m[0].length, value: m[0] });
+    // A match of the user's own pattern is kept as it is; a default one loses glued characters.
+    const byUser = m.groups !== undefined && m.groups.ftfdefault === undefined;
+    const skip = byUser ? 0 : gluedPrefixLength(m[0]);
+    out.push({ start: m.index + skip, end: m.index + m[0].length, value: m[0].slice(skip) });
   }
   return out;
 }
 
 export const KNOWN_PREFIX = /^(flag|ctf|[a-z0-9]*ctf|htb|thm|key|secret)\{/i;
+
+/**
+ * Characters glued in front of a "flag{" prefix ("Fflag{…}" when a random printable byte
+ * precedes the flag in a binary): their count, or 0. Only "flag" is trimmed: "monkey{…}" or
+ * "picoCTF{…}" are formats of their own.
+ */
+export function gluedPrefixLength(value: string): number {
+  if (KNOWN_PREFIX.test(value)) return 0;
+  const brace = value.indexOf('{');
+  const m = brace > 0 ? /flag$/i.exec(value.slice(0, brace)) : null;
+  return m ? m.index : 0;
+}
 
 /**
  * Which candidates deserve the highlight. Brute-force outputs contain dozens of

@@ -23,6 +23,29 @@ describe('flags', () => {
     expect([...selectFlags('ENSIBS{hello}', re)]).toEqual(['ENSIBS{hello}']);
   });
 
+  it('drops characters glued in front of flag{, but keeps other formats whole', () => {
+    const text = 'Fflag{streamed} sQr{%=i~} monkey{abc} picoCTF{c0d3} 9xFLAG{up}';
+    const spans = findFlags(text, re);
+    expect(spans.map((f) => f.value)).toEqual([
+      'flag{streamed}',
+      'sQr{%=i~}',
+      'monkey{abc}',
+      'picoCTF{c0d3}',
+      'FLAG{up}',
+    ]);
+    expect(text.slice(spans[0]!.start, spans[0]!.end)).toBe('flag{streamed}');
+    expect([...selectFlags(text, re)]).toEqual(['flag{streamed}', 'picoCTF{c0d3}', 'FLAG{up}']);
+  });
+
+  it('keeps a custom pattern match as it is', () => {
+    const custom = String.raw`redflag\{[a-z]+\}`;
+    const r = buildFlagRegex(custom);
+    expect(findFlags('see redflag{abc} and xflag{def}', r).map((f) => f.value)).toEqual([
+      'redflag{abc}',
+      'flag{def}',
+    ]);
+  });
+
   it('honours a custom pattern', () => {
     const custom = String.raw`RM\[[a-z]+\]`;
     const r = buildFlagRegex(custom);

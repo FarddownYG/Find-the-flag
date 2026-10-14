@@ -5,7 +5,7 @@
  * (Strings' findStrings on pre-selected ranges), byte search and hashes.
  */
 import { createMD5, createSHA256, type IHasher } from 'hash-wasm';
-import { DEFAULT_FLAG_PATTERN, KNOWN_PREFIX } from '../../core/flags';
+import { DEFAULT_FLAG_PATTERN, KNOWN_PREFIX, gluedPrefixLength } from '../../core/flags';
 import type { LazyFile } from '../../core/types';
 import { latin1Decode } from '../../lib/bytes';
 import { matchesAt, SIGNATURES, type Signature } from '../../lib/signatures';
@@ -481,14 +481,15 @@ const isBodyByte = (c: number) => c > 0x20 && c < 0x7f && c !== 0x7b && c !== 0x
 export const FLAG_LOOKBEHIND = 64;
 
 /**
- * Random bytes match prefix{body} about once every 10 MB ("jm{*d}"): beyond the known
- * prefixes (flag, CTF, HTB…), ask for a 3-character prefix and a 4-character body, which
- * random data hits about once per 300 MB.
+ * Random bytes match prefix{body} about once every 10 MB ("jm{*d}"), and a 3-character prefix
+ * with a 4-character body still once per few hundred MB ("sQr{%=i~}" in 200 MB of noise).
+ * Beyond the known prefixes (flag, CTF, HTB…), ask for a 3-character prefix and an 8-character
+ * body: each extra body character is printable with odds 94/256, so that is ~50× rarer.
  */
 export function plausibleFlag(text: string): boolean {
   if (KNOWN_PREFIX.test(text)) return true;
   const brace = text.indexOf('{');
-  return brace >= 3 && text.length - brace - 2 >= 4;
+  return brace >= 3 && text.length - brace - 2 >= 8;
 }
 
 /**
@@ -531,6 +532,9 @@ export function findFlagsIn(
       if (e >= b.length || b[e] !== 0x7d || !zero(e) || m < 2 || m > 200) continue;
       let text = '';
       for (let k = s; k <= e; k += step) text += String.fromCharCode(b[k]!);
+      const glued = gluedPrefixLength(text); // "Fflag{…}": a printable byte before the flag
+      text = text.slice(glued);
+      s += glued * step;
       if (FLAG_RE.test(text) && plausibleFlag(text) && (!best || text.length > best.text.length)) {
         best = { offset: base + s - shift, encoding, text };
       }

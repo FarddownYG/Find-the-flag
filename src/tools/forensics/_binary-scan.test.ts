@@ -245,11 +245,24 @@ describe('flag-like text', () => {
   it('ignores braces that are not flags, and random-looking short ones', () => {
     const out: FlagHit[] = [];
     const b = utf8Encode(
-      '{} a{b} x{ y } function() { return 1; } ab{c d} jm{*d} KG{1l3} key{ok} abc{defg}',
+      '{} a{b} x{ y } function() { return 1; } ab{c d} jm{*d} KG{1l3} key{ok} sQr{%=i~} abc{defghijk}',
     );
     findFlagsIn(b, 0, b.length, 0, out, 10);
     // Short random-looking candidates are dropped; known prefixes and longer ones stay.
-    expect(out.map((f) => f.text)).toEqual(['key{ok}', 'abc{defg}']);
+    expect(out.map((f) => f.text)).toEqual(['key{ok}', 'abc{defghijk}']);
+  });
+
+  it('drops printable bytes glued in front of a flag{ prefix', () => {
+    const out: FlagHit[] = [];
+    // A random byte that happens to be a letter ("F") right before the flag, in ASCII and UTF-16LE.
+    const ascii = utf8Encode('\x01Fflag{streamed_through}\x02');
+    const wide = new Uint8Array([...'\x01xflag{wide_one}'].flatMap((c) => [c.charCodeAt(0), 0]));
+    findFlagsIn(ascii, 0, ascii.length, 0, out, 10);
+    findFlagsIn(wide, 0, wide.length, 1000, out, 10);
+    expect(out.map((f) => [f.offset, f.encoding, f.text])).toEqual([
+      [2, 'ascii', 'flag{streamed_through}'],
+      [1004, 'utf16le', 'flag{wide_one}'],
+    ]);
   });
 });
 
