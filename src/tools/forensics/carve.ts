@@ -1,0 +1,335 @@
+import { defineTool, bool, text } from '../../core/define';
+import { ToolError } from '../../core/errors';
+import type { Output } from '../../core/types';
+import { printableRatio } from '../../lib/bytes';
+import { matchesAt, SIGNATURES, type Signature } from '../../lib/signatures';
+
+/** One file found inside the input. `end` is exclusive and never past the buffer. */
+export interface Embedded {
+  start: number;
+  end: number;
+  sig: Signature;
+  /** How the end was found, in plain words. */
+  how: string;
+  /** True when the end comes from the file's own structure rather than a guess. */
+  exact: boolean;
+  /** True when the structure says the file is longer than the data we have. */
+  truncated: boolean;
+}
+
+export interface CarveSettings {
+  /** Also report the file that starts at offset 0. */
+  container: boolean;
+  /** Also report files found inside other recognised files. */
+  nested: boolean;
+  /** Restrict to these signature ids / extensions (empty = everything). */
+  only: Set<string>;
+}
+
+export interface CarveResult {
+  found: Embedded[];
+  /** Matches skipped because they sit inside another recognised file. */
+  nestedSkipped: number;
+  /** The recognised file at offset 0, if any (reported or not). */
+  container: Embedded | null;
+  /** More matches existed than the cap allows. */
+  capped: boolean;
+}
+
+const MAX_FOUND = 1000;
+
+interface Anchor {
+  sig: Signature;
+  /** Index inside `magic` of the byte the scan looks for. */
+  k: number;
+}
+
+/** Signatures that can be carved: strong magics, plus weak ones that bring their own check. */
+const isCarvable = (s: Signature) => !s.weak || s.valid !== undefined;
+
+/** Anchor on a byte that is rare in real data: 0x00 and 0xFF are everywhere in binaries. */
+function anchorIndex(sig: Signature): number {
+  const rare = sig.magic.findIndex((m) => m !== null && m !== 0 && m !== 0xff);
+  if (rare >= 0) return rare;
+  const nonZero = sig.magic.findIndex((m) => m !== null && m !== 0);
+  return nonZero >= 0 ? nonZero : sig.magic.findIndex((m) => m !== null);
+}
+
+function buildTable(sigs: Signature[]): (Anchor[] | undefined)[] {
+  const table: (Anchor[] | undefined)[] = new Array<Anchor[] | undefined>(256).fill(undefined);
+  for (const sig of sigs) {
+    const k = anchorIndex(sig);
+    if (k < 0) continue;
+    const byte = sig.magic[k]!;
+    (table[byte] ??= []).push({ sig, k });
+  }
+  return table;
+}
+
+const strength = (s: Signature) =>
+  (s.weak ? 0 : 1000) + s.magic.filter((m) => m !== null).length + (s.end ? 1 : 0);
+
+const DEFAULT_TABLE = buildTable(SIGNATURES.filter(isCarvable));
+
+/** Every offset where a carvable signature matches and passes its sanity check. */
+export function scan(
+  b: Uint8Array,
+  only: Set<string> = new Set(),
+): { start: number; sig: Signature }[] {
+  const table =
+    only.size === 0
+      ? DEFAULT_TABLE
+      : buildTable(SIGNATURES.filter((s) => isCarvable(s) && (only.has(s.id) || only.has(s.ext))));
+  const best = new Map<number, { start: number; sig: Signature }>();
+  const n = b.length;
+  for (let i = 0; i < n; i++) {
+    const list = table[b[i]!];
+    if (list === undefined) continue;
+    for (const { sig, k } of list) {
+      const start = i - k - (sig.offset ?? 0);
+      if (start < 0 || !matchesAt(b, sig, start)) continue;
+      if (sig.valid && !sig.valid(b, start)) continue;
+      const prev = best.get(start);
+      if (!prev || strength(sig) > strength(prev.sig)) best.set(start, { start, sig });
+    }
+  }
+  return [...best.values()].sort((a, c) => a.start - c.start);
+}
+
+/** Find every embedded file and work out where each one ends. */
+export function carveAll(b: Uint8Array, settings: CarveSettings): CarveResult {
+  const hits = scan(b, settings.only);
+  const found: Embedded[] = [];
+  let covered = 0;
+  let nestedSkipped = 0;
+  let container: Embedded | null = null;
+  let capped = false;
+
+  for (let h = 0; h < hits.length; h++) {
+    const { start, sig } = hits[h]!;
+    const inside = start < covered;
+    if (inside && !settings.nested) {
+      nestedSkipped++;
+      continue;
+    }
+    let end = sig.end ? sig.end(b, start) : null;
+    let truncated = false;
+    if (end !== null && end <= start) end = null;
+    const exact = end !== null;
+    let how = sig.endHow ?? 'file structure';
+    if (end !== null && end > b.length) {
+      truncated = true;
+      end = b.length;
+      how += ' — truncated, data stops early';
+    }
+    if (end === null) {
+      const next = hits.slice(h + 1).find((x) => x.start > start);
+      end = next ? next.start : b.length;
+      how = next ? 'next signature (size is a guess)' : 'end of file';
+    }
+    const item: Embedded = { start, end, sig, how, exact, truncated };
+    if (start === 0 && !inside) {
+      container = item;
+      if (exact) covered = Math.max(covered, end);
+      if (!settings.container) continue;
+    } else if (exact && !inside) {
+      covered = Math.max(covered, end);
+    }
+    if (found.length >= MAX_FOUND) {
+      capped = true;
+      break;
+    }
+    found.push(item);
+  }
+  return { found, nestedSkipped, container, capped };
+}
+
+const hex8 = (n: number) => n.toString(16).padStart(8, '0');
+
+/** "ZIP archive (also docx, xlsx...)" -> "ZIP archive" for running text. */
+const shortName = (sig: Signature) => sig.name.replace(/ \(.*$/, '');
+
+/** "zip, png .gz" -> set of lower-case names; unknown names are an error. */
+function parseTypes(raw: string): Set<string> {
+  const names = raw
+    .toLowerCase()
+    .split(/[\s,;]+/)
+    .map((x) => x.replace(/^\./, ''))
+    .filter(Boolean);
+  const known = new Set(SIGNATURES.flatMap((s) => [s.id, s.ext.toLowerCase()]));
+  const unknown = names.filter((x) => !known.has(x));
+  if (unknown.length) {
+    const exts = [...new Set(SIGNATURES.filter(isCarvable).map((s) => s.ext))].sort();
+    throw new ToolError(
+      `Unknown type "${unknown.join('", "')}". Use file extensions such as: ${exts.slice(0, 24).join(', ')}…`,
+    );
+  }
+  return new Set(names);
+}
+
+export default defineTool({
+  id: 'carve',
+  name: 'Carve embedded files',
+  category: 'forensics',
+  description:
+    'Find files hidden inside other files by their magic bytes, work out where each ends, and extract them.',
+  tags: [
+    'binwalk',
+    'foremost',
+    'scalpel',
+    'extract',
+    'embedded',
+    'appended',
+    'polyglot',
+    'trailing data',
+    'file carving',
+    'steghide',
+  ],
+  input: 'bytes',
+  placeholder: 'Drop any file — an image with a ZIP behind it, a memory dump, a firmware…',
+  options: {
+    container: bool('Include the container', false, {
+      hint: 'Also carve the file that starts at offset 0 (normally that is the input itself).',
+    }),
+    nested: bool('Include nested matches', false, {
+      hint: 'Also list files found inside other recognised files, e.g. every entry of a ZIP.',
+    }),
+    types: text('Only these types', '', {
+      placeholder: 'zip, png, gz … (empty = everything)',
+      hint: 'File extensions or signature ids, separated by commas.',
+    }),
+  },
+  examples: [
+    {
+      label: 'PNG with a ZIP glued after it',
+      input: { sample: 'forensics-polyglot.png' },
+      expect: 'ZIP archive',
+    },
+    {
+      label: 'Also carve the PNG itself',
+      input: { sample: 'forensics-polyglot.png' },
+      options: { container: true },
+      expect: 'IEND chunk',
+    },
+    {
+      label: 'Only look for PNG files',
+      input: { sample: 'forensics-polyglot.png' },
+      options: { container: true, types: 'png' },
+      expect: 'PNG image',
+    },
+  ],
+  run({ bytes }, { container, nested, types }) {
+    if (bytes.length === 0) throw new ToolError('The input is empty: drop a file to scan.');
+    const only = parseTypes(types);
+    const {
+      found,
+      nestedSkipped,
+      container: first,
+      capped,
+    } = carveAll(bytes, { container, nested, only });
+    const out: Output[] = [];
+
+    // Data after the end of the file that starts at offset 0: the classic "appended" trick.
+    let trailingFrom: number | null = null;
+    if (first?.exact && !first.truncated && first.end < bytes.length) {
+      trailingFrom = first.end;
+      out.push({
+        type: 'note',
+        level: 'warn',
+        text: `${shortName(first.sig)} at offset 0 ends at ${first.end} (0x${first.end.toString(16)}), but the input has ${bytes.length - first.end} more bytes after it: trailing data.`,
+      });
+    }
+
+    const files: { name: string; data: Uint8Array; note?: string }[] = [];
+    for (const f of found) {
+      files.push({
+        // slice(): a view would drag the whole input along when the result crosses a worker.
+        name: `${hex8(f.start)}.${f.sig.ext}`,
+        data: bytes.slice(f.start, f.end),
+        note: `${f.sig.name} · ${f.how}`,
+      });
+    }
+    // Trailing bytes nobody recognised (a plain-text flag, a key...) are worth keeping too.
+    if (trailingFrom !== null && !found.some((f) => f.start >= trailingFrom)) {
+      files.push({
+        name: `trailing-${hex8(trailingFrom)}.bin`,
+        data: bytes.slice(trailingFrom),
+        note: 'Unrecognised data after the end of the file',
+      });
+    }
+
+    if (found.length > 0) {
+      out.push({
+        type: 'table',
+        label: 'Embedded files',
+        columns: ['Offset', 'Hex', 'Type', 'Size', 'Ends at', 'End found by'],
+        rows: found.map((f) => [
+          f.start,
+          `0x${f.start.toString(16)}`,
+          f.sig.name,
+          f.end - f.start,
+          `0x${f.end.toString(16)}`,
+          f.how,
+        ]),
+        highlight: found.flatMap((f, i) => (f.start > 0 && f.exact ? [i] : [])),
+      });
+    }
+    if (files.length > 0) out.push({ type: 'files', label: 'Carved files', files });
+    if (found.length === 0 && files.length === 0) {
+      out.push({
+        type: 'note',
+        level: 'info',
+        text: first
+          ? `Nothing else is embedded: the input is one ${shortName(first.sig)}${first.exact ? '' : ' (where it ends could not be told)'}.`
+          : `No embedded file signatures found in ${bytes.length} bytes${only.size ? ' for the chosen types' : ''}. Try Strings (text hidden in the data) or Entropy (is part of it encrypted or compressed?).`,
+      });
+    }
+    if (nestedSkipped > 0) {
+      const where =
+        found.length > 0
+          ? 'the files above'
+          : first
+            ? `the ${shortName(first.sig)} that makes up the input`
+            : 'other files';
+      out.push({
+        type: 'note',
+        level: 'info',
+        text: `${nestedSkipped} more signature${nestedSkipped === 1 ? ' sits' : 's sit'} inside ${where} and ${nestedSkipped === 1 ? 'was' : 'were'} skipped (for example the entries of an archive). Tick "Include nested matches" to list them.`,
+      });
+    }
+    if (capped) {
+      out.push({
+        type: 'note',
+        level: 'warn',
+        text: `Stopped at ${found.length} files. Restrict the search with "Only these types".`,
+      });
+    }
+    return out;
+  },
+  detect({ bytes }) {
+    if (bytes.length < 32) return null;
+    // Bounded: triage must stay cheap even for a big file.
+    const head = bytes.subarray(0, Math.min(bytes.length, 4 << 20));
+    const { found, container } = carveAll(head, {
+      container: false,
+      nested: false,
+      only: new Set(),
+    });
+    const sizeKnown = head.length === bytes.length;
+    if (found.length > 0) {
+      const f = found[0]!;
+      return {
+        score: printableRatio(head) > 0.97 ? 0.45 : 0.65,
+        reason: `${f.sig.name} at offset ${f.start}`,
+        options: { container: false },
+      };
+    }
+    if (sizeKnown && container?.exact && !container.truncated && container.end < bytes.length) {
+      return {
+        score: 0.6,
+        reason: `${bytes.length - container.end} bytes after the end of the file`,
+      };
+    }
+    return null;
+  },
+});
