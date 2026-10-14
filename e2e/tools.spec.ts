@@ -19,7 +19,10 @@ for (const tool of TOOLS) {
         const errors: string[] = [];
         page.on('pageerror', (e) => errors.push(e.message));
         await page.goto(`./#/tool/${tool.id}`);
-        await page.getByRole('button', { name: ex.label, exact: true }).click();
+        await page
+          .locator('.examples')
+          .getByRole('button', { name: ex.label, exact: true })
+          .click();
         const out = page.locator('.pane-out');
         await expect(out).toContainText(ex.expect, { timeout: 15_000 });
         await expect(out.locator('.note-error')).toHaveCount(0);
@@ -41,7 +44,10 @@ test('home triage suggests Base64 for a base64 string', async ({ page }) => {
 
 test('output can be piped to another tool', async ({ page }) => {
   await page.goto('./#/tool/base64');
-  await page.getByRole('button', { name: 'Decode a flag', exact: true }).click();
+  await page
+    .locator('.examples')
+    .getByRole('button', { name: 'Decode a flag', exact: true })
+    .click();
   await page.locator('.pane-out select.pipe').first().selectOption('caesar');
   await expect(page).toHaveURL(/#\/tool\/caesar/);
   await expect(page.locator('.input-text')).toHaveValue('flag{base64_is_not_crypto}');
