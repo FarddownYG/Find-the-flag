@@ -1,7 +1,23 @@
 import { defineTool } from '../../core/define';
 import { ToolError } from '../../core/errors';
 import type { Output } from '../../core/types';
+import { tOr } from '../../i18n';
+import { slug, toolT } from '../../i18n/tool-text';
 import { FORMATS, confidenceLabel, identify, type Identification } from './_hash-formats';
+
+const T = toolT('hash-identify');
+/** Fixed English strings of the format database, translated by a key derived from the text. */
+const tr = (area: string, english: string) =>
+  tOr(`tool.hash-identify.${area}.${slug(english)}`, english);
+
+/** Format notes: a few carry data (decoded hex / plaintext) and get a key with a placeholder. */
+function noteText(note: string): string {
+  const hexNote = note.match(/^decodes to hex ([0-9a-f]+)$/);
+  if (hexNote) return T('note.decodesHex', { hex: hexNote[1]! });
+  const plain = note.match(/^Not a hash: decodes to "(.*)"$/s);
+  if (plain) return T('note.ciscoPlain', { plain: plain[1]! });
+  return note ? tr('format', note) : '';
+}
 
 const MAX_LINES = 1000;
 const MAX_DETAILED = 25;
@@ -20,7 +36,12 @@ function describeShape(s: string): string {
       : /^[\x20-\x7e]+$/.test(s)
         ? 'printable text'
         : 'non-printable characters';
-  return `${s.length} characters, ${kind}`;
+  return T('shape', {
+    count: s.length,
+    kind: T(
+      `kind.${kind === 'Base64-like' ? 'base64' : kind === 'printable text' ? 'printable' : kind === 'non-printable characters' ? 'binary' : 'hex'}`,
+    ),
+  });
 }
 
 function lineBlocks(id: Identification, label: string): Output[] {
@@ -30,7 +51,7 @@ function lineBlocks(id: Identification, label: string): Output[] {
     out.push({
       type: 'note',
       level: 'warn',
-      text: `${label}: no known hash format matches (${describeShape(id.hash)}). It may be truncated, salted in an unusual way, encoded (try Base64 / Hex) or not a hash at all.`,
+      text: T('note.noMatch', { label, shape: describeShape(id.hash) }),
     });
   } else {
     const withNotes = id.candidates.some((c) => c.note);
@@ -38,29 +59,37 @@ function lineBlocks(id: Identification, label: string): Output[] {
       type: 'table',
       label,
       columns: [
-        'Candidate',
+        T('col.candidate'),
         'Hashcat -m',
-        'John format',
-        'Confidence',
-        ...(withNotes ? ['Notes'] : []),
+        T('col.john'),
+        T('col.confidence'),
+        ...(withNotes ? [T('col.notes')] : []),
       ],
       rows: id.candidates.map((c) => [
         c.name,
         dash(c.hashcat),
         dash(c.john),
-        confidenceLabel(c.confidence),
-        ...(withNotes ? [c.note] : []),
+        tr('confidence', confidenceLabel(c.confidence)),
+        ...(withNotes ? [noteText(c.note)] : []),
       ]),
       highlight: [0],
     });
   }
-  for (const text of id.context) out.push({ type: 'note', level: 'info', text });
-  if (id.known) out.push({ type: 'note', level: 'success', text: `Known value: ${id.known}.` });
+  for (const c of id.contextKeys) {
+    out.push({ type: 'note', level: 'info', text: T(`context.${c.key}`, c.params) });
+  }
+  if (id.known) {
+    out.push({
+      type: 'note',
+      level: 'success',
+      text: T('note.known', { value: tr('known', id.known) }),
+    });
+  }
   if (top && FORMATS.some((f) => f.jwt && f.name === top.name)) {
     out.push({
       type: 'note',
       level: 'info',
-      text: 'This is a JSON Web Token: use the JWT tool to decode it, try alg none or crack a weak secret.',
+      text: T('note.jwt'),
     });
   }
   return out;
@@ -136,15 +165,14 @@ export default defineTool({
       worst = Math.min(worst, top.confidence);
     }
     const score = worst >= 95 ? 0.92 : worst >= 80 ? 0.85 : 0.65;
-    return { score, reason: 'Looks like a password hash' };
+    return { score, reason: T('detect.reason') };
   },
   run(text) {
     const lines = text
       .split(/\r?\n/)
       .map((l) => l.trim())
       .filter(Boolean);
-    if (lines.length === 0)
-      throw new ToolError('Paste a hash to identify, or several hashes one per line.');
+    if (lines.length === 0) throw new ToolError(T('error.empty'));
     const used = lines.slice(0, MAX_LINES);
     const results = used.map((l) => identify(l));
     const out: Output[] = [];
@@ -152,31 +180,31 @@ export default defineTool({
     if (results.length > MAX_DETAILED) {
       out.push({
         type: 'table',
-        label: `${results.length} hashes, best guess for each`,
-        columns: ['#', 'Hash', 'Best guess', 'Hashcat -m', 'John format', 'Confidence'],
+        label: T('label.many', { count: results.length }),
+        columns: ['#', 'Hash', T('col.best'), 'Hashcat -m', T('col.john'), T('col.confidence')],
         rows: results.map((r, i) => {
           const top = r.candidates[0];
           return [
             i + 1,
             short(r.hash),
-            top?.name ?? 'unknown',
+            top?.name ?? T('value.unknown'),
             dash(top?.hashcat ?? ''),
             dash(top?.john ?? ''),
-            top ? confidenceLabel(top.confidence) : '-',
+            top ? tr('confidence', confidenceLabel(top.confidence)) : '-',
           ];
         }),
       });
       out.push({
         type: 'note',
         level: 'info',
-        text: `Paste ${MAX_DETAILED} lines or fewer to see every candidate for each hash.`,
+        text: T('note.tooMany', { max: MAX_DETAILED }),
       });
     } else {
       results.forEach((r, i) => {
         const label =
           results.length === 1
-            ? `Candidates for ${short(r.hash)}`
-            : `Line ${i + 1}: ${short(r.hash)}`;
+            ? T('label.candidates', { hash: short(r.hash) })
+            : T('label.line', { line: i + 1, hash: short(r.hash) });
         out.push(...lineBlocks(r, label));
       });
     }
@@ -184,7 +212,7 @@ export default defineTool({
       out.push({
         type: 'note',
         level: 'warn',
-        text: `Only the first ${MAX_LINES} of ${lines.length} lines were analysed.`,
+        text: T('note.truncated', { max: MAX_LINES, count: lines.length }),
       });
     }
     return out;

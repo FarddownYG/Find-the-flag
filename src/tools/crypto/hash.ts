@@ -18,6 +18,7 @@ import {
 } from 'hash-wasm';
 import { defineTool, bool, text } from '../../core/define';
 import { ToolError } from '../../core/errors';
+import { toolT } from '../../i18n/tool-text';
 import type { Output } from '../../core/types';
 import { concatBytes, fromBase64, fromHex, toHex, utf8Decode, utf8Encode } from '../../lib/bytes';
 import { createHmac, type HmacAlgo } from './_hmac';
@@ -97,10 +98,10 @@ function normalizeExpected(raw: string): string {
   if (/^[A-Za-z0-9+/_-]+={0,2}$/.test(token) && token.length >= 8) {
     return toHex(fromBase64(token));
   }
-  throw new ToolError(
-    'The expected hash is not hex or Base64. Paste just the digest, e.g. 5d41402abc4b2a76b9719d911017c592.',
-  );
+  throw new ToolError(T('error.notHex', { example: '5d41402abc4b2a76b9719d911017c592' }));
 }
+
+const T = toolT('hash');
 
 const withNewline = (b: Uint8Array) => concatBytes(b, Uint8Array.of(10));
 const withoutNewline = (b: Uint8Array) =>
@@ -191,8 +192,8 @@ export default defineTool({
 
     out.push({
       type: 'table',
-      label: `Digests of ${bytes.length} byte${bytes.length === 1 ? '' : 's'}`,
-      columns: ['Algorithm', 'Hash'],
+      label: T('label.digests', { count: bytes.length }),
+      columns: [T('col.algorithm'), T('col.hash')],
       rows: plain.map(([n, h]) => [n, fmt(h)]),
       highlight: plainHits,
     });
@@ -200,7 +201,7 @@ export default defineTool({
       out.push({
         type: 'table',
         label: 'HMAC',
-        columns: ['Algorithm', 'Hash'],
+        columns: [T('col.algorithm'), T('col.hash')],
         rows: macs.map(([n, h]) => [n, fmt(h)]),
         highlight: macHits,
       });
@@ -212,7 +213,7 @@ export default defineTool({
         out.push({
           type: 'note',
           level: 'success',
-          text: `Matches ${names.join(' / ')}.`,
+          text: T('note.matches', { names: names.join(' / ') }),
         });
       } else {
         out.push(...(await explainMiss(bytes, target, plain, macs.length > 0)));
@@ -230,28 +231,31 @@ async function explainMiss(
   hadKey: boolean,
 ): Promise<Output[]> {
   const out: Output[] = [];
-  const variants: [string, Uint8Array][] = [['a trailing newline added', withNewline(bytes)]];
+  const variants: [string, Uint8Array][] = [[T('variant.added'), withNewline(bytes)]];
   const trimmed = withoutNewline(bytes);
-  if (trimmed) variants.push(['the trailing newline removed', trimmed]);
+  if (trimmed) variants.push([T('variant.removed'), trimmed]);
   for (const [what, data] of variants) {
     const hit = (await digests(data)).filter(([, h]) => h === target).map(([n]) => n);
     if (hit.length) {
       out.push({
         type: 'note',
         level: 'warn',
-        text: `Not an exact match, but ${hit.join(' / ')} matches with ${what}. (echo adds a newline: use echo -n.)`,
+        text: T('note.newline', { names: hit.join(' / '), what }),
       });
       return out;
     }
   }
   const sameSize = plain.filter(([, h]) => h.length === target.length).map(([n]) => n);
-  const size = `${target.length} hex digits (${target.length * 4} bits)`;
+  const size = T('text.size', { digits: target.length, bits: target.length * 4 });
   out.push({
     type: 'note',
     level: 'warn',
     text: sameSize.length
-      ? `No match. The expected value has ${size}, like ${sameSize.join(', ')}, so the input probably differs (salt, encoding, extra whitespace)${hadKey ? ' or the key is wrong' : ', or it is an HMAC: set an HMAC key'}.`
-      : `No match. ${size} is not the size of any algorithm here. Is the hash truncated, or a different family (bcrypt, crypt, ...)? Try the Hash identifier.`,
+      ? T(hadKey ? 'note.noMatchSameSizeKey' : 'note.noMatchSameSizeHmac', {
+          size,
+          names: sameSize.join(', '),
+        })
+      : T('note.noMatchSize', { size }),
   });
   return out;
 }

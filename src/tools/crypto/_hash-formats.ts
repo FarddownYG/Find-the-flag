@@ -718,6 +718,8 @@ export interface Identification {
   hash: string;
   /** What was stripped or understood, e.g. 'shadow entry of user "root"'. */
   context: string[];
+  /** The same messages as i18n keys (tool.hash-identify.context.*) for the UI. */
+  contextKeys: { key: string; params?: Record<string, string> }[];
   candidates: Candidate[];
   /** Set when the hash is a famous value. */
   known?: string;
@@ -759,47 +761,59 @@ const LOCKED = new Set(['', '*', '!', '!!', 'x', 'NP', 'LK', '*LK*']);
 export function identify(line: string): Identification {
   const raw = line.trim();
   const context: string[] = [];
+  const contextKeys: Identification['contextKeys'] = [];
+  const say = (english: string, key: string, params?: Record<string, string>) => {
+    context.push(english);
+    contextKeys.push({ key, params });
+  };
 
   // /etc/shadow: user:hash:lastchange:min:max:warn:...
   const shadow = raw.match(/^([^:\s]+):([^:]*):(\d*):(\d*):(\d*):(\d*):/);
   if (shadow && !/^\d+$/.test(shadow[2]!) && !/^[0-9a-f]{32}$/i.test(shadow[2]!)) {
     let hash = shadow[2]!;
-    context.push(`/etc/shadow entry of user "${shadow[1]}"`);
+    say(`/etc/shadow entry of user "${shadow[1]}"`, 'shadow', { user: shadow[1]! });
     if (LOCKED.has(hash)) {
-      context.push('this account has no password hash (locked, or password login disabled)');
-      return { hash, context, candidates: [] };
+      say('this account has no password hash (locked, or password login disabled)', 'noHash');
+      return { hash, context, contextKeys, candidates: [] };
     }
     if (hash.startsWith('!') && hash.length > 1) {
-      context.push('the leading "!" means the account is locked; the hash itself is intact');
+      say('the leading "!" means the account is locked; the hash itself is intact', 'locked');
       hash = hash.slice(1);
     }
-    return { hash, context, candidates: classify(hash), known: KNOWN[hash.toLowerCase()] };
+    return {
+      hash,
+      context,
+      contextKeys,
+      candidates: classify(hash),
+      known: KNOWN[hash.toLowerCase()],
+    };
   }
 
   const direct = classify(raw);
   const strong = direct.some((c) => c.confidence >= 30);
   if (strong || !raw.includes(':')) {
-    return { hash: raw, context, candidates: direct, known: KNOWN[raw.toLowerCase()] };
+    return { hash: raw, context, contextKeys, candidates: direct, known: KNOWN[raw.toLowerCase()] };
   }
 
   // user:hash and hash:user are both common in dumps and CTF files.
   const fields = raw.split(':');
-  const tries: [string, string][] = [
-    [fields.slice(1).join(':'), `user:hash, user "${fields[0]}"`],
-    [fields[fields.length - 1]!, `user:hash, user "${fields.slice(0, -1).join(':')}"`],
-    [fields.slice(0, -1).join(':'), `hash:user, user "${fields[fields.length - 1]}"`],
+  const tries: [string, string, string, string][] = [
+    [fields.slice(1).join(':'), 'user:hash', fields[0]!, 'userHash'],
+    [fields[fields.length - 1]!, 'user:hash', fields.slice(0, -1).join(':'), 'userHash'],
+    [fields.slice(0, -1).join(':'), 'hash:user', fields[fields.length - 1]!, 'hashUser'],
   ];
-  for (const [candidate, who] of tries) {
+  for (const [candidate, layout, user, key] of tries) {
     const found = classify(candidate.trim());
     if (found.some((c) => c.confidence >= 30)) {
-      context.push(`read as ${who}`);
+      say(`read as ${layout}, user "${user}"`, key, { user });
       return {
         hash: candidate.trim(),
         context,
+        contextKeys,
         candidates: found,
         known: KNOWN[candidate.trim().toLowerCase()],
       };
     }
   }
-  return { hash: raw, context, candidates: direct, known: KNOWN[raw.toLowerCase()] };
+  return { hash: raw, context, contextKeys, candidates: direct, known: KNOWN[raw.toLowerCase()] };
 }

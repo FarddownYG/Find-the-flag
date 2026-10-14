@@ -143,7 +143,7 @@ async function check(prefix) {
     new RegExp(
       // Whole word, case-insensitive; a plural "s" is fine ("flags").
       `(^|[^\\p{L}\\p{N}])${term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}s?($|[^\\p{L}\\p{N}])`,
-      'iu',
+      /[A-Z]/.test(term) ? 'u' : 'iu', // proper names (Whitespace, Strings) are case-sensitive
     );
 
   const defaults = await codeDefaults();
