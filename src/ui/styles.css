@@ -692,7 +692,8 @@ tr.is-hl td:first-child {
 }
 .kv dd {
   margin: 0;
-  word-break: break-all;
+  /* Long hashes and URLs still wrap, but words are not cut in the middle ("Z IP archive"). */
+  overflow-wrap: anywhere;
 }
 
 .canvas-frame {

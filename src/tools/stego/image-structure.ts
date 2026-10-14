@@ -56,7 +56,7 @@ function previewOf(b: Uint8Array, max = 48): string {
 }
 
 /** Name the kind of data glued onto the end of an image, and the file extension to give it. */
-function describeTail(tail: Uint8Array): { label: string; ext: string } {
+export function describeTail(tail: Uint8Array): { label: string; ext: string } {
   const sig = identify(tail).find((s) => !s.weak);
   if (sig) return { label: sig.name, ext: sig.ext };
   if (tail.every((x) => x === 0)) return { label: 'zero padding', ext: 'bin' };

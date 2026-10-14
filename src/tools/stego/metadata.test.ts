@@ -38,7 +38,9 @@ describe('EXIF / metadata', () => {
     expect(dates.has('ExposureTime')).toBe(false);
     const gps = kv(out, 'GPS');
     expect(gps.get('Latitude, longitude')).toBe('48.858400, 2.294500');
-    expect(gps.get('Degrees')).toBe('48°51\'30.24"N 2°17\'40.20"E');
+    // Degrees/minutes/seconds and the map links live on the map block, not twice on the page.
+    expect(gps.has('Degrees')).toBe(false);
+    expect(gps.has('Map')).toBe(false);
     const text = kv(out, 'Software and text');
     expect(text.get('ImageDescription')).toBe('flag{exif}');
     expect(text.get('UserComment')).toBe('The real message is in the description.');
@@ -58,12 +60,26 @@ describe('EXIF / metadata', () => {
     expect(thumb.note).toContain('8x8 JPEG');
   });
 
+  it('puts the GPS position on a map', async () => {
+    const out = await run(sample('stego-exif.jpg'));
+    const map = out.find((o) => o.type === 'map');
+    expect(map).toMatchObject({ type: 'map', label: 'GPS position' });
+    if (map?.type !== 'map') throw new Error('no map');
+    expect(map.lat).toBeCloseTo(48.8584, 6);
+    expect(map.lon).toBeCloseTo(2.2945, 6);
+    expect((await run(sample('stego-text-chunk.png'))).some((o) => o.type === 'map')).toBe(false);
+  });
+
   it('gives negative coordinates for S and W references', async () => {
     let b = patch(sample('stego-exif.jpg'), [1, 0, 2, 0, 2, 0, 0, 0, 0x4e, 0, 0, 0], 8, 0x53);
     b = patch(b, [3, 0, 2, 0, 2, 0, 0, 0, 0x45, 0, 0, 0], 8, 0x57);
     const out = await run(b);
     expect(kv(out, 'GPS').get('Latitude, longitude')).toBe('-48.858400, -2.294500');
-    expect(kv(out, 'GPS').get('Degrees')).toBe('48°51\'30.24"S 2°17\'40.20"W');
+    const map = out.find((o) => o.type === 'map');
+    expect(map?.type === 'map' && [map.lat.toFixed(6), map.lon.toFixed(6)]).toEqual([
+      '-48.858400',
+      '-2.294500',
+    ]);
   });
 
   it('lists every raw tag with its group', async () => {

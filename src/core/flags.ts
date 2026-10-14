@@ -36,7 +36,7 @@ export function findFlags(text: string, re: RegExp, limit = 50): FlagSpan[] {
   return out;
 }
 
-const KNOWN_PREFIX = /^(flag|ctf|[a-z0-9]*ctf|htb|thm|key|secret)\{/i;
+export const KNOWN_PREFIX = /^(flag|ctf|[a-z0-9]*ctf|htb|thm|key|secret)\{/i;
 
 /**
  * Which candidates deserve the highlight. Brute-force outputs contain dozens of

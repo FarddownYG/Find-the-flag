@@ -266,6 +266,15 @@ export function pngTexts(bytes: Uint8Array, chunks: PngChunk[]): PngText[] {
   return out;
 }
 
+/** The tIME chunk as "2024-05-01 12:00:00 UTC", or null when there is none. */
+export function pngTime(bytes: Uint8Array, chunks: PngChunk[]): string | null {
+  const c = chunks.find((k) => k.type === 'tIME' && k.length === 7);
+  if (!c) return null;
+  const d = bytes.subarray(c.dataStart, c.dataStart + 7);
+  const p2 = (n: number) => String(n).padStart(2, '0');
+  return `${(d[0]! << 8) | d[1]!}-${p2(d[2]!)}-${p2(d[3]!)} ${p2(d[4]!)}:${p2(d[5]!)}:${p2(d[6]!)} UTC`;
+}
+
 // ---------- chunk catalogue ----------
 
 export const KNOWN_CHUNKS: Record<string, string> = {
