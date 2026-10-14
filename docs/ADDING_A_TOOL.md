@@ -43,9 +43,13 @@ That is all. `npm run dev`, open `#/tool/reverse`.
 | `bytes` | `{ bytes: Uint8Array; name?: string }`                               | textarea read as UTF-8 / hex / base64, or a file      |
 | `image` | `{ bytes, name, image: { width, height, data: Uint8ClampedArray } }` | drop zone; RGBA pixels, **exact** for PNG/BMP         |
 | `audio` | `{ bytes, name, sampleRate, channels: Float32Array[] }`              | drop zone; WAV decoded exactly, others by the browser |
+| `file`  | `LazyFile { name, size, blob, read(offset, length) }`                | drop zone; **nothing is read up front**               |
 
 Pick `bytes` whenever the data might be binary (decoders, XOR, forensics). Pick `text` for
-classical ciphers and anything that is really about characters.
+classical ciphers and anything that is really about characters. Pick `file` when inputs can be
+big (disk images, captures, dumps): only the Blob handle reaches the worker and the tool reads
+the slices it needs (`await input.read(offset, 65536)`), so a multi-gigabyte file never sits in
+memory. Scan in chunks with a small overlap, and cap what you render.
 
 ## 3. Options
 
@@ -80,16 +84,41 @@ In examples, a file option takes a sample name: `options: { other: { sample: 'b.
 | `{ type: 'kv', entries: [[k, v], ...] }`            | definition list                                           |
 | `{ type: 'image', image: RgbaImage, filename? }`    | canvas, click to zoom 1:1, PNG download                   |
 | `{ type: 'files', files: [{ name, data, note? }] }` | list with download + "Send to…" per file                  |
+| `{ type: 'picture', data, mime, filename? }`        | an encoded image shown as-is (e.g. a JPEG thumbnail)      |
+| `{ type: 'map', lat, lon, zoom? }`                  | coordinates + map links; opt-in OpenStreetMap map         |
 | `{ type: 'note', level, text }`                     | info / warn / error / success line                        |
 
-Return bytes rather than a lossy string when the result can be binary.
+Return bytes rather than a lossy string when the result can be binary. For a large extracted
+file, put a `Blob` in `files[].blob` (with an empty `data`): it is downloaded without copying.
 
-## 5. Errors
+## 5. Translations (required)
+
+The UI ships in English, French, Russian, Simplified Chinese and Hindi. **Every text a user can
+see goes through a key**, or the translation coverage degrades with each new tool.
+
+- Declarative text (name, description, placeholder, option labels / hints / choices, example
+  labels) stays in English in the tool file; it gets derived keys automatically
+  (`tool.<id>.name`, `tool.<id>.options.<key>.label`, …). Run `npm run i18n:extract` to copy
+  it into `src/i18n/locales/en.json`.
+- Runtime text (output labels, table columns, kv keys, notes, `ToolError` messages, detect
+  reasons) uses keys: `const T = toolT('my-tool');` then `T('note.binary', { size })`, with
+  the English in `en.json` under `tool.my-tool.note.binary`. Don't use the reserved sub-keys
+  `name`, `description`, `placeholder`, `options`, `examples`. Placeholders are `{name}`; for
+  counts pass `{ count }` and add `_one` / `_other` forms (`_few` / `_many` too in Russian).
+- Add the same keys to `fr.json`, `ru.json`, `zh.json` and `hi.json`. Keep technical terms and
+  tool names untouched in every language (base64, XOR, EXIF, Whitespace, hash, flag, GPS… —
+  the list is `src/i18n/glossary.json`).
+- `npm run i18n:check` fails on a key missing in one locale, a stale key, a missing plural
+  form, a placeholder mismatch or a translated technical term. While working on one tool:
+  `node scripts/i18n.mjs check --prefix=tool.my-tool.`
+- Example `expect` strings are checked against the English output.
+
+## 6. Errors
 
 Throw `new ToolError('Human sentence saying what is wrong and how to fix it.')`
 (`core/errors`). Anything else is shown as an "Unexpected error" — that is a bug.
 
-## 6. Examples are tests
+## 7. Examples are tests
 
 Every tool needs at least one example. Each one:
 
@@ -116,7 +145,7 @@ when possible, and never use copyrighted material.
 Add a `<id>.test.ts` next to the tool for edge cases (round-trips, malformed input).
 Test real behaviour with real data — no mocks of the code under test.
 
-## 7. Triage (optional, recommended)
+## 8. Triage (optional, recommended)
 
 `detect(sample)` lets the home page suggest your tool for pasted data or dropped files.
 It must be cheap and side-effect free. Return `null` when unsure.
@@ -130,20 +159,27 @@ detect({ text, bytes, name }) {
 
 `text` is `null` for binary files. Scores: 0.9 = "certainly", 0.5 = "plausible", < 0.25 is ignored.
 
-## 8. Shared code
+## 9. Shared code
 
 - `src/lib/bytes.ts` — UTF-8/latin1, hex, base64, printable ratio, byte search, LE/BE reads.
 - `src/lib/english.ts` — `plaintextScore`, `chiSquared`, `indexOfCoincidence` for brute-forcers.
+- `src/lib/readability.ts` — `readability` (0..100: does this read as French or English? It
+  also reports how well neighbouring words fit and the set phrases found), `segmentWords`
+  (split `CETTENUIT` into words), `wordSplit` (the same, with how unlikely such a split is by
+  chance, in bits), `orderFit` (how naturally lines follow on from one another),
+  `foldAccents`, `wordRank`, `isFunctionWord`, `letterFrequencies`. Word lists are in
+  `src/lib/wordlists/`. Use it to rank candidates that may be French, or whose words were
+  picked from a text.
 - `src/lib/signatures.ts` — magic-byte database (file type + carving).
 
 Helpers used by one tool only can live next to it as `_name.ts` (files starting with `_`
 are not registered as tools).
 
-## 9. Rules
+## 10. Rules
 
 - **Client-side only.** No network requests, no server, no telemetry. Libraries are bundled.
 - **Analysis of user-provided data only.** No scanners, no requests to third-party targets,
   no online brute-force. This is what keeps the site legal to host publicly.
 - Never use `innerHTML`; tools never touch the DOM anyway.
 - Pure and deterministic: same input + options → same output.
-- `npm run check` must pass (types, lint, format, tests), then `npm run test:e2e`.
+- `npm run check` must pass (types, lint, format, tests, i18n, privacy), then `npm run test:e2e`.
