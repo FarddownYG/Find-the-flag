@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { prepareInput } from '../../core/prepare';
 import { ToolError } from '../../core/errors';
 import type { AudioInput } from '../../core/types';
+import { plotRect } from './_axes';
 import { addNoise, audioInput, defaults, sine } from './_synth';
 import spectrogram, { computeSpectrogram, renderSpectrogram } from './spectrogram';
 
@@ -18,10 +19,8 @@ async function sample(name: string): Promise<AudioInput> {
 
 /** dB at (time, frequency) of a linear-axis spectrogram. */
 function at(sp: ReturnType<typeof computeSpectrogram>, fs: number, seconds: number, hz: number) {
-  const t = Math.min(
-    sp.frames - 1,
-    Math.max(0, Math.round((seconds * fs - sp.fftSize / 2) / sp.hop)),
-  );
+  // Column t is centred on sample t * hop of the analysed slice.
+  const t = Math.min(sp.frames - 1, Math.max(0, Math.round(((seconds - sp.time0) * fs) / sp.hop)));
   const r = Math.round(((hz - sp.fMin) / (sp.fMax - sp.fMin)) * (sp.rows - 1));
   return sp.db[t * sp.rows + r]!;
 }
@@ -109,9 +108,13 @@ describe('spectrogram tool', () => {
     const opts = { ...defaults(spectrogram), fftSize: '512', overlap: 90 };
     const out = await spectrogram.run(audio, opts as never);
     const img = out.find((o) => o.type === 'image');
-    expect(img?.type === 'image' && img.image.height).toBe(256);
+    // 256 rows of picture inside the margins that hold the time axis and the frequency labels.
+    expect(img?.type === 'image' && plotRect(img.image.width, img.image.height).height).toBe(256);
     const kv = out.find((o) => o.type === 'kv');
-    expect(kv?.type === 'kv' && kv.entries).toContainEqual(['Sample rate', '8000 Hz']);
+    expect(kv?.type === 'kv' && kv.entries).toContainEqual([
+      'Sample rate',
+      '8000 Hz (from the file)',
+    ]);
 
     // Read the picture back: the F is 5 columns wide and 7 rows tall, starting at column 2
     // of 0.09 s slots; row 0 is 1750 Hz and every row below is 75 Hz lower.

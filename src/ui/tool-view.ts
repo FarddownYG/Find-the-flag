@@ -14,9 +14,9 @@ import {
 import { selectFlags } from '../core/flags';
 import { resultToText } from '../core/result-text';
 import { exampleToRaw, prepareInput, resolveExampleOptions, type RawInput } from '../core/prepare';
-import { defaultOptions } from '../core/registry';
+import { defaultOptions, getTool } from '../core/registry';
 import { CancelledError, Runner } from '../core/runner';
-import type { AnyTool, ExampleInput, OptionSpec } from '../core/types';
+import type { AnyTool, OptionSpec } from '../core/types';
 import { formatSize, fromBase64, fromHex, toHex } from '../lib/bytes';
 import { identify } from '../lib/signatures';
 import { clear, copyText, debounce, h } from './dom';
@@ -25,21 +25,62 @@ import { flagSettings } from './settings';
 
 type PasteAs = 'text' | 'hex' | 'base64';
 
+/**
+ * The input on screen came from a built-in example (a "Try" chip), not from the user. While this
+ * is set, the output pane says so, so a demo result can never be taken for the analysis of the
+ * user's own file.
+ */
+interface DemoState {
+  /** Tool the example belongs to, and its English label (translated when shown). */
+  toolId: string;
+  label: string;
+  /** Sample file the example loaded; none for a text example. */
+  sample?: string;
+  /** Tool the demo data was piped from (when the demo is in another tool). */
+  from?: string;
+  /** Options the example set, and those the user changed by hand since (kept on leaving). */
+  keys: string[];
+  touched: Set<string>;
+}
+
 interface ToolState {
   text: string;
   pasteAs: PasteAs;
   /** bytes for tools that need the whole file; blob (a handle, nothing read) for input 'file'. */
   file: { bytes?: Uint8Array; blob?: Blob; name: string; size: number } | null;
   values: Record<string, unknown>;
+  demo: DemoState | null;
 }
 
 const memory = new Map<string, ToolState>();
 const runner = new Runner();
 
 /** Set by triage / "Send to…" right before navigating to a tool. */
-let pending: { toolId: string; raw: RawInput; options?: Record<string, unknown> } | null = null;
-export function setPending(toolId: string, raw: RawInput, options?: Record<string, unknown>) {
-  pending = { toolId, raw, options };
+let pending: {
+  toolId: string;
+  raw: RawInput;
+  options?: Record<string, unknown>;
+  demo?: { toolId: string; label: string; from: string };
+} | null = null;
+export function setPending(
+  toolId: string,
+  raw: RawInput,
+  options?: Record<string, unknown>,
+  demo?: { toolId: string; label: string; from: string },
+) {
+  pending = { toolId, raw, options, demo };
+}
+
+/** Back to defaults for the options an example set, except those the user changed by hand. */
+function endDemo(tool: AnyTool, state: ToolState, resetOptions: boolean): boolean {
+  const demo = state.demo;
+  if (!demo) return false;
+  state.demo = null;
+  if (resetOptions) {
+    const defaults = defaultOptions(tool);
+    for (const key of demo.keys) if (!demo.touched.has(key)) state.values[key] = defaults[key];
+  }
+  return true;
 }
 
 export async function loadSample(name: string): Promise<Uint8Array> {
@@ -60,11 +101,15 @@ export function renderTool(
     pasteAs: 'text',
     file: null,
     values: defaultOptions(tool),
+    demo: null,
   };
   memory.set(tool.id, state);
   if (pending?.toolId === tool.id) {
+    // New data from triage or "Send to…": whatever example was on screen is gone.
+    endDemo(tool, state, true);
     applyRaw(pending.raw);
     Object.assign(state.values, pending.options ?? {});
+    if (pending.demo) state.demo = { ...pending.demo, keys: [], touched: new Set() };
     pending = null;
   }
 
@@ -99,6 +144,7 @@ export function renderTool(
   const status = h('span', { class: 'status', role: 'status', 'aria-live': 'polite' });
   const outBody = h('div', { class: 'out-stack' });
   const flagStrip = h('div', { class: 'flag-strip', hidden: true });
+  const demoBanner = h('div', { class: 'demo-banner', role: 'note', hidden: true });
   const inputBox = h('div', { class: 'input-box' });
   const optionsBar = h('div', { class: 'options' });
   const runBtn = h(
@@ -148,6 +194,7 @@ export function renderTool(
             status,
             live ? null : runBtn,
           ),
+          demoBanner,
           flagStrip,
           outBody,
         ),
@@ -163,31 +210,104 @@ export function renderTool(
       ...tool.examples.map((ex) =>
         h(
           'button',
-          { type: 'button', class: 'chip', onclick: () => loadExample(ex.input, ex.options) },
+          { type: 'button', class: 'chip', onclick: () => loadExample(ex) },
           exampleLabel(tool, ex.label),
         ),
       ),
     );
   }
 
-  async function loadExample(input: ExampleInput, options?: Record<string, unknown>) {
-    state.file = null;
+  // ---------- demo ----------
+  /** Banner above the output while the input is a built-in example (never the user's data). */
+  function renderDemoBanner() {
+    clear(demoBanner);
+    const demo = state.demo;
+    demoBanner.hidden = !demo;
+    if (!demo) return;
+    const source = getTool(demo.toolId) ?? tool;
+    const label = exampleLabel(source, demo.label);
+    const line = demo.from
+      ? t('ui.demo.pipedLine', { label, tool: toolName(getTool(demo.from) ?? tool) })
+      : demo.sample
+        ? t('ui.demo.fileLine', { label, name: demo.sample })
+        : t('ui.demo.textLine', { label });
+    demoBanner.append(
+      h('span', { class: 'demo-badge' }, t('ui.demo.badge')),
+      ' ',
+      h('span', { class: 'demo-line' }, line),
+      ' ',
+      h('span', { class: 'demo-note' }, t('ui.demo.note')),
+    );
+  }
+
+  /** The user's own input replaces the example: no demo banner, example options back to default. */
+  function leaveDemo(resetOptions: boolean) {
+    if (!endDemo(tool, state, resetOptions)) return false;
+    if (resetOptions) renderOptions();
+    renderDemoBanner();
+    return true;
+  }
+
+  /** An option changed by hand: it stays when the example is replaced. */
+  const touch = (key: string) => state.demo?.touched.add(key);
+
+  /** New input is on its way: nothing of the previous input (or of a demo) stays on screen. */
+  function showAnalysing(name?: string) {
+    runCount++; // a result still in flight belongs to the previous input
+    clear(outBody);
+    flagStrip.hidden = true;
+    status.textContent = '';
+    outBody.append(
+      h(
+        'p',
+        { class: 'empty analysing', role: 'status' },
+        name ? t('ui.tool.analysing', { name }) : t('ui.tool.analysingInput'),
+      ),
+    );
+  }
+
+  let inputSeq = 0;
+
+  async function loadExample(ex: AnyTool['examples'][number]) {
+    const { input, options } = ex;
+    const seq = ++inputSeq;
+    const sample = typeof input === 'object' && 'sample' in input ? input.sample : undefined;
+    state.demo = null;
+    renderDemoBanner();
+    showAnalysing(sample);
     try {
-      state.values = {
+      const values = {
         ...defaultOptions(tool),
         ...(await resolveExampleOptions(tool, options, loadSample)),
       };
+      let text = state.text;
+      let pasteAs = state.pasteAs;
+      let raw: RawInput | null = null;
       if (typeof input === 'object' && 'hex' in input && tool.input === 'bytes') {
-        state.text = input.hex;
-        state.pasteAs = 'hex';
+        text = input.hex;
+        pasteAs = 'hex';
       } else {
-        applyRaw(await exampleToRaw(input, loadSample));
+        raw = await exampleToRaw(input, loadSample);
       }
+      if (seq !== inputSeq) return; // another input was chosen while the sample loaded
+      state.file = null;
+      state.values = values;
+      state.text = text;
+      state.pasteAs = pasteAs;
+      if (raw) applyRaw(raw);
     } catch (e) {
-      showError(e);
+      if (seq === inputSeq) showError(e);
       return;
     }
+    state.demo = {
+      toolId: tool.id,
+      label: ex.label,
+      sample,
+      keys: Object.keys(options ?? {}),
+      touched: new Set(),
+    };
     prepared = null;
+    renderDemoBanner();
     renderOptions();
     renderInput();
     run();
@@ -218,6 +338,7 @@ export function renderTool(
   }
 
   function setValue(key: string, v: unknown) {
+    touch(key);
     state.values[key] = v;
     renderOptions();
     if (live) scheduleRun();
@@ -331,6 +452,7 @@ export function renderTool(
         oninput: (e: Event) => {
           const n = Number((e.target as HTMLInputElement).value);
           if (Number.isFinite(n)) {
+            touch(key);
             state.values[key] = n;
             if (live) scheduleRun();
           }
@@ -346,6 +468,7 @@ export function renderTool(
         spellcheck: false,
         autocomplete: 'off',
         oninput: (e: Event) => {
+          touch(key);
           state.values[key] = (e.target as HTMLInputElement).value;
           if (live) scheduleRun();
         },
@@ -380,9 +503,17 @@ export function renderTool(
   });
 
   async function takeFile(f: File) {
+    const seq = ++inputSeq;
+    // The user's own file: leave the demo (and its options) and clear the old output at once.
+    leaveDemo(true);
+    showAnalysing(f.name);
     // Tools reading on demand get the handle only: a 4 GB disk image is never loaded whole.
     if (tool.input === 'file') applyRaw({ file: f, name: f.name });
-    else applyRaw({ bytes: new Uint8Array(await f.arrayBuffer()), name: f.name });
+    else {
+      const bytes = new Uint8Array(await f.arrayBuffer());
+      if (seq !== inputSeq) return; // a newer input replaced this one while it was read
+      applyRaw({ bytes, name: f.name });
+    }
     prepared = null;
     renderInput();
     run();
@@ -430,6 +561,12 @@ export function renderTool(
         state.text = ta.value;
         prepared = null;
         count.textContent = t('ui.input.chars', { count: ta.value.length });
+        inputSeq++; // typing wins over an example or a file still being loaded
+        // The first edit of an example makes it the user's text: drop the demo output at once.
+        if (leaveDemo(false)) {
+          if (live) showAnalysing();
+          else showPressRun();
+        }
         if (live) scheduleRun();
       },
       onkeydown: (ev: KeyboardEvent) => {
@@ -484,7 +621,13 @@ export function renderTool(
               {
                 type: 'button',
                 class: 'btn btn-ghost',
-                onclick: () => ((state.text = ''), renderInput(), showEmpty()),
+                onclick: () => (
+                  leaveDemo(true),
+                  (state.text = ''),
+                  (inputSeq += 1),
+                  renderInput(),
+                  showEmpty()
+                ),
               },
               t('ui.input.clear'),
             )
@@ -542,7 +685,14 @@ export function renderTool(
             {
               type: 'button',
               class: 'btn btn-ghost',
-              onclick: () => ((state.file = null), (prepared = null), renderInput(), showEmpty()),
+              onclick: () => (
+                leaveDemo(true),
+                (state.file = null),
+                (prepared = null),
+                (inputSeq += 1),
+                renderInput(),
+                showEmpty()
+              ),
             },
             t('ui.input.remove'),
           ),
@@ -562,6 +712,14 @@ export function renderTool(
     outBody.append(
       h('p', { class: 'empty' }, t(fileKind ? 'ui.tool.emptyFile' : 'ui.tool.emptyText')),
     );
+  }
+
+  function showPressRun() {
+    runCount++;
+    clear(outBody);
+    flagStrip.hidden = true;
+    status.textContent = '';
+    outBody.append(h('p', { class: 'empty' }, t('ui.tool.pressRun')));
   }
 
   function showError(e: unknown) {
@@ -608,8 +766,19 @@ export function renderTool(
       outBody.append(
         ...renderResult(result, {
           highlight: flags,
-          pipe: (id, r) => (setPending(id, r), open(id)),
+          pipe: (id, r) => (
+            setPending(
+              id,
+              r,
+              undefined,
+              state.demo
+                ? { toolId: state.demo.toolId, label: state.demo.label, from: tool.id }
+                : undefined,
+            ),
+            open(id)
+          ),
           setOptions: (values) => {
+            for (const key of Object.keys(values)) touch(key);
             Object.assign(state.values, values);
             renderOptions();
             run();
@@ -632,9 +801,17 @@ export function renderTool(
   function renderFlags(flags: Set<string>) {
     clear(flagStrip);
     flagStrip.hidden = flags.size === 0;
+    flagStrip.classList.toggle('is-demo', Boolean(state.demo));
     if (!flags.size) return;
+    // Candidates found in a demo sample are not findings about the user's file.
     flagStrip.append(
-      h('span', { class: 'flag-strip-label' }, t('ui.flags.candidates', { count: flags.size })),
+      h(
+        'span',
+        { class: 'flag-strip-label' },
+        state.demo
+          ? t('ui.flags.demoCandidates', { count: flags.size })
+          : t('ui.flags.candidates', { count: flags.size }),
+      ),
       ...[...flags].slice(0, 8).map((f) => {
         const b: HTMLButtonElement = h(
           'button',
@@ -667,6 +844,7 @@ export function renderTool(
   root.addEventListener('drop', onDrop);
   const offFlags = flagSettings.onChange(() => run());
 
+  renderDemoBanner();
   renderOptions();
   renderInput();
   if (currentRawSafe()) run();

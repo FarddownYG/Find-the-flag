@@ -1238,3 +1238,69 @@ tr.is-hl td:first-child {
   display: inline-flex;
   gap: 4px;
 }
+
+/* ---------- demo content (a built-in example is on screen, not the user's data) ---------- */
+.demo-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin: 12px 12px 0;
+  padding: 8px 12px;
+  border: 1px dashed var(--amber);
+  border-left: 4px solid var(--amber);
+  border-radius: var(--radius);
+  background: repeating-linear-gradient(
+    135deg,
+    rgb(229 160 70 / 0.12) 0 8px,
+    rgb(229 160 70 / 0.04) 8px 16px
+  );
+}
+.demo-badge {
+  padding: 1px 7px;
+  border-radius: 2px;
+  background: var(--amber);
+  color: var(--signal-ink);
+  font-size: var(--fs-0);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.demo-line {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.demo-note {
+  flex-basis: 100%;
+  color: var(--mute);
+  font-size: var(--fs-0);
+}
+/* Flag candidates of a demo: dashed and quiet, never the loud signal colour. */
+.flag-strip.is-demo {
+  background: transparent;
+  color: var(--text);
+  border: 1px dashed var(--amber);
+  animation: none;
+}
+.flag-strip.is-demo::before,
+.flag-strip.is-demo::after {
+  background: var(--amber);
+}
+.flag-strip.is-demo .flag-chip {
+  background: var(--raised);
+  color: var(--text);
+  border: 1px solid var(--line-strong);
+}
+.analysing {
+  animation: pulse 1.2s ease-in-out infinite;
+}
+@keyframes pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .analysing {
+    animation: none;
+  }
+}

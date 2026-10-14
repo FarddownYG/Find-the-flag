@@ -3,9 +3,11 @@
 An open-source toolbox for solving CTF challenges, entirely in your browser.
 
 Paste a string or drop a file on the home page and it suggests which tools fit. Each tool
-page has **Try** buttons with real examples, so nothing needs a manual. Outputs can be sent
-to another tool in one click to chain steps, and anything that looks like a flag
-(`flag{…}`, `CTF{…}`, or your event's own format) gets highlighted.
+page has **Try** buttons with real examples, so nothing needs a manual. An example is always
+labelled **Demo** in the output, and the label goes away the moment you open, drop or paste
+your own input (a file you open also puts the example's options back to their defaults). Outputs can be sent to another tool in
+one click to chain steps, and anything that looks like a flag (`flag{…}`, `CTF{…}`, or your
+event's own format) gets highlighted.
 
 The full list is in [docs/TOOLS.md](docs/TOOLS.md). It covers:
 
@@ -13,7 +15,7 @@ The full list is in [docs/TOOLS.md](docs/TOOLS.md). It covers:
 - **Crypto**: ROT/Caesar, XOR (brute force, repeating-key crack, known plaintext), Vigenère (with cracking), Atbash, affine, Bacon, rail fence, Polybius / tap code, substitution solver, frequency analysis, hash identification and computation, JWT.
 - **Steganography**: LSB extraction (zsteg-style auto scan), bit planes and colour filters (stegsolve-style), PNG/JPEG/GIF structure (with IHDR CRC repair), a PNG chunk surgeon for black or broken PNGs (lists every chunk where pngcheck stops at the first error, shows the text chunks, puts shuffled IDAT chunks back in order from a text-chunk hint, by hand or by search, repairs CRCs, signature, zlib header and IHDR size, and shows the rebuilt image), EXIF/metadata, an aperisolve-style image analyzer (every EXIF/IPTC/XMP/ICC field, GPS on a map, MD5/SHA hashes and file comparison, EXIF thumbnail checked against the picture, appended data, strings), QR codes, printer tracking dots (the Xerox DocuColor "yellow dots" found in a scan and decoded to print date, time and printer serial with a parity check, or a pasted / built 15 × 8 dot matrix), a colour-channel reveal (R/G/B/C/M/Y/K, colour ink only, contrast stretch), zero-width Unicode text, whitespace, and a full-scan text analyzer that runs every hidden-text check on a pasted text at once (acrostics of lines, words, sentences and paragraphs, regular picks, line orders and columns, invisible characters, trailing whitespace, homoglyphs and letter case as bits, encodings including leet, Morse and phone multi-tap, text typed with the wrong keyboard layout, classical ciphers with French and English key recovery) and ranks the results by French / English readability and by how unlikely each find is by chance.
 - **Forensics**: hexdump / `xxd -r`, file type from magic bytes, `strings`, carving of embedded files (binwalk-style), archive extraction (including ZipCrypto with a known password), entropy, and a binary analyzer for big unknown files and disk images (a BIN without its CUE: sector layout, data and audio tracks, rebuilt `.cue`, cooked `.iso`, ISO 9660 / Joliet / Rock Ridge files; FAT12/16/32 with deleted files; raw data as numbers, ENVI rasters), read in chunks so multi-gigabyte images never sit in memory (copies out of raw CD sectors stay under 64 MiB unless asked).
-- **Audio**: spectrogram, DTMF tones, Morse from audio.
+- **Audio**: spectrogram (the file's real sample rate is read from the MP3 / FLAC / Ogg / Opus / AAC / MP4 header before decoding, so nothing is resampled; the default view is the whole 0 Hz to Nyquist band, with FFT size, frequency and time zoom, log or linear axis, colour maps and labelled axes), DTMF tones, Morse from audio.
 - **Misc**: number bases and `long_to_bytes`, timestamps, text transforms.
 
 ## Principles
