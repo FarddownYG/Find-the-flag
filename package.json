@@ -16,7 +16,9 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "check": "npm run typecheck && npm run lint && npm run format:check && npm test"
+    "check": "npm run typecheck && npm run lint && npm run format:check && npm test && npm run check:privacy",
+    "docs:tools": "node scripts/gen-tools-doc.mjs",
+    "check:privacy": "node scripts/check-privacy.mjs"
   },
   "dependencies": {
     "@fontsource-variable/martian-mono": "^5.3.0",
@@ -37,5 +39,8 @@
     "typescript-eslint": "^8.71.2",
     "vite": "^8.3.4",
     "vitest": "^5.0.4"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }
