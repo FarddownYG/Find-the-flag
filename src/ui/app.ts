@@ -6,13 +6,29 @@ import { clear, copyText, debounce, h } from './dom';
 import { flagSettings } from './settings';
 import { renderTool, setPending } from './tool-view';
 
+/** Rank tools for a query: exact names/aliases first, then prefixes, then any mention. */
+function matchScore(t: AnyTool, w: string): number {
+  const name = t.name.toLowerCase();
+  const tags = (t.tags ?? []).map((x) => x.toLowerCase());
+  if (t.id === w || name === w || tags.includes(w)) return 100;
+  if (name.startsWith(w) || t.id.startsWith(w)) return 80;
+  if (tags.some((x) => x.startsWith(w))) return 70;
+  if (name.includes(w)) return 60;
+  if (tags.some((x) => x.includes(w))) return 50;
+  if (t.description.toLowerCase().includes(w)) return 20;
+  return 0;
+}
+
 const search = (q: string): AnyTool[] => {
   const words = q.toLowerCase().split(/\s+/).filter(Boolean);
   if (!words.length) return [...TOOLS];
-  return TOOLS.filter((t) => {
-    const hay = [t.id, t.name, t.description, ...(t.tags ?? [])].join(' ').toLowerCase();
-    return words.every((w) => hay.includes(w));
-  });
+  return TOOLS.map((t, i) => {
+    const scores = words.map((w) => matchScore(t, w));
+    return { t, i, score: Math.min(...scores) && scores.reduce((a, b) => a + b, 0) };
+  })
+    .filter((r) => r.score > 0)
+    .sort((a, b) => b.score - a.score || a.i - b.i)
+    .map((r) => r.t);
 };
 
 export function mountApp(root: HTMLElement): void {
