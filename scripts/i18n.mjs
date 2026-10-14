@@ -138,7 +138,9 @@ async function check(prefix) {
   const warnings = [];
   const en = read('en');
   const enBases = bases(en);
-  const glossary = JSON.parse(readFileSync(join(ROOT, 'src/i18n/glossary.json'), 'utf8')).terms;
+  const { terms: glossary, exempt = {} } = JSON.parse(
+    readFileSync(join(ROOT, 'src/i18n/glossary.json'), 'utf8'),
+  );
   const termRe = (term) =>
     new RegExp(
       // Whole word, case-insensitive; a plural "s" is fine ("flags").
@@ -197,6 +199,7 @@ async function check(prefix) {
         if (!enForms.size && ph !== expectedPh)
           problems.push(`${l}: "${k}" placeholders {${ph}} ≠ English {${expectedPh}}`);
         for (const term of glossary) {
+          if ((exempt[base] ?? []).includes(term)) continue; // the English uses it as a plain word
           if (enText.some((s) => termRe(term).test(s)) && !termRe(term).test(v)) {
             problems.push(`${l}: "${k}" must keep the term "${term}" unchanged`);
           }
