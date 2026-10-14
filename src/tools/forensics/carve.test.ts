@@ -2,8 +2,15 @@ import { readFileSync } from 'node:fs';
 import { deflateSync, gzipSync, strFromU8, strToU8, unzipSync, zlibSync } from 'fflate';
 import { describe, expect, it } from 'vitest';
 import { ToolError } from '../../core/errors';
+import { setLocale } from '../../i18n';
+import en from '../../i18n/locales/en.json';
+import fr from '../../i18n/locales/fr.json';
+import hi from '../../i18n/locales/hi.json';
+import ru from '../../i18n/locales/ru.json';
+import zh from '../../i18n/locales/zh.json';
+import { slug } from '../../i18n/tool-text';
 import { concatBytes, indexOfBytes } from '../../lib/bytes';
-import { adler32, crc32, deflateScan } from '../../lib/signatures';
+import { adler32, crc32, deflateScan, SIGNATURES } from '../../lib/signatures';
 import carve, { carveAll, type CarveSettings } from './carve';
 import {
   BZIP2,
@@ -527,5 +534,38 @@ describe('carve: more formats', () => {
       noise(100, 8),
     );
     expect(carveAll(fakes, base).found).toEqual([]);
+  });
+});
+
+describe('carve: translations', () => {
+  it('every signature end rule has a Binary analyzer key with the same English text', () => {
+    // Carve shows sig.endHow through tool.binary-analyzer.end.<slug>, which the i18n script cannot
+    // see (the key is built at run time): without this, a new end rule would stay English.
+    const locales: Record<string, Record<string, string>> = { en, fr, ru, zh, hi };
+    const problems: string[] = [];
+    for (const sig of SIGNATURES) {
+      if (sig.endHow === undefined) continue;
+      const key = `tool.binary-analyzer.end.${slug(sig.endHow)}`;
+      if (locales.en![key] !== sig.endHow)
+        problems.push(`en: ${key} ≠ "${sig.endHow}" (${sig.id})`);
+      for (const [l, d] of Object.entries(locales)) if (!(key in d)) problems.push(`${l}: ${key}`);
+    }
+    expect(problems).toEqual([]);
+  });
+
+  it('lets each language quote and list unknown type names', async () => {
+    const bytes = noise(100, 3);
+    const fail = (types: string) => Promise.resolve().then(() => run(bytes, { types }));
+    await expect(fail('nope, zzz')).rejects.toThrow(
+      'Unknown type "nope", "zzz". Use file extensions such as: 7z, ',
+    );
+    await setLocale('fr');
+    try {
+      await expect(fail('nope, zzz')).rejects.toThrow('Type inconnu « nope », « zzz ». ');
+      await setLocale('zh');
+      await expect(fail('nope, zzz')).rejects.toThrow('未知类型“nope”、“zzz”。');
+    } finally {
+      await setLocale('en');
+    }
   });
 });

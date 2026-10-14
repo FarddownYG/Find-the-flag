@@ -1,9 +1,12 @@
 import { defineTool, number, toggle } from '../../core/define';
 import { ToolError } from '../../core/errors';
 import type { Output, RgbaImage } from '../../core/types';
+import { signatureName, toolT } from '../../i18n/tool-text';
 import { formatSize } from '../../lib/bytes';
 import { identify } from '../../lib/signatures';
 import { Canvas, COLORS, shortSize, type Rgb } from './_chart';
+
+const T = toolT('entropy');
 
 const MAX_BLOCKS = 50_000;
 
@@ -280,36 +283,35 @@ function verdict(
   typeName: string | null,
   compressedType: boolean,
 ): Output {
+  const value = overall.toFixed(3);
   if (overall >= 7.9) {
     return {
       type: 'note',
       level: compressedType ? 'info' : 'warn',
       text: compressedType
-        ? `Entropy ${overall.toFixed(3)} ≈ 8: normal for a ${typeName} (already compressed). Look at the regions near its end for appended data.`
-        : `Entropy ${overall.toFixed(3)} ≈ 8: the data is encrypted, compressed or random. If it is not a known compressed format, suspect encryption: look for a key, an XOR pattern or a custom scheme.`,
+        ? T('note.randomCompressed', { value, name: String(typeName) })
+        : T('note.random', { value }),
     };
   }
   if (overall >= 7) {
     return {
       type: 'note',
       level: 'info',
-      text: `Entropy ${overall.toFixed(3)}: compressed data, or encrypted data with some structure around it.`,
+      text: T('note.high', { value }),
     };
   }
   if (overall >= 5) {
     return {
       type: 'note',
       level: 'info',
-      text: `Entropy ${overall.toFixed(3)}: typical of executable code, mixed binary data or non-English text.`,
+      text: T('note.medium', { value }),
     };
   }
   const zeros = mostCommon.value === 0 && mostCommon.share > 0.5;
   return {
     type: 'note',
     level: 'info',
-    text: zeros
-      ? `Low entropy (${overall.toFixed(3)}): mostly zero bytes, so padding or a sparse image. Real content may hide in the non-zero parts.`
-      : `Low entropy (${overall.toFixed(3)}): this looks like text, code or sparse data, not encrypted or compressed.`,
+    text: zeros ? T('note.lowZeros', { value }) : T('note.low', { value }),
   };
 }
 
@@ -363,12 +365,12 @@ export default defineTool({
     },
   ],
   run({ bytes }, { block, threshold, chart }) {
-    if (bytes.length === 0) throw new ToolError('The input is empty: drop a file to measure.');
+    if (bytes.length === 0) throw new ToolError(T('error.empty'));
     const size = block > 0 ? Math.floor(block) : autoBlockSize(bytes.length);
     const count = Math.ceil(bytes.length / size);
     if (count > MAX_BLOCKS) {
       throw new ToolError(
-        `A block size of ${size} bytes would make ${count} blocks. Use at least ${Math.ceil(bytes.length / MAX_BLOCKS)} bytes, or 0 for automatic.`,
+        T('error.tooManyBlocks', { size, count, min: Math.ceil(bytes.length / MAX_BLOCKS) }),
       );
     }
     const { overall, counts, blocks } = analyse(bytes, size);
@@ -393,30 +395,33 @@ export default defineTool({
       verdict(
         overall,
         mostCommon,
-        type?.name ?? null,
+        type ? signatureName(type) : null,
         type !== null && COMPRESSED_IDS.has(type.id),
       ),
       {
         type: 'kv',
-        label: 'Summary',
+        label: T('label.summary'),
         entries: [
-          ['Size', `${formatSize(bytes.length)} (${bytes.length} bytes)`],
+          [T('kv.size'), T('value.size', { size: formatSize(bytes.length), count: bytes.length })],
           [
-            'Shannon entropy',
-            `${overall.toFixed(4)} bits/byte (${((overall / 8) * 100).toFixed(1)}% of the maximum)`,
+            T('kv.shannon'),
+            T('value.shannon', {
+              value: overall.toFixed(4),
+              percent: ((overall / 8) * 100).toFixed(1),
+            }),
           ],
-          ['Block size', `${size} bytes (${blocks.length} block${blocks.length === 1 ? '' : 's'})`],
-          ['Lowest / highest block', `${lowest.toFixed(3)} / ${highest.toFixed(3)}`],
-          ['Distinct byte values', `${distinct} of 256`],
+          [T('kv.blockSize'), T('value.blockSize', { size, count: blocks.length })],
+          [T('kv.lowHigh'), `${lowest.toFixed(3)} / ${highest.toFixed(3)}`],
+          [T('kv.distinct'), T('value.distinct', { distinct })],
           [
-            'Most common byte',
+            T('kv.commonByte'),
             `0x${top.toString(16).padStart(2, '0')} (${(mostCommon.share * 100).toFixed(1)}%)`,
           ],
         ],
       },
       {
         type: 'image',
-        label: `Entropy per block (bits per byte, dashed line = ${threshold.toFixed(1)})`,
+        label: T('label.chart', { threshold: threshold.toFixed(1) }),
         image: entropyChart(blocks, bytes.length, threshold, chart),
         filename: 'entropy.png',
       },
@@ -425,40 +430,39 @@ export default defineTool({
       out.push({
         type: 'note',
         level: 'info',
-        text: 'Blocks under 1024 bytes read lower than 8 even for random data (256 random bytes give about 7.2), so the threshold is optimistic here.',
+        text: T('note.smallBlocks'),
       });
     }
     if (regions.length > 0) {
       out.push({
         type: 'table',
-        label: 'High-entropy regions',
-        columns: ['Start', 'End', 'Size', 'Mean entropy', 'Looks like'],
+        label: T('label.regions'),
+        columns: [T('col.start'), T('col.end'), T('col.size'), T('col.mean'), T('col.looksLike')],
         rows: regions.map((r) => [
           `0x${r.start.toString(16)}`,
           `0x${r.end.toString(16)}`,
           r.end - r.start,
           r.mean.toFixed(3),
-          r.mean >= 7.9 ? 'random: encrypted or already compressed' : 'compressed or encrypted',
+          r.mean >= 7.9 ? T('value.random') : T('value.compressed'),
         ]),
       });
       if (overall < threshold && regions.length < blocks.length) {
         out.push({
           type: 'note',
           level: 'warn',
-          text: 'The file is mostly low-entropy but contains high-entropy regions: an encrypted or compressed payload may be embedded. Try Carve on those offsets.',
+          text: T('note.payload'),
         });
       }
     } else {
       out.push({
         type: 'note',
         level: 'info',
-        text: `No block reaches ${threshold.toFixed(1)} bits/byte, so nothing looks encrypted or compressed.`,
+        text: T('note.noHigh', { threshold: threshold.toFixed(1) }),
       });
     }
     out.push({
       type: 'image',
-      label:
-        'Byte histogram (blue: printable ASCII, orange: 0x00, green: 0x80-0xFF, grey: other control bytes; dashed line: height if every value were equally likely)',
+      label: T('label.histogram'),
       image: histogramChart(counts, bytes.length),
       filename: 'histogram.png',
     });

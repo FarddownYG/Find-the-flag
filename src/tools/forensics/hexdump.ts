@@ -1,8 +1,11 @@
 import { bool, defineTool, number, select, text, toggle } from '../../core/define';
 import { ToolError } from '../../core/errors';
 import type { Output } from '../../core/types';
+import { signatureName, toolT } from '../../i18n/tool-text';
 import { formatSize, fromHex, toHex, utf8Decode } from '../../lib/bytes';
 import { identify } from '../../lib/signatures';
+
+const T = toolT('hexdump');
 
 /** The text dump is capped; the `bytes` block next to it always holds the whole selection. */
 const MAX_DUMP_BYTES = 1 << 18;
@@ -15,9 +18,7 @@ function parseNumber(raw: string, label: string): number | null {
   if (s === '') return null;
   const m = /^(-)?(?:0x([0-9a-f]+)|(\d+))$/i.exec(s);
   if (!m) {
-    throw new ToolError(
-      `${label} "${raw.trim()}" is not a number. Use decimal (256) or hex (0x100).`,
-    );
+    throw new ToolError(T('error.number', { option: label, value: raw.trim() }));
   }
   const value = m[2] !== undefined ? parseInt(m[2], 16) : parseInt(m[3]!, 10);
   return m[1] ? -value : value;
@@ -117,19 +118,17 @@ function parseLine(
 ): { offset: string; data: Uint8Array } {
   if (kind === 'xxd') {
     const m = RE_XXD.exec(line);
-    if (!m) throw new ToolError(`Line ${lineNo} is not an xxd line: "${line.slice(0, 60)}".`);
+    if (!m) throw new ToolError(T('error.notXxd', { line: lineNo, text: line.slice(0, 60) }));
     // Hex groups end at the first run of two spaces; the ASCII column follows it.
     const hexPart = m[2]!.split(/ {2,}|\t/)[0]!.replace(/ /g, '');
     if (!/^(?:[0-9a-f]{2})*$/i.test(hexPart)) {
-      throw new ToolError(
-        `Line ${lineNo} has no valid hex bytes after the offset: "${line.slice(0, 60)}".`,
-      );
+      throw new ToolError(T('error.noHex', { line: lineNo, text: line.slice(0, 60) }));
     }
     return { offset: m[1]!, data: fromHex(hexPart) };
   }
   if (kind === 'words') {
     const m = RE_WORDS.exec(line);
-    if (!m) throw new ToolError(`Line ${lineNo} is not a hexdump line: "${line.slice(0, 60)}".`);
+    if (!m) throw new ToolError(T('error.notHexdump', { line: lineNo, text: line.slice(0, 60) }));
     // Plain `hexdump` prints 16-bit words in little-endian order.
     const out: number[] = [];
     for (const w of m[2]!.trim().split(/\s+/))
@@ -137,7 +136,7 @@ function parseLine(
     return { offset: m[1]!, data: Uint8Array.from(out) };
   }
   const m = RE_OFFSET_BYTES.exec(line);
-  if (!m) throw new ToolError(`Line ${lineNo} is not a hexdump line: "${line.slice(0, 60)}".`);
+  if (!m) throw new ToolError(T('error.notHexdump', { line: lineNo, text: line.slice(0, 60) }));
   const out: number[] = [];
   for (const tok of `${m[2]} ${m[3]}`.trim().split(/\s+/)) {
     // Stop at the ASCII column: |...| (hexdump -C) or >...< (od).
@@ -157,8 +156,7 @@ export function parseHexDump(input: string): ParsedDump {
     .map((l, i) => ({ text: l.replace(/\s+$/, ''), no: i + 1 }))
     .filter((l) => l.text.trim() !== '');
   const lines = numbered.map((l) => l.text);
-  if (lines.length === 0)
-    throw new ToolError('Paste a hex dump (xxd, hexdump -C, od) or plain hex.');
+  if (lines.length === 0) throw new ToolError(T('error.noDump'));
 
   const kind = lineKind(lines[0]!);
   if (!kind) {
@@ -169,10 +167,10 @@ export function parseHexDump(input: string): ParsedDump {
       const bytes = Uint8Array.from(
         [...body.matchAll(/0x([0-9a-f]{1,2})\b/gi)].map((m) => parseInt(m[1]!, 16)),
       );
-      return { bytes, format: 'C array (xxd -i)', filled: 0 };
+      return { bytes, format: T('format.cArray'), filled: 0 };
     }
     // Plain hex (xxd -p, a hex string, "de ad be ef", 0x.. lists).
-    return { bytes: fromHex(lines.join('')), format: 'plain hex', filled: 0 };
+    return { bytes: fromHex(lines.join('')), format: T('format.plain'), filled: 0 };
   }
 
   // Offsets of od/hexdump may be octal; decide from the first two lines.
@@ -234,8 +232,8 @@ export function parseHexDump(input: string): ParsedDump {
     bytes.set(c, at);
     at += c.length;
   }
-  const format =
-    kind === 'xxd' ? 'xxd' : kind === 'words' ? 'hexdump (16-bit words)' : 'hexdump -C / od';
+  // "xxd" and "hexdump -C / od" are command names: data, not text.
+  const format = kind === 'xxd' ? 'xxd' : kind === 'words' ? T('format.words') : 'hexdump -C / od';
   return { bytes, format, filled };
 }
 
@@ -335,41 +333,40 @@ export default defineTool({
       const out: Output[] = [];
       const best = identify(parsed.bytes)[0];
       const entries: [string, string][] = [
-        ['Format', parsed.format],
-        ['Bytes', `${parsed.bytes.length} (${formatSize(parsed.bytes.length)})`],
+        [T('kv.format'), parsed.format],
+        [T('kv.bytes'), `${parsed.bytes.length} (${formatSize(parsed.bytes.length)})`],
       ];
-      if (best) entries.push(['File type', `${best.name} (.${best.ext})`]);
-      out.push({ type: 'kv', label: 'Parsed', entries });
+      if (best) entries.push([T('kv.fileType'), `${signatureName(best)} (.${best.ext})`]);
+      out.push({ type: 'kv', label: T('label.parsed'), entries });
       if (parsed.filled > 0) {
         out.push({
           type: 'note',
           level: 'warn',
-          text: `The dump skipped ${parsed.filled} byte${parsed.filled === 1 ? '' : 's'} (offsets jump); they were filled with zeros, as xxd -r does.`,
+          text: T('note.filled', { count: parsed.filled }),
         });
       }
       out.push({
         type: 'bytes',
-        label: 'Bytes',
+        label: T('label.bytes'),
         value: parsed.bytes,
         filename: `reversed.${best && !best.weak ? best.ext : 'bin'}`,
       });
       return out;
     }
 
-    if (bytes.length === 0) throw new ToolError('Nothing to dump: drop a file or paste some text.');
-    let from = parseNumber(start, 'Start offset') ?? 0;
+    if (bytes.length === 0) throw new ToolError(T('error.empty'));
+    // Errors name the field by its form label (derived key), so the two can never drift apart.
+    let from = parseNumber(start, T('options.start.label')) ?? 0;
     if (from < 0) from = Math.max(0, bytes.length + from);
     if (from > bytes.length) {
-      throw new ToolError(
-        `Start offset ${from} is past the end of the input (${bytes.length} bytes). Use a smaller value, or a negative one to count from the end.`,
-      );
+      throw new ToolError(T('error.pastEnd', { offset: from, count: bytes.length }));
     }
-    const wanted = parseNumber(length, 'Length');
-    if (wanted !== null && wanted < 0) throw new ToolError('Length cannot be negative.');
+    const wanted = parseNumber(length, T('options.length.label'));
+    if (wanted !== null && wanted < 0) throw new ToolError(T('error.negativeLength'));
     const to =
       wanted === null || wanted === 0 ? bytes.length : Math.min(bytes.length, from + wanted);
     const selection = from === 0 && to === bytes.length ? bytes : bytes.slice(from, to);
-    if (selection.length === 0) throw new ToolError('The selected range is empty.');
+    if (selection.length === 0) throw new ToolError(T('error.emptyRange'));
 
     const shown =
       selection.length > MAX_DUMP_BYTES ? selection.subarray(0, MAX_DUMP_BYTES) : selection;
@@ -379,17 +376,20 @@ export default defineTool({
         : style === 'plain'
           ? dumpPlain(shown, cols)
           : dumpXxd(shown, from, cols, group, ascii);
-    const out: Output[] = [{ type: 'text', label: 'Hexdump', value: dump }];
+    const out: Output[] = [{ type: 'text', label: T('label.hexdump'), value: dump }];
     if (shown.length < selection.length) {
       out.push({
         type: 'note',
         level: 'warn',
-        text: `Only the first ${shown.length} of ${selection.length} selected bytes are dumped as text. Set Start offset and Length to look at another part; the Bytes block below holds everything.`,
+        text: T('note.capped', { shown: shown.length, count: selection.length }),
       });
     }
     out.push({
       type: 'bytes',
-      label: `Bytes 0x${from.toString(16)}-0x${(from + selection.length).toString(16)}`,
+      label: T('label.range', {
+        from: `0x${from.toString(16)}`,
+        to: `0x${(from + selection.length).toString(16)}`,
+      }),
       value: selection,
       filename:
         from === 0 && selection.length === bytes.length
@@ -407,7 +407,7 @@ export default defineTool({
       return {
         score: 0.85,
         options: { mode: 'reverse' },
-        reason: 'Looks like an xxd / hexdump listing',
+        reason: T('detect.dump'),
       };
     }
     return null;

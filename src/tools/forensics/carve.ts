@@ -1,8 +1,12 @@
 import { defineTool, bool, text } from '../../core/define';
 import { ToolError } from '../../core/errors';
 import type { Output } from '../../core/types';
+import { tOr } from '../../i18n';
+import { signatureName, slug, toolT } from '../../i18n/tool-text';
 import { printableRatio } from '../../lib/bytes';
 import { matchesAt, SIGNATURES, type Signature } from '../../lib/signatures';
+
+const T = toolT('carve');
 
 /** One file found inside the input. `end` is exclusive and never past the buffer. */
 export interface Embedded {
@@ -71,6 +75,9 @@ export const strength = (s: Signature) =>
 
 const DEFAULT_TABLE = buildTable(SIGNATURES.filter(isCarvable));
 
+/** A signature's own end rule in the user's language (the Binary analyzer translates them). */
+const endHowText = (endHow: string) => tOr(`tool.binary-analyzer.end.${slug(endHow)}`, endHow);
+
 /** Every offset where a carvable signature matches and passes its sanity check. */
 export function scan(
   b: Uint8Array,
@@ -116,16 +123,16 @@ export function carveAll(b: Uint8Array, settings: CarveSettings): CarveResult {
     let truncated = false;
     if (end !== null && end <= start) end = null;
     const exact = end !== null;
-    let how = sig.endHow ?? 'file structure';
+    let how = sig.endHow ? endHowText(sig.endHow) : T('how.structure');
     if (end !== null && end > b.length) {
       truncated = true;
       end = b.length;
-      how += ' — truncated, data stops early';
+      how = T('how.truncated', { how });
     }
     if (end === null) {
       const next = hits.slice(h + 1).find((x) => x.start > start);
       end = next ? next.start : b.length;
-      how = next ? 'next signature (size is a guess)' : 'end of file';
+      how = next ? T('how.next') : T('how.eof');
     }
     const item: Embedded = { start, end, sig, how, exact, truncated };
     if (start === 0 && !inside) {
@@ -147,7 +154,7 @@ export function carveAll(b: Uint8Array, settings: CarveSettings): CarveResult {
 const hex8 = (n: number) => n.toString(16).padStart(8, '0');
 
 /** "ZIP archive (also docx, xlsx...)" -> "ZIP archive" for running text. */
-const shortName = (sig: Signature) => sig.name.replace(/ \(.*$/, '');
+const shortName = (sig: Signature) => signatureName(sig).replace(/\s*[(（].*$/, '');
 
 /** "zip, png .gz" -> set of lower-case names; unknown names are an error. */
 function parseTypes(raw: string): Set<string> {
@@ -160,9 +167,11 @@ function parseTypes(raw: string): Set<string> {
   const unknown = names.filter((x) => !known.has(x));
   if (unknown.length) {
     const exts = [...new Set(SIGNATURES.filter(isCarvable).map((s) => s.ext))].sort();
-    throw new ToolError(
-      `Unknown type "${unknown.join('", "')}". Use file extensions such as: ${exts.slice(0, 24).join(', ')}…`,
-    );
+    // Each language quotes and lists the names its own way: "a", "b" · « a », « b » · “a”、“b”.
+    const types = unknown
+      .map((type) => T('value.quotedType', { type }))
+      .join(T('value.typeSeparator'));
+    throw new ToolError(T('error.unknownType', { types, exts: exts.slice(0, 24).join(', ') }));
   }
   return new Set(names);
 }
@@ -219,7 +228,7 @@ export default defineTool({
     },
   ],
   run({ bytes }, { container, nested, types }) {
-    if (bytes.length === 0) throw new ToolError('The input is empty: drop a file to scan.');
+    if (bytes.length === 0) throw new ToolError(T('error.empty'));
     const only = parseTypes(types);
     const {
       found,
@@ -236,7 +245,12 @@ export default defineTool({
       out.push({
         type: 'note',
         level: 'warn',
-        text: `${shortName(first.sig)} at offset 0 ends at ${first.end} (0x${first.end.toString(16)}), but the input has ${bytes.length - first.end} more bytes after it: trailing data.`,
+        text: T('note.trailing', {
+          name: shortName(first.sig),
+          end: first.end,
+          hex: `0x${first.end.toString(16)}`,
+          count: bytes.length - first.end,
+        }),
       });
     }
 
@@ -246,7 +260,7 @@ export default defineTool({
         // slice(): a view would drag the whole input along when the result crosses a worker.
         name: `${hex8(f.start)}.${f.sig.ext}`,
         data: bytes.slice(f.start, f.end),
-        note: `${f.sig.name} · ${f.how}`,
+        note: `${signatureName(f.sig)} · ${f.how}`,
       });
     }
     // Trailing bytes nobody recognised (a plain-text flag, a key...) are worth keeping too.
@@ -254,19 +268,26 @@ export default defineTool({
       files.push({
         name: `trailing-${hex8(trailingFrom)}.bin`,
         data: bytes.slice(trailingFrom),
-        note: 'Unrecognised data after the end of the file',
+        note: T('file.trailing'),
       });
     }
 
     if (found.length > 0) {
       out.push({
         type: 'table',
-        label: 'Embedded files',
-        columns: ['Offset', 'Hex', 'Type', 'Size', 'Ends at', 'End found by'],
+        label: T('label.embedded'),
+        columns: [
+          T('col.offset'),
+          T('col.hex'),
+          T('col.type'),
+          T('col.size'),
+          T('col.endsAt'),
+          T('col.endFoundBy'),
+        ],
         rows: found.map((f) => [
           f.start,
           `0x${f.start.toString(16)}`,
-          f.sig.name,
+          signatureName(f.sig),
           f.end - f.start,
           `0x${f.end.toString(16)}`,
           f.how,
@@ -274,34 +295,37 @@ export default defineTool({
         highlight: found.flatMap((f, i) => (f.start > 0 && f.exact ? [i] : [])),
       });
     }
-    if (files.length > 0) out.push({ type: 'files', label: 'Carved files', files });
+    if (files.length > 0) out.push({ type: 'files', label: T('label.carvedFiles'), files });
     if (found.length === 0 && files.length === 0) {
       out.push({
         type: 'note',
         level: 'info',
         text: first
-          ? `Nothing else is embedded: the input is one ${shortName(first.sig)}${first.exact ? '' : ' (where it ends could not be told)'}.`
-          : `No embedded file signatures found in ${bytes.length} bytes${only.size ? ' for the chosen types' : ''}. Try Strings (text hidden in the data) or Entropy (is part of it encrypted or compressed?).`,
+          ? first.exact
+            ? T('note.single', { name: shortName(first.sig) })
+            : T('note.singleNoEnd', { name: shortName(first.sig) })
+          : only.size
+            ? T('note.noneTypes', { count: bytes.length })
+            : T('note.none', { count: bytes.length }),
       });
     }
     if (nestedSkipped > 0) {
-      const where =
-        found.length > 0
-          ? 'the files above'
-          : first
-            ? `the ${shortName(first.sig)} that makes up the input`
-            : 'other files';
       out.push({
         type: 'note',
         level: 'info',
-        text: `${nestedSkipped} more signature${nestedSkipped === 1 ? ' sits' : 's sit'} inside ${where} and ${nestedSkipped === 1 ? 'was' : 'were'} skipped (for example the entries of an archive). Tick "Include nested matches" to list them.`,
+        text:
+          found.length > 0
+            ? T('note.nestedAbove', { count: nestedSkipped })
+            : first
+              ? T('note.nestedInput', { count: nestedSkipped, name: shortName(first.sig) })
+              : T('note.nestedOther', { count: nestedSkipped }),
       });
     }
     if (capped) {
       out.push({
         type: 'note',
         level: 'warn',
-        text: `Stopped at ${found.length} files. Restrict the search with "Only these types".`,
+        text: T('note.capped', { count: found.length }),
       });
     }
     return out;
@@ -320,14 +344,14 @@ export default defineTool({
       const f = found[0]!;
       return {
         score: printableRatio(head) > 0.97 ? 0.45 : 0.65,
-        reason: `${f.sig.name} at offset ${f.start}`,
+        reason: T('detect.found', { name: signatureName(f.sig), offset: f.start }),
         options: { container: false },
       };
     }
     if (sizeKnown && container?.exact && !container.truncated && container.end < bytes.length) {
       return {
         score: 0.6,
-        reason: `${bytes.length - container.end} bytes after the end of the file`,
+        reason: T('detect.trailing', { count: bytes.length - container.end }),
       };
     }
     return null;
