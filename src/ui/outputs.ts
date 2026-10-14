@@ -277,7 +277,10 @@ function kvBlock(o: Extract<Output, { type: 'kv' }>, ctx: OutputContext): HTMLEl
     h(
       'dl',
       { class: 'kv' },
-      ...o.entries.flatMap(([k, v]) => [h('dt', null, k), h('dd', null, ...flagged(v, ctx))]),
+      ...o.entries.flatMap(([k, v]) => [
+        h('dt', null, k, h('span', { class: 'visually-hidden' }, ': ')),
+        h('dd', null, ...flagged(v, ctx)),
+      ]),
     ),
   );
 }
