@@ -7,6 +7,9 @@
  */
 import { ToolError } from '../../core/errors';
 import type { RgbaImage } from '../../core/types';
+import { toolT } from '../../i18n/tool-text';
+
+const T = toolT('piet');
 
 export const HUES = ['red', 'yellow', 'green', 'cyan', 'blue', 'magenta'] as const;
 export const SHADES = ['light', 'normal', 'dark'] as const;
@@ -264,11 +267,9 @@ const MAX_CODELS = 4_000_000;
 
 export function buildGrid(image: RgbaImage, o: BuildOptions): BuiltGrid {
   const { width, height, data } = image;
-  if (width < 1 || height < 1) throw new ToolError('The image is empty.');
+  if (width < 1 || height < 1) throw new ToolError(T('error.empty'));
   if (width * height > MAX_PIXELS) {
-    throw new ToolError(
-      `The image is too large (${width}x${height} pixels). Piet programs are small: downscale it, or crop to the program.`,
-    );
+    throw new ToolError(T('error.tooLarge', { width, height }));
   }
   const rgb = new Int32Array(width * height);
   for (let i = 0; i < rgb.length; i++) rgb[i] = flatten(data, i * 4);
@@ -276,18 +277,14 @@ export function buildGrid(image: RgbaImage, o: BuildOptions): BuiltGrid {
   const detected = !(o.codel > 0);
   const codel = detected ? detectCodelSize(width, height, rgb) : Math.floor(o.codel);
   if (codel > width || codel > height) {
-    throw new ToolError(
-      `Codel size ${codel} is larger than the image (${width}x${height} pixels). Use a smaller value, or 0 to detect it.`,
-    );
+    throw new ToolError(T('error.codelTooLarge', { codel, width, height }));
   }
   const cw = Math.floor(width / codel);
   const ch = Math.floor(height / codel);
   const cropped = cw * codel !== width || ch * codel !== height;
   const n = cw * ch;
   if (n > MAX_CODELS) {
-    throw new ToolError(
-      `The image has ${n.toLocaleString('en-US')} codels, far too many for a Piet program. It is probably not a clean Piet image (anti-aliased or compressed?): set the codel size by hand, or choose how other colours are treated.`,
-    );
+    throw new ToolError(T('error.tooManyCodels', { codels: n.toLocaleString('en-US') }));
   }
 
   // Colour of every codel.

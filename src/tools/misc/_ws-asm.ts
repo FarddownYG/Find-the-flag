@@ -3,6 +3,7 @@
  * program generators (text -> program, program hidden in a cover text).
  */
 import { ToolError } from '../../core/errors';
+import { toolT } from '../../i18n/tool-text';
 import {
   charLiteral,
   encodeNumber,
@@ -13,6 +14,8 @@ import {
   type Parsed,
 } from './_ws-core';
 import { labelText } from './_ws-vm';
+
+const T = toolT('whitespace-lang');
 
 /** Other spellings people use for the same instructions. */
 const ALIASES: Record<string, string> = {
@@ -122,7 +125,7 @@ interface Item {
 export function assemble(src: string): string {
   const items: Item[] = [];
   src.split(/\r?\n/).forEach((rawLine, i) => {
-    const where = `Line ${i + 1}`;
+    const lineNo = i + 1;
     // Disassembly columns: instruction index, source line, raw S/T/L tokens (maybe cut with …).
     let line = stripComment(rawLine)
       .trim()
@@ -130,7 +133,7 @@ export function assemble(src: string): string {
     const def = /^([^\s:]+):\s*(.*)$/.exec(line);
     if (def) {
       const ref = parseLabelArg(def[1]!);
-      if (!ref) throw new ToolError(`${where}: "${def[1]}" is not a valid label name.`);
+      if (!ref) throw new ToolError(T('error.asmLabelName', { line: lineNo, name: def[1]! }));
       items.push({ op: OP_BY_NAME.get('label')!, label: ref });
       line = def[2]!.trim();
     }
@@ -140,31 +143,32 @@ export function assemble(src: string): string {
     const arg = m[2]!.trim();
     const op = OP_BY_NAME.get(ALIASES[word] ?? word);
     if (!op) {
-      throw new ToolError(`${where}: unknown instruction "${m[1]}". Known: ${MNEMONICS}.`);
+      throw new ToolError(T('error.asmUnknown', { line: lineNo, word: m[1]!, known: MNEMONICS }));
     }
     if (op.arg === 'none') {
-      if (arg) throw new ToolError(`${where}: ${op.name} takes no argument (got "${arg}").`);
+      if (arg) throw new ToolError(T('error.asmNoArgument', { line: lineNo, op: op.name, arg }));
       items.push({ op });
     } else if (!arg) {
-      throw new ToolError(`${where}: ${op.name} needs a ${op.arg}.`);
+      throw new ToolError(
+        op.arg === 'number'
+          ? T('error.asmNeedsNumber', { line: lineNo, op: op.name })
+          : T('error.asmNeedsLabel', { line: lineNo, op: op.name }),
+      );
     } else if (op.arg === 'number') {
       const num = parseNumberArg(arg);
       if (num === null) {
-        throw new ToolError(`${where}: "${arg}" is not a number (use 70, -3, 0x46, 0b101 or 'F').`);
+        throw new ToolError(T('error.asmBadNumber', { line: lineNo, arg }));
       }
       items.push({ op, num });
     } else {
       const label = parseLabelArg(arg);
       if (!label) {
-        throw new ToolError(
-          `${where}: "${arg}" is not a label (use a name like loop, a number, or S/T letters).`,
-        );
+        throw new ToolError(T('error.asmBadLabel', { line: lineNo, arg }));
       }
       items.push({ op, label });
     }
   });
-  if (!items.length)
-    throw new ToolError('Type some instructions, e.g. "push 70", "outchar", "end".');
+  if (!items.length) throw new ToolError(T('error.asmEmpty'));
 
   // Symbolic names get the shortest binary codes not already used by literal labels.
   const taken = new Set<string>();
@@ -255,25 +259,28 @@ export function disassemble(parsed: Parsed, lines?: ArrayLike<number>, maxRows =
       text += ` ${labelText(ins.label)}`;
       const id = ids.get(ins.label);
       if (ins.op.name === 'label') {
-        note = seen.has(ins.label) ? `L${id} again (ignored: the first mark wins)` : `L${id}`;
+        note = seen.has(ins.label) ? T('text.labelAgain', { id: `L${id}` }) : `L${id}`;
         seen.add(ins.label);
-      } else note = id ? `L${id}` : 'never marked';
+      } else note = id ? `L${id}` : T('text.neverMarked');
     }
     const line = lineOf[ins.start] ?? 1;
     const head = `${String(i).padStart(iw)}  ${String(line).padStart(lw)}  ${tokens[i]!.padEnd(tw)}  `;
     return note ? `${head}${text.padEnd(14)}  ; ${note}` : `${head}${text}`;
   });
   const out = [
-    `${'#'.padStart(iw)}  ${'line'.padStart(lw)}  ${'tokens'.padEnd(tw)}  instruction`,
+    `${'#'.padStart(iw)}  ${T('text.columnLine').padStart(lw)}  ${T('text.columnTokens').padEnd(tw)}  ${T('text.columnInstruction')}`,
     ...rows,
   ];
   if (instrs.length > shown.length) {
-    out.push(`; … ${instrs.length - shown.length} more instructions not shown`);
+    const more = instrs.length - shown.length;
+    out.push(`; … ${T('text.moreInstructions', { count: more })}`);
   }
   if (tail) {
     const line = lineOf[tail.start] ?? 1;
     const raw = tail.raw.length > 24 ? `${tail.raw.slice(0, 24)}…` : tail.raw;
-    out.push(`; ${instrs.length} @ line ${line}: ${raw} — parsing stops here: ${tail.reason}`);
+    out.push(
+      `; ${T('text.parsingStops', { index: instrs.length, line, tokens: raw, reason: tail.reason })}`,
+    );
   }
   return out.join('\n');
 }

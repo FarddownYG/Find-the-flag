@@ -14,7 +14,10 @@
  *  - in(number) reads like scanf("%d"): it skips blanks, takes an optional sign and digits, and
  *    stops at the first other character (which stays in the input).
  */
+import { toolT } from '../../i18n/tool-text';
 import { BLACK, colourChange, DX, DY, exitCodel, WHITE, type PietGrid } from './_piet-core';
+
+const T = toolT('piet');
 
 export const COMMANDS = [
   null,
@@ -46,6 +49,16 @@ export function commandFor(from: number, to: number): Command | null {
 
 export const DP_NAMES = ['right', 'down', 'left', 'up'] as const;
 export const CC_NAMES = ['left', 'right'] as const;
+
+const DIRECTION: Record<(typeof DP_NAMES)[number], () => string> = {
+  right: () => T('value.dir.right'),
+  down: () => T('value.dir.down'),
+  left: () => T('value.dir.left'),
+  up: () => T('value.dir.up'),
+};
+/** The direction of the DP (0-3) or of the CC (0-1), in the interface language. */
+export const dpName = (dp: number) => DIRECTION[DP_NAMES[dp]!]();
+export const ccName = (cc: number) => DIRECTION[CC_NAMES[cc]!]();
 
 /** Consecutive blocked attempts after which the program ends. */
 export const MAX_ATTEMPTS = 8;
@@ -111,8 +124,8 @@ export function unescapeInput(s: string): string {
 /** A character for the trace: quoted when printable, a name or code point otherwise. */
 export function showChar(ch: string): string {
   const cp = ch.codePointAt(0)!;
-  const named: Record<number, string> = { 10: '\\n', 13: '\\r', 9: '\\t', 0: '\\0', 32: 'space' };
-  const name = named[cp];
+  const named: Record<number, string> = { 10: '\\n', 13: '\\r', 9: '\\t', 0: '\\0' };
+  const name = cp === 32 ? T('value.space') : named[cp];
   if (name !== undefined) return `'${name}'`;
   if (cp < 32 || (cp >= 0x7f && cp < 0xa0) || cp === 0xfffd) {
     return `U+${cp.toString(16).toUpperCase().padStart(4, '0')}`;
@@ -197,21 +210,33 @@ export function runPiet(grid: PietGrid, o: RunOptions): PietResult {
   }
   if (first === WHITE) inWhite = true;
 
+  /** Why a command was ignored, for the trace. */
+  const WHY = {
+    emptyStack: () => T('value.why.emptyStack'),
+    twoValues: () => T('value.why.twoValues'),
+    divisionByZero: () => T('value.why.divisionByZero'),
+    moduloByZero: () => T('value.why.moduloByZero'),
+    negativeDepth: () => T('value.why.negativeDepth'),
+    deepRoll: () => T('value.why.deepRoll'),
+    noInput: () => T('value.why.noInput'),
+    noNumber: () => T('value.why.noNumber'),
+  };
+
   /** Run one command; returns the trace "value" text (only built when `tracing`). */
   const apply = (cmd: Command, size: number, tracing: boolean): string => {
-    const skip = (why: string): string => {
+    const skip = (why: keyof typeof WHY): string => {
       ignored++;
-      return tracing ? `ignored: ${why}` : '';
+      return tracing ? T('value.ignored', { why: WHY[why]() }) : '';
     };
     const len = stack.length;
     switch (cmd) {
       case 'push':
         stack.push(BigInt(size));
-        return tracing ? `pushed ${size}` : '';
+        return tracing ? T('value.pushed', { value: size }) : '';
       case 'pop': {
-        if (len < 1) return skip('empty stack');
+        if (len < 1) return skip('emptyStack');
         const v = stack.pop()!;
-        return tracing ? `popped ${v}` : '';
+        return tracing ? T('value.popped', { value: String(v) }) : '';
       }
       case 'add':
       case 'subtract':
@@ -219,7 +244,7 @@ export function runPiet(grid: PietGrid, o: RunOptions): PietResult {
       case 'divide':
       case 'mod':
       case 'greater': {
-        if (len < 2) return skip('needs two values');
+        if (len < 2) return skip('twoValues');
         const a = stack[len - 1]!;
         const b = stack[len - 2]!;
         let r: bigint;
@@ -228,7 +253,7 @@ export function runPiet(grid: PietGrid, o: RunOptions): PietResult {
         else if (cmd === 'multiply') r = b * a;
         else if (cmd === 'greater') r = b > a ? 1n : 0n;
         else {
-          if (a === 0n) return skip(cmd === 'divide' ? 'division by zero' : 'modulo by zero');
+          if (a === 0n) return skip(cmd === 'divide' ? 'divisionByZero' : 'moduloByZero');
           if (cmd === 'divide') r = b / a;
           else {
             r = b % a;
@@ -241,35 +266,35 @@ export function runPiet(grid: PietGrid, o: RunOptions): PietResult {
         return tracing ? `${b} ${BINARY_SYMBOL[cmd]} ${a} = ${r}` : '';
       }
       case 'not': {
-        if (len < 1) return skip('empty stack');
+        if (len < 1) return skip('emptyStack');
         const v = stack[len - 1]!;
         stack[len - 1] = v === 0n ? 1n : 0n;
         return tracing ? `not ${v} = ${stack[len - 1]}` : '';
       }
       case 'pointer': {
-        if (len < 1) return skip('empty stack');
+        if (len < 1) return skip('emptyStack');
         const n = stack.pop()!;
         dp = (dp + Number(((n % 4n) + 4n) % 4n)) & 3;
-        return tracing ? `${n}: DP ${DP_NAMES[dp]}` : '';
+        return tracing ? `${n}: DP ${dpName(dp)}` : '';
       }
       case 'switch': {
-        if (len < 1) return skip('empty stack');
+        if (len < 1) return skip('emptyStack');
         const n = stack.pop()!;
         if (n % 2n !== 0n) cc ^= 1;
-        return tracing ? `${n}: CC ${CC_NAMES[cc]}` : '';
+        return tracing ? `${n}: CC ${ccName(cc)}` : '';
       }
       case 'duplicate': {
-        if (len < 1) return skip('empty stack');
+        if (len < 1) return skip('emptyStack');
         stack.push(stack[len - 1]!);
         return tracing ? `${stack[len - 1]}` : '';
       }
       case 'roll': {
-        if (len < 2) return skip('needs two values');
+        if (len < 2) return skip('twoValues');
         // The first value popped is the number of rolls, the second the depth.
         const rolls = stack[len - 1]!;
         const depth = stack[len - 2]!;
-        if (depth < 0n) return skip('negative depth');
-        if (depth > BigInt(len - 2)) return skip('depth larger than the stack');
+        if (depth < 0n) return skip('negativeDepth');
+        if (depth > BigInt(len - 2)) return skip('deepRoll');
         stack.length = len - 2;
         const d = Number(depth);
         if (d > 1) {
@@ -280,39 +305,42 @@ export function runPiet(grid: PietGrid, o: RunOptions): PietResult {
             for (let i = 0; i < d; i++) stack.push(part[(i - r + d) % d]!);
           }
         }
-        return tracing ? `depth ${depth}, ${rolls} roll${rolls === 1n ? '' : 's'}` : '';
+        if (!tracing) return '';
+        const roll = { depth: String(depth), rolls: String(rolls) };
+        return rolls === 1n ? T('value.oneRoll', roll) : T('value.rolls', roll);
       }
       case 'in(number)': {
         const got = readNumber(chars, inPos);
-        if (!got) return skip(inPos >= chars.length ? 'no input left' : 'no number in the input');
+        if (!got) return skip(inPos >= chars.length ? 'noInput' : 'noNumber');
         inPos = got.next;
         stack.push(got.value);
-        return tracing ? `read ${got.value}` : '';
+        return tracing ? T('value.read', { value: String(got.value) }) : '';
       }
       case 'in(char)': {
-        if (inPos >= chars.length) return skip('no input left');
+        if (inPos >= chars.length) return skip('noInput');
         const ch = chars[inPos++]!;
         stack.push(BigInt(ch.codePointAt(0)!));
-        return tracing ? `read ${showChar(ch)}` : '';
+        return tracing ? T('value.read', { value: showChar(ch) }) : '';
       }
       case 'out(number)': {
-        if (len < 1) return skip('empty stack');
+        if (len < 1) return skip('emptyStack');
         const text = String(stack.pop()!);
         out.push(text);
         outLength += text.length;
-        return tracing ? `printed ${text}` : '';
+        return tracing ? T('value.printed', { value: text }) : '';
       }
       case 'out(char)': {
-        if (len < 1) return skip('empty stack');
+        if (len < 1) return skip('emptyStack');
         const v = stack.pop()!;
         const valid = v >= 0n && v <= 0x10ffffn && !(v >= 0xd800n && v <= 0xdfffn);
         const ch = valid ? String.fromCodePoint(Number(v)) : '�';
         if (!valid) badChars++;
         out.push(ch);
         outLength += ch.length;
-        return tracing
-          ? `printed ${showChar(ch)}${valid ? '' : ` (${v} is not a code point)`}`
-          : '';
+        if (!tracing) return '';
+        return valid
+          ? T('value.printed', { value: showChar(ch) })
+          : T('value.printedInvalid', { value: showChar(ch), code: String(v) });
       }
     }
   };
@@ -373,18 +401,18 @@ export function runPiet(grid: PietGrid, o: RunOptions): PietResult {
         inWhite = true;
       }
       if (tracing) {
-        commandName = '(white)';
+        commandName = T('value.whiteCommand');
         value = lands
-          ? `slid over ${crossed} white codel${crossed === 1 ? '' : 's'}`
-          : `stopped in white after ${crossed} codel${crossed === 1 ? '' : 's'}`;
+          ? T('value.slid', { count: crossed })
+          : T('value.stoppedInWhite', { count: crossed });
       }
     } else {
       const next = blockOf[ny * W + nx]!;
       if (inWhite) {
         inWhite = false;
         if (tracing) {
-          commandName = '(white)';
-          value = 'left white, no command';
+          commandName = T('value.whiteCommand');
+          value = T('value.leftWhite');
         }
       } else {
         const cmd = commandFor(blockKind[block]!, blockKind[next]!);

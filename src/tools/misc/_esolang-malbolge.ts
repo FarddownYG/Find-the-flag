@@ -1,5 +1,15 @@
 import { ToolError } from '../../core/errors';
-import { ByteSink, grouped, InputStream, lineCol, type RunResult } from './_esolang-common';
+import { toolT } from '../../i18n/tool-text';
+import {
+  ByteSink,
+  grouped,
+  InputStream,
+  languageName,
+  lineCol,
+  type RunResult,
+} from './_esolang-common';
+
+const T = toolT('esolang');
 
 /**
  * Malbolge (Ben Olmstead, 1998), the standard machine:
@@ -100,9 +110,7 @@ export function denormaliseMalbolge(src: string): string {
     if (isSpace(ch)) continue;
     const value = VALUE_OF.get(ch);
     if (value === undefined) {
-      throw new ToolError(
-        `"${ch}" at ${lineCol(src, i)} is not a normalised Malbolge operation. A normalised program uses only i < / * j p o v (and whitespace).`,
-      );
+      throw new ToolError(T('error.malbolgeNotOp', { ch, where: lineCol(src, i) }));
     }
     out += String.fromCharCode(33 + mod(value - 33 - address, 94));
     address++;
@@ -135,20 +143,25 @@ export function loadMalbolge(src: string): Uint16Array {
     const code = src.charCodeAt(i);
     if (code < 33 || code > 126) {
       throw new ToolError(
-        `Character ${JSON.stringify(ch)} at ${lineCol(src, i)} is not printable ASCII, so it cannot be Malbolge code.`,
+        T('error.malbolgeNotPrintable', { ch: JSON.stringify(ch), where: lineCol(src, i) }),
       );
     }
     if (n >= MALBOLGE_SIZE) {
-      throw new ToolError(`The program is longer than Malbolge memory (${MALBOLGE_SIZE} words).`);
+      throw new ToolError(T('error.malbolgeTooLong', { size: MALBOLGE_SIZE }));
     }
     if (!MNEMONIC.has((code + n) % 94)) {
       throw new ToolError(
-        `"${ch}" at ${lineCol(src, i)} (instruction ${n + 1}) is not a valid Malbolge instruction at that position: (character code + position) mod 94 must be one of 4, 5, 23, 39, 40, 62, 68, 81. The program was probably edited, truncated or has a stray character; if it is written with the mnemonics i < / * j p o v, choose "Malbolge (normalised)".`,
+        T('error.malbolgeInvalid', {
+          ch,
+          where: lineCol(src, i),
+          n: n + 1,
+          normalised: languageName('malbolge-normalized'),
+        }),
       );
     }
     mem[n++] = code;
   }
-  if (n < 2) throw new ToolError('A Malbolge program needs at least two instructions.');
+  if (n < 2) throw new ToolError(T('error.malbolgeShort'));
   for (let i = n; i < MALBOLGE_SIZE; i++) mem[i] = crazy(mem[i - 1]!, mem[i - 2]!);
   return mem;
 }
@@ -197,9 +210,7 @@ export function runMalbolge(
 
   const died = (why: string) => {
     stopped = 'error';
-    notes.push(
-      `Stopped after ${grouped(steps)} steps: ${why} (C = ${c}). A real Malbolge interpreter would crash or loop here too.`,
-    );
+    notes.push(T('note.malbolgeDied', { steps: grouped(steps), why, c }));
   };
 
   for (;;) {
@@ -209,9 +220,7 @@ export function runMalbolge(
     }
     const word = mem[c]!;
     if (word < 33 || word > 126) {
-      died(
-        `the word at C is ${word}, which is not a printable character (33..126), so it is not an instruction`,
-      );
+      died(T('text.malbolgeNotInstruction', { word }));
       break;
     }
     steps++;
@@ -245,7 +254,7 @@ export function runMalbolge(
     if (stopped === 'output-limit') break;
     const next = mem[c]!;
     if (next < 33 || next > 126) {
-      died(`the word at C is ${next}, which cannot be encrypted (only 33..126 can)`);
+      died(T('text.malbolgeNoEncrypt', { word: next }));
       break;
     }
     mem[c] = encrypt(next);

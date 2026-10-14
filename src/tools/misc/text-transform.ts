@@ -1,7 +1,10 @@
 import { bool, defineTool, number, select, text } from '../../core/define';
 import { ToolError } from '../../core/errors';
 import type { Output } from '../../core/types';
+import { toolT } from '../../i18n/tool-text';
 import { utf8Encode } from '../../lib/bytes';
+
+const T = toolT('text-transform');
 
 const OPS = [
   { value: 'reverse', label: 'Reverse the text' },
@@ -54,7 +57,7 @@ function stripNonPrintable(input: string): Output[] {
     out.push({
       type: 'note',
       level: 'info',
-      text: 'Nothing to strip: every character is printable.',
+      text: T('note.nothingToStrip'),
     });
   } else {
     const total = [...removed.values()].reduce((a, b) => a + b, 0);
@@ -62,7 +65,7 @@ function stripNonPrintable(input: string): Output[] {
     out.push({
       type: 'note',
       level: 'info',
-      text: `Removed ${total} character${total === 1 ? '' : 's'}: ${list}. They may carry a hidden message (try binary or Morse on their positions).`,
+      text: T('note.removed', { count: total, list }),
     });
   }
   return out;
@@ -79,8 +82,8 @@ function everyNth(input: string, n: number, offset: number): Output[] {
   if (n >= 2 && n <= 16) {
     out.push({
       type: 'table',
-      label: `All ${n} offsets`,
-      columns: ['Offset', 'Characters'],
+      label: T('label.offsets', { count: n }),
+      columns: [T('col.offset'), T('col.characters')],
       rows: Array.from({ length: n }, (_, o) => [o, pick(o)]),
       highlight: offset < n ? [offset] : [],
     });
@@ -104,11 +107,11 @@ function transpose(input: string): string {
 }
 
 function showChar(ch: string): string {
-  if (ch === ' ') return '(space)';
+  if (ch === ' ') return T('value.space');
   if (ch === '\n') return '\\n';
   if (ch === '\r') return '\\r';
   if (ch === '\t') return '\\t';
-  return NON_PRINTABLE.test(ch) ? '(invisible)' : ch;
+  return NON_PRINTABLE.test(ch) ? T('value.invisible') : ch;
 }
 
 function count(input: string): Output[] {
@@ -126,21 +129,21 @@ function count(input: string): Output[] {
     {
       type: 'kv',
       entries: [
-        ['Characters', String(chars.length)],
-        ['Bytes (UTF-8)', String(utf8Encode(input).length)],
-        ['Lines', String(lines)],
-        ['Words', String(words)],
-        ['Unique characters', String(freq.size)],
-        ['Letters', String(letters)],
-        ['Digits', String(digits)],
-        ['Whitespace', String(spaces)],
-        ['Non-ASCII', String(nonAscii)],
+        [T('kv.characters'), String(chars.length)],
+        [T('kv.bytes'), String(utf8Encode(input).length)],
+        [T('kv.lines'), String(lines)],
+        [T('kv.words'), String(words)],
+        [T('kv.unique'), String(freq.size)],
+        [T('kv.letters'), String(letters)],
+        [T('kv.digits'), String(digits)],
+        [T('kv.whitespace'), String(spaces)],
+        [T('kv.nonAscii'), String(nonAscii)],
       ],
     },
     {
       type: 'table',
-      label: ranked.length > 100 ? 'Most frequent characters (top 100)' : 'Characters by frequency',
-      columns: ['Character', 'Code point', 'Count', 'Share'],
+      label: ranked.length > 100 ? T('label.top100') : T('label.byFrequency'),
+      columns: [T('col.character'), T('col.codePoint'), T('col.count'), T('col.share')],
       rows: ranked
         .slice(0, 100)
         .map(([ch, n]) => [
@@ -173,7 +176,7 @@ function uniqueLines(input: string, ignoreCase: boolean): Output[] {
     {
       type: 'note',
       level: 'info',
-      text: `Dropped ${dropped} repeated line${dropped === 1 ? '' : 's'}.`,
+      text: T('note.dropped', { count: dropped }),
     },
   ];
 }
@@ -255,10 +258,10 @@ export default defineTool({
     },
   ],
   run(input, { op, n, offset, sep, descending, ignoreCase }) {
-    if (input === '') throw new ToolError('Type or paste some text first.');
+    if (input === '') throw new ToolError(T('error.empty'));
     const size = Math.floor(n);
     if ((op === 'every-nth' || op === 'chunk') && (!Number.isFinite(size) || size < 1))
-      throw new ToolError('N must be a whole number of at least 1.');
+      throw new ToolError(T('error.n'));
     const t = (value: string): Output[] => [{ type: 'text', value }];
 
     switch (op) {

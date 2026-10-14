@@ -4,6 +4,9 @@
  * A program is written with three tokens: Space (S), Tab (T) and Line feed (L). Everything else
  * is a comment. Internally a program is a string of the letters S, T and L ("code").
  */
+import { toolT } from '../../i18n/tool-text';
+
+const T = toolT('whitespace-lang');
 
 export type ArgKind = 'none' | 'number' | 'label';
 
@@ -127,10 +130,15 @@ function isOpPrefix(fragment: string): boolean {
   return OPS.some((o) => o.code.startsWith(fragment));
 }
 
-const SPELLED: Record<string, string> = { S: 'space', T: 'tab', L: 'line feed' };
+const SPELLED: Record<string, () => string> = {
+  S: () => T('value.space'),
+  T: () => T('value.tab'),
+  L: () => T('value.lineFeed'),
+};
 
 /** "STT" -> "space, tab, tab". */
-export const spell = (letters: string) => Array.from(letters, (c) => SPELLED[c] ?? c).join(', ');
+export const spell = (letters: string) =>
+  Array.from(letters, (c) => SPELLED[c]?.() ?? c).join(', ');
 
 /** Why the code cannot be parsed at `rest` (which does not start with an instruction code). */
 function badTail(start: number, rest: string): ParseTail {
@@ -141,7 +149,7 @@ function badTail(start: number, rest: string): ParseTail {
     return {
       start,
       raw: rest,
-      reason: `the code ends in the middle of an instruction (${rest})`,
+      reason: T('text.tailPartial', { tokens: rest }),
       kind: 'partial',
       incomplete: true,
     };
@@ -150,7 +158,7 @@ function badTail(start: number, rest: string): ParseTail {
   return {
     start,
     raw: rest,
-    reason: `${seq} (${spell(seq)}) is not a Whitespace instruction`,
+    reason: T('text.tailInvalid', { tokens: seq, spelled: spell(seq) }),
     kind: 'invalid',
     incomplete: false,
   };
@@ -182,7 +190,10 @@ export function parse(code: string): Parsed {
         tail: {
           start,
           raw: code.slice(start),
-          reason: `unterminated ${op.arg} after ${op.name} (no line feed ends it)`,
+          reason:
+            op.arg === 'number'
+              ? T('text.tailNumber', { op: op.name })
+              : T('text.tailLabel', { op: op.name }),
           kind: 'unterminated',
           incomplete: true,
         },

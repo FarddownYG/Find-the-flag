@@ -3,6 +3,7 @@
  * them all and keeps the one that works.
  */
 import { ToolError } from '../../core/errors';
+import { toolT } from '../../i18n/tool-text';
 import { plaintextScore } from '../../lib/english';
 import { parse, type Parsed } from './_ws-core';
 import {
@@ -18,6 +19,8 @@ import {
   type MarkerRegion,
 } from './_ws-extract';
 import { execute, type VmResult } from './_ws-vm';
+
+const T = toolT('whitespace-lang');
 
 export type ExtractMode = 'auto' | 'all' | 'trailing' | 'markers' | 'markers-trailing' | 'letters';
 
@@ -73,60 +76,77 @@ export interface Attempt extends Candidate {
 }
 
 const q = (s: string) => JSON.stringify(s);
-const label = (mode: ExtractMode) => EXTRACT_CHOICES.find((c) => c.value === mode)!.label;
-const bareLabel = (b: BareLines) => BARE_CHOICES.find((c) => c.value === b)!.label;
+/** The "Program is in" choice label, as the options show it (translated). */
+export const extractLabel = (mode: ExtractMode) => T(`options.extract.choices.${mode}`);
+const bareLabel = (b: BareLines) => T(`options.bareLines.choices.${b}`);
+/** `Program is in = "Line ends…"`: how to pick an extraction by hand. */
+const setting = (mode: ExtractMode) => `${T('options.extract.label')} = "${extractLabel(mode)}"`;
+const bareSetting = (b: BareLines) => `${T('options.bareLines.label')} = "${bareLabel(b)}"`;
 
-const BARE_DESC: Record<BareLines, string> = {
-  count: 'every line feed counts',
-  lead: 'the lines before the first one that has some are skipped',
-  skip: 'the lines without any are skipped',
+const BARE_DESC: Record<BareLines, () => string> = {
+  count: () => T('value.bare.count'),
+  lead: () => T('value.bare.lead'),
+  skip: () => T('value.bare.skip'),
 };
-const BARE_KEY: Record<BareLines, string> = {
-  count: '',
-  lead: ', from the first coded line',
-  skip: ', coded lines only',
+const TRAILING_KEY: Record<BareLines, () => string> = {
+  count: () => T('value.key.trailing'),
+  lead: () => T('value.key.trailingLead'),
+  skip: () => T('value.key.trailingSkip'),
+};
+const MARKERS_TRAILING_KEY: Record<BareLines, () => string> = {
+  count: () => T('value.key.markersTrailing'),
+  lead: () => T('value.key.markersTrailingLead'),
+  skip: () => T('value.key.markersTrailingSkip'),
 };
 const BARE_RANK: Record<BareLines, number> = { count: 0, lead: 1, skip: 2 };
 
 function between(start: string, end: string, r: MarkerRegion): string {
-  const from = start ? q(start) : 'the start of the text';
-  if (!r.endFound) return `after ${from} (to the end of the text: ${q(end)} was not found)`;
-  return `between ${from} and ${end ? q(end) : 'the end of the text'}`;
+  const from = start ? q(start) : T('text.textStart');
+  if (!r.endFound) return T('text.afterMarker', { from, end: q(end) });
+  return T('text.betweenMarkers', { from, to: end ? q(end) : T('text.textEnd') });
 }
 
 function build(src: string, o: ExtractOptions) {
   const all = (): Candidate => ({
-    key: 'all whitespace',
-    desc: 'all whitespace',
-    how: `Program is in = "${label('all')}"`,
+    key: T('value.key.all'),
+    desc: T('value.desc.all'),
+    how: setting('all'),
     rank: 0,
     trailing: false,
     extraction: extractAll(src),
     same: [],
   });
   const trailing = (bare: BareLines): Candidate => ({
-    key: `line ends${BARE_KEY[bare]}`,
-    desc: `the trailing spaces/tabs of each line (${BARE_DESC[bare]})`,
-    how: `Program is in = "${label('trailing')}", Lines without trailing spaces/tabs = "${bareLabel(bare)}"`,
+    key: TRAILING_KEY[bare](),
+    desc: T('value.desc.trailing', { bare: BARE_DESC[bare]() }),
+    how: `${setting('trailing')}, ${bareSetting(bare)}`,
     rank: 3 + BARE_RANK[bare],
     trailing: true,
     extraction: extractTrailing(src, bare),
     same: [],
   });
-  const markers = (r: MarkerRegion, own: boolean): Candidate => ({
-    key: own ? 'between markers (own lines)' : 'between markers',
-    desc: `the whitespace ${between(o.start, o.end, r)}${own ? `, without the line break that ends the ${q(o.start)} line` : ''}`,
-    how: `Program is in = "${label('markers')}", with these markers`,
-    rank: own ? 2 : 1,
-    trailing: false,
-    extraction: extractMarkers(src, r, own),
-    same: [],
-    endFound: r.endFound,
-  });
+  const markers = (r: MarkerRegion, own: boolean): Candidate => {
+    const where = between(o.start, o.end, r);
+    return {
+      key: own ? T('value.key.markersOwn') : T('value.key.markers'),
+      desc: own
+        ? T('value.desc.markersOwn', { where, start: q(o.start) })
+        : T('value.desc.markers', { where }),
+      how: T('text.withMarkers', { setting: setting('markers') }),
+      rank: own ? 2 : 1,
+      trailing: false,
+      extraction: extractMarkers(src, r, own),
+      same: [],
+      endFound: r.endFound,
+    };
+  };
   const markersTrailing = (r: MarkerRegion, bare: BareLines): Candidate => ({
-    key: `line ends between markers${BARE_KEY[bare]}`,
-    desc: `the trailing spaces/tabs of the lines ${between(o.start, o.end, r)} (${BARE_DESC[bare]})`,
-    how: `Program is in = "${label('markers-trailing')}", Lines without trailing spaces/tabs = "${bareLabel(bare)}"`,
+    key: MARKERS_TRAILING_KEY[bare](),
+    desc: T('value.desc.markersTrailing', {
+      where: between(o.start, o.end, r),
+      bare: BARE_DESC[bare](),
+    }),
+    how: `${setting('markers-trailing')}, ${bareSetting(bare)}`,
     rank: 6 + BARE_RANK[bare],
     trailing: true,
     extraction: extractMarkersTrailing(src, r, bare),
@@ -134,9 +154,9 @@ function build(src: string, o: ExtractOptions) {
     endFound: r.endFound,
   });
   const letters = (): Candidate => ({
-    key: 'S/T/L letters',
-    desc: 'the letters S, T and L (and the words [Space] [Tab] [LF])',
-    how: `Program is in = "${label('letters')}"`,
+    key: T('value.key.letters'),
+    desc: T('value.desc.letters'),
+    how: setting('letters'),
     rank: 9,
     trailing: false,
     extraction: extractLetters(src),
@@ -171,9 +191,7 @@ export function candidates(src: string, o: ExtractOptions): Candidate[] {
   if (o.extract === 'markers' || o.extract === 'markers-trailing') {
     const r = markerRegion(src, o.start, o.end);
     if (!r) {
-      throw new ToolError(
-        `The start marker ${q(o.start)} does not appear in the text. Markers are case-sensitive (\\n and other escapes work); leave it empty to start at the beginning.`,
-      );
+      throw new ToolError(T('error.startMissing', { start: q(o.start) }));
     }
     if (o.extract === 'markers-trailing') return [b.markersTrailing(r, o.bareLines)];
     // A marker alone on its line is followed by a line break that may be layout or code: try both.
@@ -409,15 +427,15 @@ export function pick(
 ): { chosen: Attempt; attempts: Attempt[] } {
   const list = candidates(src, o).filter(hasCode);
   if (!list.length) {
-    const where =
+    throw new ToolError(
       o.extract === 'trailing'
-        ? 'at the end of any line. Try "All whitespace"'
+        ? T('error.noCodeTrailing', { all: extractLabel('all') })
         : o.extract === 'markers' || o.extract === 'markers-trailing'
-          ? 'between the markers'
+          ? T('error.noCodeMarkers')
           : o.extract === 'letters'
-            ? 'as S/T/L letters'
-            : 'anywhere';
-    throw new ToolError(`No spaces or tabs found ${where}.`);
+            ? T('error.noCodeLetters')
+            : T('error.noCode'),
+    );
   }
   const attempts = list.map((c) => attempt(c, input, stepLimit));
   return { chosen: best(attempts), attempts };
@@ -460,16 +478,20 @@ export const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}�
 /** "line ends → printed "FTF"", "all whitespace → error at #3 (add): stack underflow...". */
 export function attemptSummary(a: Attempt): string {
   const r = a.result;
+  const shown = q(clip(r.output, 40));
   const printed = r.output
-    ? `printed ${q(clip(r.output, 40))}${printsText(a) ? '' : ' (mostly unprintable)'}`
+    ? printsText(a)
+      ? T('text.printed', { output: shown })
+      : T('text.printedNoise', { output: shown })
     : '';
   let what: string;
   if (r.error) {
-    const err = `error at #${r.error.index} (${r.error.op}): ${r.error.message}`;
-    what = printed ? `${printed}, then ${err}` : err;
+    const { index, op, message } = r.error;
+    const err = T('text.errorAt', { index, op, message });
+    what = printed ? T('text.thenError', { printed, error: err }) : err;
   } else if (r.stopped === 'step-limit') {
-    what = printed ? `${printed}, then stopped at the step limit` : 'stopped at the step limit';
-  } else if (r.stopped === 'output-limit') what = `${printed} without end (output limit)`;
-  else what = printed || 'printed nothing';
+    what = printed ? T('text.thenStepLimit', { printed }) : T('text.stepLimit');
+  } else if (r.stopped === 'output-limit') what = T('text.outputLimit', { printed });
+  else what = printed || T('text.printedNothing');
   return `${a.key} → ${what}`;
 }

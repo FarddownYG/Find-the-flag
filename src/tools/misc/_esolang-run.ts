@@ -1,5 +1,6 @@
 import { ToolError } from '../../core/errors';
 import type { Output } from '../../core/types';
+import { toolT } from '../../i18n/tool-text';
 import { runBefunge } from './_esolang-befunge';
 import {
   bracketsPair,
@@ -11,7 +12,7 @@ import {
 } from './_esolang-brainfuck';
 import {
   grouped,
-  LANGUAGE_NAME,
+  languageName,
   OUTPUT_MAX,
   type Language,
   type RunResult,
@@ -19,6 +20,8 @@ import {
 import { runCow, tokenizeCow } from './_esolang-cow';
 import { runDeadfish } from './_esolang-deadfish';
 import { denormaliseMalbolge, normaliseMalbolge, runMalbolge } from './_esolang-malbolge';
+
+const T = toolT('esolang');
 
 export interface RunSettings {
   input: Uint8Array;
@@ -50,15 +53,14 @@ export function isBrainfuckFamily(language: Language): language is BrainfuckLang
 }
 
 /** What to paste, per dialect: shown when a program has no instruction at all. */
-const SYNTAX_HINT: Record<BrainfuckLanguage, string> = {
-  brainfuck:
-    'Paste a program made of + - < > [ ] . , (Brainfuck) or Ook. Ook? Ook! words, or pick another language.',
-  ook: 'Paste a program made of Ook. Ook? Ook! words.',
-  'short-ook': 'Paste a program made of pairs of the symbols . ? !',
-  blub: 'Paste a program made of Blub. Blub? Blub! words.',
-  pikalang: 'Paste a program made of the words pi, ka, pipi, pichu, pikachu, pikapi, pika and chu.',
-  alphuck: 'Paste a program made of the lowercase letters a c e i j o p s.',
-  reversefuck: 'Paste a program made of + - < > [ ] . , (every symbol means its opposite).',
+const SYNTAX_HINT: Record<BrainfuckLanguage, () => string> = {
+  brainfuck: () => T('error.syntax.brainfuck'),
+  ook: () => T('error.syntax.ook'),
+  'short-ook': () => T('error.syntax.shortOok'),
+  blub: () => T('error.syntax.blub'),
+  pikalang: () => T('error.syntax.pikalang'),
+  alphuck: () => T('error.syntax.alphuck'),
+  reversefuck: () => T('error.syntax.reversefuck'),
 };
 
 const chunk = (s: string, width: number) =>
@@ -79,11 +81,14 @@ export function runProgram(src: string, language: Language, settings: RunSetting
     if (instructions.code.length === 0) {
       if (looksLikeWhitespaceProgram(src)) {
         throw new ToolError(
-          `No ${LANGUAGE_NAME[language]} instructions found, but the text is made of spaces, tabs and line feeds: that is a Whitespace program. Open the "Whitespace (esolang)" tool, which shows the invisible characters and runs it.`,
+          T('error.noInstructionsWhitespace', { language: languageName(language) }),
         );
       }
       throw new ToolError(
-        `No ${LANGUAGE_NAME[language]} instructions found. ${SYNTAX_HINT[language]}`,
+        T('error.noInstructions', {
+          language: languageName(language),
+          hint: SYNTAX_HINT[language](),
+        }),
       );
     }
     let program: Program;
@@ -96,9 +101,7 @@ export function runProgram(src: string, language: Language, settings: RunSetting
         language === 'brainfuck' &&
         bracketsPair(instructions.code, true)
       ) {
-        throw new ToolError(
-          `${e.message} The brackets would pair up if [ and ] were swapped: this may be ReverseFuck (choose it in Language).`,
-        );
+        throw new ToolError(T('error.maybeReverseFuck', { message: e.message }));
       }
       throw e;
     }
@@ -107,9 +110,7 @@ export function runProgram(src: string, language: Language, settings: RunSetting
   switch (language) {
     case 'cow':
       if (tokenizeCow(src).ops.length === 0) {
-        throw new ToolError(
-          'No COW instructions found. Paste a program made of moo, mOo, moO, mOO, Moo, MOo, MoO, MOO, OOO, MMM, OOM and oom (the case matters).',
-        );
+        throw new ToolError(T('error.noCow'));
       }
       return { result: runCow(src, input, steps), extra: [] };
     case 'deadfish':
@@ -117,7 +118,10 @@ export function runProgram(src: string, language: Language, settings: RunSetting
       const letters = language === 'deadfish' ? /[idso]/i : /[xdkc]/i;
       if (!letters.test(src)) {
         throw new ToolError(
-          `No ${LANGUAGE_NAME[language]} commands found. Paste a program made of ${language === 'deadfish' ? 'i d s o' : 'x d k c'}.`,
+          T('error.noDeadfish', {
+            language: languageName(language),
+            letters: language === 'deadfish' ? 'i d s o' : 'x d k c',
+          }),
         );
       }
       const fish = runDeadfish(src, language, steps, settings.deadfishOutput);
@@ -130,7 +134,7 @@ export function runProgram(src: string, language: Language, settings: RunSetting
       ) {
         extra.push({
           type: 'bytes',
-          label: 'Numbers read as ASCII',
+          label: T('label.numbersAsAscii'),
           value: Uint8Array.from(values),
           filename: 'ascii.bin',
         });
@@ -147,14 +151,14 @@ export function runProgram(src: string, language: Language, settings: RunSetting
         ? [
             {
               type: 'text',
-              label: 'Real Malbolge program',
+              label: T('label.realMalbolge'),
               value: chunk(denormaliseMalbolge(src), 64),
             },
           ]
         : [
             {
               type: 'text',
-              label: 'Normalised form (what each character does at its position)',
+              label: T('label.normalisedForm'),
               value: chunk(normaliseMalbolge(src), 64),
             },
           ];
@@ -175,29 +179,37 @@ export function describeRun(
   if (result.output.length > 0) {
     out.push({
       type: 'bytes',
-      label: 'Program output',
+      label: T('label.output'),
       value: result.output,
       filename: 'output.bin',
     });
   }
   out.push(...extra);
-  const how = autoDetected ? `${LANGUAGE_NAME[language]} (auto-detected)` : LANGUAGE_NAME[language];
+  const name = languageName(language);
+  const how = autoDetected ? T('text.autoDetected', { language: name }) : name;
   out.push({
     type: 'note',
     level: 'info',
-    text: `${how}: ${grouped(result.steps)} steps executed, ${grouped(result.output.length)} byte(s) printed.`,
+    text: T('note.summary', {
+      how,
+      steps: T('text.stepsExecuted', { count: result.steps, n: grouped(result.steps) }),
+      bytes: T('text.bytesPrinted', {
+        count: result.output.length,
+        n: grouped(result.output.length),
+      }),
+    }),
   });
   if (result.stopped === 'step-limit') {
     out.push({
       type: 'note',
       level: 'warn',
-      text: `Stopped at the step limit (${grouped(stepLimit)} steps): the program probably loops forever, or needs a higher limit. Output so far is shown.`,
+      text: T('note.stepLimit', { limit: grouped(stepLimit) }),
     });
   } else if (result.stopped === 'output-limit') {
     out.push({
       type: 'note',
       level: 'warn',
-      text: `Stopped after ${grouped(OUTPUT_MAX)} bytes of output. The program probably prints forever.`,
+      text: T('note.outputLimit', { max: grouped(OUTPUT_MAX) }),
     });
   }
   for (const text of result.notes ?? []) out.push({ type: 'note', level: 'warn', text });
@@ -205,7 +217,7 @@ export function describeRun(
     out.push({
       type: 'note',
       level: 'warn',
-      text: 'The program finished without printing anything.',
+      text: T('note.noOutput'),
     });
   }
   return out;

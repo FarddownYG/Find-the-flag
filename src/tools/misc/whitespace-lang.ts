@@ -1,6 +1,7 @@
 import { defineTool, number, select, text, toggle } from '../../core/define';
 import { ToolError } from '../../core/errors';
 import type { Output } from '../../core/types';
+import { toolT } from '../../i18n/tool-text';
 import { utf8Decode, utf8Encode } from '../../lib/bytes';
 import { assemble, disassemble, hideInCover, linesOfCode, textToProgram } from './_ws-asm';
 import { grouped, parse, tokenCounts, toWhitespace, type Parsed } from './_ws-core';
@@ -23,6 +24,7 @@ import {
   candidates,
   clip,
   EXTRACT_CHOICES,
+  extractLabel,
   hasCode,
   isClean,
   isHit,
@@ -34,6 +36,8 @@ import {
   type ExtractOptions,
 } from './_ws-pick';
 import { execute, labelText } from './_ws-vm';
+
+const T = toolT('whitespace-lang');
 
 const STEP_LIMIT_MAX = 500_000_000;
 const DETECT_STEPS = 20_000;
@@ -59,15 +63,15 @@ export function unescapeInput(s: string): string {
 }
 
 const q = (s: string) => JSON.stringify(s);
+/** A sentence followed by the space that separates it from the next one ('' stays ''). */
+const sentence = (s: string) => (s ? `${s} ` : '');
 
 /** "The "line ends" extraction gives the same program. " */
 function sameText(a: Candidate): string {
   if (!a.same.length) return '';
-  const names = a.same.map(q).join(' and ');
-  return `The ${names} extraction${a.same.length > 1 ? 's give' : ' gives'} the same program. `;
+  const names = a.same.map(q).join(` ${T('text.and')} `);
+  return sentence(T('text.same', { count: a.same.length, names }));
 }
-
-const HIDDEN_ANOTHER_WAY = 'or hides it another way (other markers? S/T/L letters?)';
 
 /** The warning of an auto run where no extraction prints text cleanly. */
 function noHitNote(chosen: Attempt, attempts: Attempt[]): Output {
@@ -75,8 +79,8 @@ function noHitNote(chosen: Attempt, attempts: Attempt[]): Output {
   const r = chosen.result;
   const text =
     r.error && printsText(chosen)
-      ? `Auto: no extraction gives a program that runs without an error and prints text. The closest, ${chosen.key}, printed ${q(clip(r.output, 40))} and then stopped with an error (below): if that output looks right, the program itself fails there (does it need Input?); if not, this text probably does not hide a Whitespace program, ${HIDDEN_ANOTHER_WAY}. Tried: ${tried}.`
-      : `Auto: no extraction gives a program that runs without an error and prints text, so this text probably does not hide a Whitespace program, ${HIDDEN_ANOTHER_WAY}. Tried: ${tried}. Shown below: ${chosen.key}, the closest.`;
+      ? T('note.noHitError', { key: chosen.key, output: q(clip(r.output, 40)), tried })
+      : T('note.noHit', { key: chosen.key, tried });
   return { type: 'note', level: 'warn', text };
 }
 
@@ -95,18 +99,26 @@ function autoNote(chosen: Attempt, attempts: Attempt[]): Output[] {
   if (!isHit(chosen)) return [noHitNote(chosen, attempts)];
   const failed = attempts.filter((a) => a.result.stopped === 'error').length;
   const does = atLimit(chosen)
-    ? `prints text until the ${chosen.result.stopped === 'step-limit' ? 'step' : 'output'} limit stops it`
-    : 'runs without an error and prints text';
+    ? chosen.result.stopped === 'step-limit'
+      ? T('text.doesStepLimit')
+      : T('text.doesOutputLimit')
+    : T('text.doesClean');
+  const counts = { count: attempts.length, n: attempts.length, failed, does };
   const tried =
     attempts.length === 1
       ? chosen.same.length
         ? ''
-        : 'No other extraction finds spaces or tabs. '
-      : `${attempts.length} different extractions tried${failed ? ` (${failed} stopped with an error)` : ''}; this one ${does}. `;
+        : sentence(T('text.noOther'))
+      : sentence(failed ? T('text.triedFailed', counts) : T('text.tried', counts));
   out.push({
     type: 'note',
     level: 'info',
-    text: `Auto: the program is in ${chosen.desc}. ${sameText(chosen)}${tried}By hand: ${chosen.how}.`,
+    text: T('note.auto', {
+      desc: chosen.desc,
+      same: sameText(chosen),
+      tried,
+      how: chosen.how,
+    }),
   });
   const others = attempts.filter(
     (a) =>
@@ -119,7 +131,10 @@ function autoNote(chosen: Attempt, attempts: Attempt[]): Output[] {
     out.push({
       type: 'note',
       level: 'warn',
-      text: `Other extractions also print text: ${others.map(attemptSummary).join('; ')}. Choose one in "Program is in" to see it.`,
+      text: T('note.others', {
+        list: others.map(attemptSummary).join('; '),
+        option: T('options.extract.label'),
+      }),
     });
   }
   return out;
@@ -127,25 +142,33 @@ function autoNote(chosen: Attempt, attempts: Attempt[]): Output[] {
 
 /** First note of an explicit run. */
 function explicitNote(chosen: Attempt, attempts: Attempt[], o: ExtractOptions): Output {
-  let text = `Program read from ${chosen.desc}.`;
+  let text = T('note.readFrom', { desc: chosen.desc });
   if (attempts.length > 1) {
-    text += ` The line break after ${q(o.start)} was tried both as layout and as code; this one ${isHit(chosen) ? 'prints text' : 'gives the most readable output'} (the other: ${attempts
-      .filter((a) => a !== chosen)
-      .map(attemptSummary)
-      .join('; ')}).`;
+    const both = {
+      start: q(o.start),
+      other: attempts
+        .filter((a) => a !== chosen)
+        .map(attemptSummary)
+        .join('; '),
+    };
+    text += ` ${isHit(chosen) ? T('text.bothPrints', both) : T('text.bothReadable', both)}`;
   }
   return { type: 'note', level: 'info', text };
 }
 
 function errorNote(a: Attempt, auto: boolean): Output {
   const e = a.result.error!;
+  const option = T('options.extract.label');
   const hint = a.result.output
-    ? ' What it printed before is shown below.'
-    : ` Nothing was printed before it: the program may not be in this extraction (try another "Program is in" choice${auto ? '' : ', or Auto'}).`;
+    ? T('text.printedBefore')
+    : auto
+      ? T('text.nothingBefore', { option })
+      : T('text.nothingBeforeOrAuto', { option });
+  const at = { index: e.index, op: e.op, step: grouped(e.step), message: e.message };
   return {
     type: 'note',
     level: 'error',
-    text: `The program stopped with an error at instruction #${e.index} (${e.op}), step ${grouped(e.step)}: ${e.message}.${hint}`,
+    text: `${T('note.error', at)} ${hint}`,
   };
 }
 
@@ -157,28 +180,29 @@ function runNotes(a: Attempt, input: string): Output[] {
     notes.push({
       type: 'note',
       level: 'info',
-      text: `The program read characters (readchar ×${grouped(r.readsAtEnd)}) but the Input option is empty, so each read gave -1 (end of input). If it waits for something, type it in Input.`,
+      text: T('note.readsAtEnd', {
+        reads: grouped(r.readsAtEnd),
+        input: T('options.input.label'),
+      }),
     });
   }
   if (r.stopped === 'step-limit') {
     notes.push({
       type: 'note',
       level: 'warn',
-      text: `Stopped at the step limit (${grouped(r.steps)} instructions executed): the program probably loops forever, or needs a higher limit. Output so far is shown.`,
+      text: T('note.stepLimit', { steps: grouped(r.steps) }),
     });
   } else if (r.stopped === 'output-limit') {
     notes.push({
       type: 'note',
       level: 'warn',
-      text: `Stopped after ${grouped(r.output.length)} characters of output: the program probably prints forever.`,
+      text: T('note.outputLimit', { length: grouped(r.output.length) }),
     });
   } else if (r.stopped === 'fell-off') {
     notes.push({
       type: 'note',
       level: 'warn',
-      text: r.partialEnd
-        ? `The program ran off its last instruction without an end (LLL), into a partial instruction at the very end of the code (${r.partialEnd}), usually the final line break of the file. Everything up to there was run.`
-        : 'The program ran off its last instruction without an end (LLL). Everything up to there was run; a missing end often means the extraction cut the program short.',
+      text: r.partialEnd ? T('note.fellOffPartial', { tokens: r.partialEnd }) : T('note.fellOff'),
     });
   }
   const t = a.parsed.tail;
@@ -186,29 +210,33 @@ function runNotes(a: Attempt, input: string): Output[] {
     notes.push({
       type: 'note',
       level: 'info',
-      text: `${grouped(t.raw.length)} token(s) after the last complete instruction (#${a.parsed.instrs.length - 1}) were never reached: ${t.reason}.`,
+      text: T('note.tail', {
+        count: t.raw.length,
+        n: grouped(t.raw.length),
+        index: a.parsed.instrs.length - 1,
+        reason: t.reason,
+      }),
     });
   }
   if (r.duplicateLabels.length) {
     notes.push({
       type: 'note',
       level: 'warn',
-      text: `Label(s) marked more than once: ${r.duplicateLabels.map(labelText).join(', ')}. The first mark wins.`,
+      text: T('note.duplicateLabels', {
+        count: r.duplicateLabels.length,
+        labels: r.duplicateLabels.map(labelText).join(', '),
+      }),
     });
   }
   if (r.badChars) {
     notes.push({
       type: 'note',
       level: 'warn',
-      text: `${grouped(r.badChars)} outchar value(s) were not valid Unicode code points (negative, above U+10FFFF, or a surrogate) and print as �. The reference interpreter stops with an error there; this tool prints � and goes on, so that the rest of the output is not lost.`,
+      text: T('note.badChars', { count: r.badChars, n: grouped(r.badChars) }),
     });
   }
   if (a.endFound === false) {
-    notes.push({
-      type: 'note',
-      level: 'warn',
-      text: 'The end marker was not found after the start marker: the program runs to the end of the text.',
-    });
+    notes.push({ type: 'note', level: 'warn', text: T('note.endMissing') });
   }
   return notes;
 }
@@ -219,12 +247,12 @@ function outputBlocks(a: Attempt): Output[] {
   if (!r.output) {
     return r.stopped === 'error'
       ? []
-      : [{ type: 'note', level: 'info', text: 'The program ran but printed nothing.' }];
+      : [{ type: 'note', level: 'info', text: T('note.printedNothing') }];
   }
   const out: Output[] = [
     {
       type: 'text',
-      label: r.stopped === 'error' ? 'Output before the error' : 'Program output',
+      label: r.stopped === 'error' ? T('label.outputBeforeError') : T('label.output'),
       value: r.output,
     },
   ];
@@ -234,9 +262,9 @@ function outputBlocks(a: Attempt): Output[] {
       {
         type: 'note',
         level: 'warn',
-        text: `The output contains ${grouped(marked.count)} control or invisible character(s) (NUL, BEL...) that do not show: they are written ⟨NAME⟩ below.`,
+        text: T('note.invisible', { count: marked.count, n: grouped(marked.count) }),
       },
-      { type: 'text', label: 'Output, invisible characters shown', value: marked.text },
+      { type: 'text', label: T('label.outputMarked'), value: marked.text },
     );
   }
   return out;
@@ -247,8 +275,8 @@ function revealBlocks(src: string, table: boolean): Output[] {
   const out: Output[] = [
     {
       type: 'text',
-      label: 'Revealed text (· space, → tab, ⏎ line feed, ␍ carriage return)',
-      value: r.truncated ? `${r.text}\n… (truncated)` : r.text,
+      label: T('label.revealed'),
+      value: r.truncated ? `${r.text}\n${T('text.truncated')}` : r.text,
     },
   ];
   if (r.special.size) {
@@ -256,18 +284,21 @@ function revealBlocks(src: string, table: boolean): Output[] {
     out.unshift({
       type: 'note',
       level: 'info',
-      text: `Unusual invisible characters: ${list}. Whitespace ignores them (comments), but they may hide another message: try the zero-width tool.`,
+      text: T('note.unusual', { list }),
     });
   }
   const lines = summarizeLines(src);
   const withText = lines.filter((l) => l.visible.trim()).length;
   const withWs = lines.filter((l) => l.trailing).length;
   if (table && lines.length >= 2 && withText >= 1 && withWs >= 1) {
-    const cut = lines.length > TABLE_ROWS ? `, first ${TABLE_ROWS} shown` : '';
+    const counts = { with: withWs, total: lines.length, rows: TABLE_ROWS };
     out.push({
       type: 'table',
-      label: `Trailing whitespace per line (${withWs} of ${lines.length} lines have some${cut})`,
-      columns: ['Line', 'Visible text', 'Trailing count', 'Trailing S/T'],
+      label:
+        lines.length > TABLE_ROWS
+          ? T('label.trailingTableCut', counts)
+          : T('label.trailingTable', counts),
+      columns: [T('col.line'), T('col.visible'), T('col.trailingCount'), T('col.trailingLetters')],
       rows: lines
         .slice(0, TABLE_ROWS)
         .map((l) => [
@@ -281,28 +312,31 @@ function revealBlocks(src: string, table: boolean): Output[] {
   return out;
 }
 
-/** "17 (S 9, T 3, L 5)", or "17 tokens (S 9, T 3, L 5)" with a unit. */
-function countsText(code: string, unit = ''): string {
+/** "17 (S 9, T 3, L 5)", or "17 tokens (S 9, T 3, L 5)" with the unit. */
+function countsText(code: string, unit = false): string {
   const c = tokenCounts(code);
-  return `${grouped(code.length)}${unit} (S ${grouped(c.s)}, T ${grouped(c.t)}, L ${grouped(c.l)})`;
+  const parts = { n: grouped(code.length), s: grouped(c.s), t: grouped(c.t), l: grouped(c.l) };
+  return unit
+    ? T('text.tokens', { count: code.length, ...parts })
+    : `${parts.n} (S ${parts.s}, T ${parts.t}, L ${parts.l})`;
 }
 
 function stats(a: Attempt): Output {
   const r = a.result;
   const entries: [string, string][] = [
-    ['Extraction', a.key],
-    ['Tokens', countsText(a.extraction.code)],
-    ['Instructions', grouped(a.parsed.instrs.length)],
-    ['Steps', grouped(r.steps)],
-    ['Stack depth at end', grouped(r.stack.length)],
-    ['Heap cells', grouped(r.heap.size)],
+    [T('kv.extraction'), a.key],
+    [T('kv.tokens'), countsText(a.extraction.code)],
+    [T('kv.instructions'), grouped(a.parsed.instrs.length)],
+    [T('kv.steps'), grouped(r.steps)],
+    [T('kv.stackDepth'), grouped(r.stack.length)],
+    [T('kv.heap'), grouped(r.heap.size)],
   ];
   if (r.stack.length) {
     const top = r.stack.slice(-8).reverse().map(String).join(', ');
-    entries.push(['Stack (top first)', r.stack.length > 8 ? `${top}, …` : top]);
+    entries.push([T('kv.stack'), r.stack.length > 8 ? `${top}, …` : top]);
   }
-  if (r.inputUsed) entries.push(['Input characters read', grouped(r.inputUsed)]);
-  return { type: 'kv', label: 'Run', entries };
+  if (r.inputUsed) entries.push([T('kv.inputRead'), grouped(r.inputUsed)]);
+  return { type: 'kv', label: T('label.run'), entries };
 }
 
 interface RunOptions extends ExtractOptions {
@@ -312,7 +346,7 @@ interface RunOptions extends ExtractOptions {
 
 function stepLimit(steps: number): number {
   if (!Number.isFinite(steps) || steps < 1) {
-    throw new ToolError('The step limit must be a positive number.');
+    throw new ToolError(T('error.stepLimit'));
   }
   return Math.min(Math.floor(steps), STEP_LIMIT_MAX);
 }
@@ -325,7 +359,7 @@ function runProgram(src: string, o: RunOptions): Output[] {
   out.push(...runNotes(chosen, o.input), ...outputBlocks(chosen));
   out.push({
     type: 'text',
-    label: 'Disassembly',
+    label: T('label.disassembly'),
     value: disassemble(chosen.parsed, chosen.extraction.lines),
   });
   out.push(...revealBlocks(src, chosen.trailing || !isHit(chosen)));
@@ -345,44 +379,47 @@ function disassembleOnly(src: string, o: RunOptions): Output[] {
   if (o.extract === 'auto') {
     const { chosen, attempts, by } = pickForListing(src, o, LISTING_STEPS);
     view = chosen;
-    const trial = `a short trial run (${grouped(LISTING_STEPS)} steps, no input)`;
+    const trial = T('text.trial', { steps: grouped(LISTING_STEPS) });
     if (by === 'parse') {
       out.push({
         type: 'note',
         level: 'info',
-        text: `Auto: no extraction prints text in ${trial}; the program is probably in ${chosen.desc}: it parses to the end, every label it uses is marked and it does input or output. ${sameText(chosen)}By hand: ${chosen.how}. Tried: ${attempts.map(attemptSummary).join('; ')}.`,
+        text: T('note.autoParse', {
+          trial,
+          desc: chosen.desc,
+          same: sameText(chosen),
+          how: chosen.how,
+          tried: attempts.map(attemptSummary).join('; '),
+        }),
       });
     } else out.push(...autoNote(chosen, attempts));
-    out.push({
-      type: 'note',
-      level: 'info',
-      text: `Disassemble does not run the program; Auto only gave each extraction ${trial} to choose one.`,
-    });
+    out.push({ type: 'note', level: 'info', text: T('note.disasmTrial', { trial }) });
     if (chosen.result.error) {
       const e = chosen.result.error;
       out.push({
         type: 'note',
         level: 'warn',
-        text: `Run: instruction #${e.index} (${e.op}), step ${grouped(e.step)}: ${e.message}.`,
+        text: T('note.disasmError', {
+          index: e.index,
+          op: e.op,
+          step: grouped(e.step),
+          message: e.message,
+        }),
       });
     }
   } else {
     const list = candidates(src, o).filter(hasCode);
-    if (!list.length) throw new ToolError('No spaces or tabs found in this extraction.');
+    if (!list.length) throw new ToolError(T('error.noCodeExtraction'));
     view = parsedBest(list);
-    out.push({ type: 'note', level: 'info', text: `Program read from ${view.desc} (not run).` });
+    out.push({ type: 'note', level: 'info', text: T('note.readFromNotRun', { desc: view.desc }) });
     if (view.endFound === false) {
-      out.push({
-        type: 'note',
-        level: 'warn',
-        text: 'The end marker was not found after the start marker: the program runs to the end of the text.',
-      });
+      out.push({ type: 'note', level: 'warn', text: T('note.endMissing') });
     }
   }
   out.push(...revealBlocks(src, view.trailing));
   out.push({
     type: 'text',
-    label: 'Disassembly',
+    label: T('label.disassembly'),
     value: disassemble(view.parsed, view.extraction.lines),
   });
   const labels = new Set(
@@ -390,13 +427,18 @@ function disassembleOnly(src: string, o: RunOptions): Output[] {
   );
   out.push({
     type: 'kv',
-    label: 'Program',
+    label: T('label.program'),
     entries: [
-      ['Extraction', view.key],
-      ['Tokens', countsText(view.extraction.code)],
-      ['Instructions', grouped(view.parsed.instrs.length)],
-      ['Labels', grouped(labels.size)],
-      ['Parsing', view.parsed.tail ? `stops early: ${view.parsed.tail.reason}` : 'complete'],
+      [T('kv.extraction'), view.key],
+      [T('kv.tokens'), countsText(view.extraction.code)],
+      [T('kv.instructions'), grouped(view.parsed.instrs.length)],
+      [T('kv.labels'), grouped(labels.size)],
+      [
+        T('kv.parsing'),
+        view.parsed.tail
+          ? T('value.stopsEarly', { reason: view.parsed.tail.reason })
+          : T('value.complete'),
+      ],
     ],
   });
   return out;
@@ -409,17 +451,14 @@ function testRun(extraction: Extraction, input: string, steps: number): Output[]
     stepLimit: Math.min(Math.max(1, Math.floor(steps) || 1), STEP_LIMIT_MAX),
   });
   const out: Output[] = [];
-  if (r.output) out.push({ type: 'text', label: 'Program output (test run)', value: r.output });
+  if (r.output) out.push({ type: 'text', label: T('label.testOutput'), value: r.output });
   if (r.error) {
-    out.push({
-      type: 'note',
-      level: 'warn',
-      text: `Test run stopped at instruction #${r.error.index} (${r.error.op}): ${r.error.message}.`,
-    });
+    const { index, op, message } = r.error;
+    out.push({ type: 'note', level: 'warn', text: T('note.testError', { index, op, message }) });
   } else if (r.stopped === 'step-limit') {
-    out.push({ type: 'note', level: 'warn', text: 'Test run stopped at the step limit.' });
+    out.push({ type: 'note', level: 'warn', text: T('note.testStepLimit') });
   } else if (!r.output) {
-    out.push({ type: 'note', level: 'info', text: 'Test run: the program printed nothing.' });
+    out.push({ type: 'note', level: 'info', text: T('note.testNothing') });
   }
   return out;
 }
@@ -557,7 +596,7 @@ export default defineTool({
       return {
         score: isClean(top) && [...printed].length >= 2 ? 0.9 : 0.6,
         options: { mode: 'run', extract: 'auto' },
-        reason: `A Whitespace program in ${top.key} prints ${q(clip(printed, 40))}`,
+        reason: T('detect.program', { key: top.key, output: q(clip(printed, 40)) }),
       };
     }
     const n = Math.min(bytes.length, 1 << 20);
@@ -576,7 +615,7 @@ export default defineTool({
       return {
         score: 0.8,
         options: { mode: 'run', extract: 'auto' },
-        reason: 'Mostly spaces, tabs and line feeds',
+        reason: T('detect.blank'),
       };
     }
     if (!sample) return null;
@@ -590,7 +629,7 @@ export default defineTool({
       return {
         score: 0.55,
         options: { mode: 'run', extract: 'auto' },
-        reason: `${ending.length} of ${lines.length} lines end in spaces/tabs (a Whitespace program may hide there)`,
+        reason: T('detect.lineEnds', { ending: ending.length, lines: lines.length }),
       };
     }
     return null;
@@ -604,22 +643,25 @@ export default defineTool({
         {
           type: 'note',
           level: 'success',
-          text: `Assembled ${grouped(parsed.instrs.length)} instructions into ${countsText(code, ' tokens')}.`,
+          text: T('note.assembled', {
+            instructions: grouped(parsed.instrs.length),
+            tokens: countsText(code, true),
+          }),
         },
         {
           type: 'bytes',
-          label: 'Whitespace program',
+          label: T('label.wsProgram'),
           value: utf8Encode(ws),
           filename: 'program.ws',
         },
-        { type: 'text', label: 'Revealed program', value: reveal(ws).text },
+        { type: 'text', label: T('label.revealedProgram'), value: reveal(ws).text },
         ...testRun({ code, lines: linesOfCode(code) }, o.input, o.steps),
-        { type: 'text', label: 'Disassembly', value: disassemble(parsed) },
+        { type: 'text', label: T('label.disassembly'), value: disassemble(parsed) },
       ];
     }
     if (o.mode === 'generate') {
       const message = utf8Decode(bytes);
-      if (!message) throw new ToolError('Type the text the program should print.');
+      if (!message) throw new ToolError(T('error.generateEmpty'));
       const { code, listing } = textToProgram(message);
       const cover = unescapeInput(o.cover);
       const hidden = cover ? hideInCover(code, cover) : null;
@@ -628,14 +670,29 @@ export default defineTool({
         {
           type: 'note',
           level: 'success',
-          text: `${grouped([...message].length)} character(s) became ${grouped(parse(code).instrs.length)} instructions, ${countsText(code, ' tokens')}.`,
+          text: T('note.generated', {
+            count: [...message].length,
+            characters: grouped([...message].length),
+            instructions: grouped(parse(code).instrs.length),
+            tokens: countsText(code, true),
+          }),
         },
       ];
       if (hidden) {
+        const { linesUsed, linesAdded, linesCleaned } = hidden;
         notes.push({
           type: 'note',
           level: 'info',
-          text: `Hidden in the trailing whitespace of ${grouped(hidden.linesUsed)} line(s) of the cover${hidden.linesAdded ? `, and of ${grouped(hidden.linesAdded)} empty line(s) added after it because it was too short (every line feed of the program needs its own line)` : ''}${hidden.linesCleaned ? `; ${grouped(hidden.linesCleaned)} cover line(s) had their own trailing whitespace removed` : ''}. Read it back with "${EXTRACT_CHOICES.find((c) => c.value === 'trailing')!.label}".`,
+          text: T('note.hidden', {
+            lines: T('text.coverLines', { count: linesUsed, n: grouped(linesUsed) }),
+            added: linesAdded
+              ? T('text.coverAdded', { count: linesAdded, n: grouped(linesAdded) })
+              : '',
+            cleaned: linesCleaned
+              ? T('text.coverCleaned', { count: linesCleaned, n: grouped(linesCleaned) })
+              : '',
+            choice: extractLabel('trailing'),
+          }),
         });
       }
       const extraction = hidden ? extractTrailing(result, 'count') : extractAll(result);
@@ -643,22 +700,22 @@ export default defineTool({
         ...notes,
         {
           type: 'bytes',
-          label: hidden ? 'Cover text with the program' : 'Whitespace program',
+          label: hidden ? T('label.coverWithProgram') : T('label.wsProgram'),
           value: utf8Encode(result),
           filename: hidden ? 'hidden.txt' : 'program.ws',
         },
         {
           type: 'text',
-          label: 'Revealed (· space, → tab, ⏎ line feed)',
+          label: T('label.revealedShort'),
           value: reveal(result).text,
         },
         ...testRun(extraction, '', 2 * [...message].length + 10),
-        { type: 'text', label: 'Assembly', value: listing },
+        { type: 'text', label: T('label.assembly'), value: listing },
       ];
     }
     const decoded = decodeSource(bytes);
     const src = decoded.text;
-    if (!src) throw new ToolError('Paste a Whitespace program, or open the file that hides one.');
+    if (!src) throw new ToolError(T('error.emptyInput'));
     const opts: RunOptions = {
       ...o,
       start: unescapeInput(o.start),
@@ -669,7 +726,7 @@ export default defineTool({
       out.unshift({
         type: 'note',
         level: 'info',
-        text: `The file was read as ${decoded.encoding}: ${decoded.why}.`,
+        text: T('note.encoding', { encoding: decoded.encoding, why: decoded.why }),
       });
     }
     return out;

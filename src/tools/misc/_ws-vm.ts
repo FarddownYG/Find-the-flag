@@ -2,7 +2,10 @@
  * Whitespace 0.3 virtual machine: arbitrary-precision stack and heap, call stack, I/O.
  * Semantics follow the reference (Haskell) interpreter, notably floor division.
  */
+import { toolT } from '../../i18n/tool-text';
 import { grouped, type Parsed } from './_ws-core';
+
+const T = toolT('whitespace-lang');
 
 export interface VmOptions {
   /** Characters the program reads (readchar / readnum), already unescaped. */
@@ -144,10 +147,12 @@ export function execute(parsed: Parsed, opts: VmOptions): VmResult {
     error = { index: pc, op: instrs[pc]!.op.name, step: steps, message };
   };
   const unknownLabel = () => {
-    const where = tail
-      ? ` (parsing stopped at instruction #${n}: ${tail.reason}, so labels after it are unknown)`
-      : '';
-    fail(`label ${labelText(instrs[pc]!.label!)} is never marked${where}`);
+    const label = labelText(instrs[pc]!.label!);
+    fail(
+      tail
+        ? T('error.unknownLabelTail', { label, index: n, reason: tail.reason })
+        : T('error.unknownLabel', { label }),
+    );
   };
   const emit = (s: string) => {
     out.push(s);
@@ -163,7 +168,7 @@ export function execute(parsed: Parsed, opts: VmOptions): VmResult {
           index: n,
           op: tail.incomplete ? 'incomplete' : 'invalid',
           step: steps + 1,
-          message: `execution reached code that cannot be parsed: ${tail.reason}`,
+          message: T('error.unparsable', { reason: tail.reason }),
         };
       }
       break;
@@ -180,7 +185,7 @@ export function execute(parsed: Parsed, opts: VmOptions): VmResult {
     const need = pops[pc]!;
     if (stack.length < need) {
       fail(
-        `stack underflow: ${instrs[pc]!.op.name} needs ${need} value${need > 1 ? 's' : ''} and the stack holds ${stack.length}`,
+        T('error.underflow', { count: need, op: instrs[pc]!.op.name, need, depth: stack.length }),
       );
       break;
     }
@@ -194,11 +199,13 @@ export function execute(parsed: Parsed, opts: VmOptions): VmResult {
       case K.copy: {
         const k = nums[pc]!;
         if (k < 0n) {
-          fail(`copy ${k}: the index must be 0 or more (0 is the top of the stack)`);
+          fail(T('error.copyNegative', { index: String(k) }));
           break run;
         }
         if (k >= BigInt(stack.length)) {
-          fail(`copy ${k}: the stack holds ${stack.length} item(s), counted from 0 at the top`);
+          fail(
+            T('error.copyRange', { count: stack.length, index: String(k), depth: stack.length }),
+          );
           break run;
         }
         stack.push(stack[stack.length - 1 - Number(k)]!);
@@ -229,7 +236,7 @@ export function execute(parsed: Parsed, opts: VmOptions): VmResult {
         const a = stack.pop()!;
         const kind = kinds[pc];
         if ((kind === K.div || kind === K.mod) && b === 0n) {
-          fail(`division by zero (${a} ${kind === K.div ? 'div' : 'mod'} 0)`);
+          fail(T('error.divisionByZero', { a: String(a), op: kind === K.div ? 'div' : 'mod' }));
           break run;
         }
         stack.push(
@@ -249,9 +256,7 @@ export function execute(parsed: Parsed, opts: VmOptions): VmResult {
         const value = stack.pop()!;
         const address = stack.pop()!;
         if (heap.size >= HEAP_LIMIT && !heap.has(address)) {
-          fail(
-            `the heap holds ${grouped(HEAP_LIMIT)} cells: the program is probably storing forever`,
-          );
+          fail(T('error.heapFull', { max: grouped(HEAP_LIMIT) }));
           break run;
         }
         heap.set(address, value);
@@ -268,7 +273,7 @@ export function execute(parsed: Parsed, opts: VmOptions): VmResult {
           break run;
         }
         if (calls.length >= CALL_LIMIT) {
-          fail(`${grouped(CALL_LIMIT)} nested calls: the program probably recurses forever`);
+          fail(T('error.callDepth', { max: grouped(CALL_LIMIT) }));
           break run;
         }
         calls.push(pc + 1);
@@ -292,7 +297,7 @@ export function execute(parsed: Parsed, opts: VmOptions): VmResult {
       case K.ret: {
         const back = calls.pop();
         if (back === undefined) {
-          fail('return with an empty call stack (ret without a matching call)');
+          fail(T('error.ret'));
           break run;
         }
         pc = back;
@@ -323,7 +328,7 @@ export function execute(parsed: Parsed, opts: VmOptions): VmResult {
         // readnum
         const address = stack.pop()!;
         if (inPos >= input.length) {
-          fail('readnum found no input left: type the numbers in the Input option, one per line');
+          fail(T('error.readnumEmpty'));
           break run;
         }
         let line = '';
@@ -331,18 +336,14 @@ export function execute(parsed: Parsed, opts: VmOptions): VmResult {
         if (inPos < input.length) inPos++;
         const digits = line.trim();
         if (!/^[+-]?\d+$/.test(digits)) {
-          fail(
-            `readnum read the input line ${JSON.stringify(line)}, which is not a decimal integer`,
-          );
+          fail(T('error.readnumBad', { line: JSON.stringify(line) }));
           break run;
         }
         heap.set(address, BigInt(digits.replace(/^\+/, '')));
       }
     }
     if (stack.length > STACK_LIMIT) {
-      fail(
-        `the stack holds more than ${grouped(STACK_LIMIT)} values: the program probably pushes forever`,
-      );
+      fail(T('error.stackFull', { max: grouped(STACK_LIMIT) }));
       break;
     }
     pc++;

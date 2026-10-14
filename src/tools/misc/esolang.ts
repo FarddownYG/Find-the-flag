@@ -1,5 +1,6 @@
 import { defineTool, number, select, text, toggle } from '../../core/define';
 import { ToolError } from '../../core/errors';
+import { toolT } from '../../i18n/tool-text';
 import { concatBytes, utf8Encode } from '../../lib/bytes';
 import {
   compile,
@@ -8,7 +9,7 @@ import {
   textToBrainfuck,
   toBrainfuck,
 } from './_esolang-brainfuck';
-import { grouped, LANGUAGE_NAME, type Language } from './_esolang-common';
+import { grouped, languageName, type Language } from './_esolang-common';
 import { valuesToDeadfish } from './_esolang-deadfish';
 import { detectLanguage, guessLanguage } from './_esolang-detect';
 import { describeRun, isBrainfuckFamily, runProgram } from './_esolang-run';
@@ -16,6 +17,8 @@ import { describeRun, isBrainfuckFamily, runProgram } from './_esolang-run';
 export type { Language } from './_esolang-common';
 export type { RunResult } from './_esolang-common';
 export { compile, detectLanguage, execute, fromBrainfuck, textToBrainfuck, toBrainfuck };
+
+const T = toolT('esolang');
 
 const STEP_LIMIT_MAX = 500_000_000;
 
@@ -37,10 +40,6 @@ export function inputBytes(s: string): Uint8Array {
   parts.push(utf8Encode(s.slice(last)));
   return concatBytes(...parts);
 }
-
-/** Languages that "Text → program" can write. */
-const GENERATED =
-  'Brainfuck, Ook!, Short Ook, Blub, Pikalang, Alphuck, ReverseFuck, COW and Deadfish';
 
 export default defineTool({
   id: 'esolang',
@@ -277,41 +276,43 @@ pichu pikachu`,
   run(src, { mode, language, input, steps, seed, deadfish }) {
     if (mode === 'generate') {
       const bytes = utf8Encode(src);
-      if (bytes.length === 0) throw new ToolError('Type the text to turn into a program.');
+      if (bytes.length === 0) throw new ToolError(T('error.generateEmpty'));
       const target: Language = language === 'auto' ? 'brainfuck' : language;
       let program: string;
       let count: number;
-      let reading = '';
+      let numbers = false;
       if (target === 'deadfish' || target === 'xkcd-deadfish') {
         program = valuesToDeadfish(Array.from(bytes), target);
         count = program.length;
-        reading =
-          ' It prints each byte as a number: run it with "ASCII characters" selected to read the text.';
+        numbers = true;
       } else if (isBrainfuckFamily(target) || target === 'cow') {
         if (target === 'cow' && bytes.includes(0)) {
-          throw new ToolError(
-            'COW cannot print a zero byte (Moo reads a character when the cell is 0). Remove the NUL characters from the text.',
-          );
+          throw new ToolError(T('error.cowZeroByte'));
         }
         const bf = textToBrainfuck(bytes);
         program = fromBrainfuck(bf, target);
         count = bf.length;
       } else {
-        throw new ToolError(
-          `Text → program writes ${GENERATED} programs. ${LANGUAGE_NAME[target]} can only be run here.`,
-        );
+        throw new ToolError(T('error.runOnly', { language: languageName(target) }));
       }
+      const made = { count: bytes.length, bytes: bytes.length, instructions: grouped(count) };
       return [
-        { type: 'text', label: `${LANGUAGE_NAME[target]} program`, value: program },
+        {
+          type: 'text',
+          label: T('label.program', { language: languageName(target) }),
+          value: program,
+        },
         {
           type: 'note',
           level: 'info',
-          text: `${bytes.length} byte(s) became ${grouped(count)} instructions. Run it with this tool to check.${reading}`,
+          text: numbers
+            ? T('note.generatedNumbers', { ...made, choice: T('options.deadfish.choices.chars') })
+            : T('note.generated', made),
         },
       ];
     }
     if (!Number.isFinite(steps) || steps < 1) {
-      throw new ToolError('The step limit must be a positive number.');
+      throw new ToolError(T('error.stepLimit'));
     }
     const detected = language === 'auto' ? detectLanguage(src) : language;
     const run = runProgram(src, detected, {

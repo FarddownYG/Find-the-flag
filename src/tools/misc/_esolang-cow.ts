@@ -1,5 +1,8 @@
 import { ToolError } from '../../core/errors';
+import { toolT } from '../../i18n/tool-text';
 import { ByteSink, grouped, InputStream, lineCol, type RunResult } from './_esolang-common';
+
+const T = toolT('esolang');
 
 /**
  * COW (BigZaphod). Twelve three-letter instructions, numbered 0-11. The memory is a row of
@@ -68,9 +71,7 @@ export function runCow(src: string, input: Uint8Array, stepLimit: number): RunRe
     } else if (ops[i] === MOO_END) {
       const start = open.pop();
       if (start === undefined) {
-        throw new ToolError(
-          `Unmatched "moo" at ${lineCol(src, at[i]!)}: there is no "MOO" to go back to. Remove it or add the missing "MOO".`,
-        );
+        throw new ToolError(T('error.cowUnmatchedEnd', { where: lineCol(src, at[i]!) }));
       }
       partner[start] = i;
       partner[i] = start;
@@ -78,9 +79,7 @@ export function runCow(src: string, input: Uint8Array, stepLimit: number): RunRe
   }
   const dangling = open.pop();
   if (dangling !== undefined) {
-    throw new ToolError(
-      `Unmatched "MOO" at ${lineCol(src, at[dangling]!)}: the loop is never closed. Add the missing "moo".`,
-    );
+    throw new ToolError(T('error.cowUnmatchedStart', { where: lineCol(src, at[dangling]!) }));
   }
 
   const backToMoo = (from: number): number => {
@@ -89,7 +88,7 @@ export function runCow(src: string, input: Uint8Array, stepLimit: number): RunRe
       if (ops[j] === MOO_END) depth++;
       else if (ops[j] === MOO_START && depth-- === 0) return j;
     }
-    throw new ToolError('A "moo" run by mOO has no "MOO" before it to go back to.');
+    throw new ToolError(T('error.cowNoMooBefore'));
   };
 
   const stream = new InputStream(input);
@@ -114,9 +113,8 @@ export function runCow(src: string, input: Uint8Array, stepLimit: number): RunRe
       const value = tape[ptr]!;
       if (value < 0 || value > 11 || value === 3) {
         // The language says an invalid command exits the program. Whatever was printed stays.
-        notes.push(
-          `mOO ran the cell value ${value} as an instruction after ${grouped(steps)} steps, but COW instructions are numbered 0 to 11${value === 3 ? ' (3 is mOO itself, which would run for ever)' : ''}: the program ends there, as the language says.`,
-        );
+        const at = { value, steps: grouped(steps) };
+        notes.push(value === 3 ? T('note.cowRunsItself', at) : T('note.cowBadCode', at));
         break run;
       }
       code = value;
@@ -127,16 +125,14 @@ export function runCow(src: string, input: Uint8Array, stepLimit: number): RunRe
         continue run;
       case 1:
         if (--ptr < 0) {
-          throw new ToolError(
-            `The pointer moved left of the first cell after ${grouped(steps)} steps. COW memory starts at the first cell and only grows to the right.`,
-          );
+          throw new ToolError(T('error.cowLeftOfTape', { steps: grouped(steps) }));
         }
         break;
       case 2:
         if (++ptr >= tape.length) {
           if (ptr >= TAPE_MAX) {
             throw new ToolError(
-              `The pointer ran past ${grouped(TAPE_MAX)} cells after ${grouped(steps)} steps: the program is probably looping forever to the right.`,
+              T('error.tapeRight', { cells: grouped(TAPE_MAX), steps: grouped(steps) }),
             );
           }
           const grown = new Int32Array(Math.min(TAPE_MAX, Math.max(tape.length * 2, ptr + 1)));

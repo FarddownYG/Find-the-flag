@@ -6,7 +6,10 @@
  * end of each line (plus the line breaks), or whatever lies between two marker strings.
  */
 
+import { toolT } from '../../i18n/tool-text';
 import { classify } from '../stego/_zerowidth';
+
+const T = toolT('whitespace-lang');
 
 export interface Extraction {
   /** The program as S/T/L letters. */
@@ -51,16 +54,16 @@ function utf16Guess(bytes: Uint8Array): 'UTF-16LE' | 'UTF-16BE' | null {
 export function decodeSource(bytes: Uint8Array): Decoded {
   if (bytes[0] === 0xff && bytes[1] === 0xfe) {
     const text = new TextDecoder('utf-16le').decode(bytes);
-    return { text, encoding: 'UTF-16LE', why: 'it starts with the byte order mark FF FE' };
+    return { text, encoding: 'UTF-16LE', why: T('value.why.bomLE') };
   }
   if (bytes[0] === 0xfe && bytes[1] === 0xff) {
     const text = new TextDecoder('utf-16be').decode(bytes);
-    return { text, encoding: 'UTF-16BE', why: 'it starts with the byte order mark FE FF' };
+    return { text, encoding: 'UTF-16BE', why: T('value.why.bomBE') };
   }
   const guess = utf16Guess(bytes);
   if (guess) {
     const text = new TextDecoder(guess.toLowerCase()).decode(bytes);
-    return { text, encoding: guess, why: 'every other byte is 0' };
+    return { text, encoding: guess, why: T('value.why.zeros') };
   }
   try {
     const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
@@ -68,7 +71,7 @@ export function decodeSource(bytes: Uint8Array): Decoded {
   } catch (e) {
     if (!(e instanceof TypeError)) throw e;
     const text = new TextDecoder('windows-1252').decode(bytes);
-    return { text, encoding: 'Latin-1', why: 'it is not valid UTF-8' };
+    return { text, encoding: 'Latin-1', why: T('value.why.notUtf8') };
   }
 }
 

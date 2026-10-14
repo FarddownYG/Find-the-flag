@@ -1,5 +1,8 @@
 import { ToolError } from '../../core/errors';
-import { grouped, lineCol, LANGUAGE_NAME, OUTPUT_MAX, type RunResult } from './_esolang-common';
+import { toolT } from '../../i18n/tool-text';
+import { grouped, languageName, lineCol, OUTPUT_MAX, type RunResult } from './_esolang-common';
+
+const T = toolT('esolang');
 
 /**
  * Brainfuck and every dialect that is "just a renamed Brainfuck": they are all reduced to plain
@@ -176,7 +179,7 @@ export function toBrainfuck(src: string, language: BrainfuckLanguage): Instructi
   if (symbols.length % 2 !== 0) {
     const last = symbols[symbols.length - 1]!;
     throw new ToolError(
-      `${LANGUAGE_NAME[language]} instructions are pairs of symbols, but the last one (${lineCol(src, last.at)}) has no partner. Check for a missing or extra word.`,
+      T('error.unpaired', { language: languageName(language), where: lineCol(src, last.at) }),
     );
   }
   for (let i = 0; i < symbols.length; i += 2) {
@@ -242,9 +245,7 @@ export function compile(src: string, { code, at }: Instructions): Program {
     } else {
       const start = open.pop();
       if (!start) {
-        throw new ToolError(
-          `Unmatched "]" at ${lineCol(src, at[i]!)}: there is no "[" to close. Remove it or add the missing "[".`,
-        );
+        throw new ToolError(T('error.unmatchedClose', { where: lineCol(src, at[i]!) }));
       }
       arg[start.op] = op.length + 1;
       push(JNZ, start.op + 1, 1);
@@ -253,9 +254,7 @@ export function compile(src: string, { code, at }: Instructions): Program {
   }
   const dangling = open.pop();
   if (dangling) {
-    throw new ToolError(
-      `Unmatched "[" at ${lineCol(src, dangling.at)}: the loop is never closed. Add the missing "]".`,
-    );
+    throw new ToolError(T('error.unmatchedOpen', { where: lineCol(src, dangling.at) }));
   }
   return {
     op: Uint8Array.from(op),
@@ -291,14 +290,12 @@ export function execute(prog: Program, input: Uint8Array, stepLimit: number): Ru
       case MOVE:
         ptr += arg[pc]!;
         if (ptr < 0) {
-          throw new ToolError(
-            `The pointer moved left of the first cell after ${grouped(steps)} steps. The program expects a tape that wraps or extends to the left; it is probably not plain Brainfuck.`,
-          );
+          throw new ToolError(T('error.leftOfTape', { steps: grouped(steps) }));
         }
         if (ptr >= tape.length) {
           if (ptr >= TAPE_MAX) {
             throw new ToolError(
-              `The pointer ran past ${grouped(TAPE_MAX)} cells after ${grouped(steps)} steps: the program is probably looping forever to the right.`,
+              T('error.tapeRight', { cells: grouped(TAPE_MAX), steps: grouped(steps) }),
             );
           }
           const grown = new Uint8Array(Math.min(TAPE_MAX, Math.max(tape.length * 2, ptr + 1)));

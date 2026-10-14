@@ -1,4 +1,7 @@
 /** Pieces shared by the interpreters behind the "esolang" tool. */
+import { toolT } from '../../i18n/tool-text';
+
+const T = toolT('esolang');
 
 export type Language =
   | 'brainfuck'
@@ -31,6 +34,10 @@ export const LANGUAGE_NAME: Record<Language, string> = {
   'malbolge-normalized': 'Malbolge (normalised)',
 };
 
+/** Display name of a language (the normalised Malbolge spelling has a translated qualifier). */
+export const languageName = (language: Language): string =>
+  language === 'malbolge-normalized' ? T('value.malbolgeNormalised') : LANGUAGE_NAME[language];
+
 /** Output is capped so that a program printing forever cannot exhaust memory. */
 export const OUTPUT_MAX = 8 << 20;
 
@@ -41,7 +48,7 @@ export function lineCol(src: string, offset: number): string {
   const before = src.slice(0, offset);
   const line = before.split('\n').length;
   const col = offset - before.lastIndexOf('\n');
-  return `line ${line}, column ${col}`;
+  return T('text.lineCol', { line, col });
 }
 
 export interface RunResult {

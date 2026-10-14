@@ -1,7 +1,10 @@
 import { defineTool, number, select, toggle } from '../../core/define';
 import { ToolError } from '../../core/errors';
 import type { Output } from '../../core/types';
+import { toolT } from '../../i18n/tool-text';
 import { isValidUtf8, utf8Decode, utf8Encode } from '../../lib/bytes';
+
+const T = toolT('number-base');
 
 /** 0-9, then A-Z, then a-z: the usual base62 alphabet. Bases up to 36 ignore case. */
 const DIGITS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
@@ -18,14 +21,17 @@ function digitValue(ch: string, base: number): number {
 
 /** Parse the digits of one number (no sign, no prefix) in any base from 2 to 62. */
 function parseDigits(digits: string, base: number, token: string): bigint {
-  if (digits.length === 0) throw new ToolError(`"${token}" has no digits.`);
+  if (digits.length === 0) throw new ToolError(T('error.noDigits', { token }));
   if (digits.length > MAX_DIGITS)
-    throw new ToolError(`"${token.slice(0, 20)}…" is longer than ${MAX_DIGITS} digits.`);
+    throw new ToolError(T('error.tooLong', { start: token.slice(0, 20), max: MAX_DIGITS }));
   for (const ch of digits) {
     if (digitValue(ch, base) < 0) {
       throw new ToolError(
-        `"${ch}" is not a base-${base} digit (in "${token.length > 40 ? `${token.slice(0, 40)}…` : token}"). ` +
-          'Change the input base, or use a 0x / 0b / 0o prefix.',
+        T('error.badDigit', {
+          ch,
+          base,
+          token: token.length > 40 ? `${token.slice(0, 40)}…` : token,
+        }),
       );
     }
   }
@@ -66,10 +72,7 @@ function parseNumber(raw: string, choice: number | 'auto'): Parsed {
       base = PREFIX_BASE[prefix[1]!.toLowerCase()]!;
       s = s.slice(2);
     } else base = /^\d+$/.test(s) ? 10 : /^[0-9a-f]+$/i.test(s) ? 16 : 0;
-    if (base === 0)
-      throw new ToolError(
-        `Cannot guess the base of "${raw}". Use a 0x / 0b / 0o prefix or choose the input base.`,
-      );
+    if (base === 0) throw new ToolError(T('error.guessBase', { token: raw }));
   } else {
     base = choice;
     // 0x only means "hex prefix" when the chosen base is hex; otherwise it is plain digits (0b1 is valid hex).
@@ -155,8 +158,8 @@ function forms(n: bigint): Forms {
     base62: withSign(n, '', 62),
     bits: abs === 0n ? 1 : abs.toString(2).length,
     bytes,
-    be: bytes ? showBytes(bytes) : '(negative number)',
-    le: bytes ? showBytes(Uint8Array.from(bytes).reverse()) : '(negative number)',
+    be: bytes ? showBytes(bytes) : T('value.negative'),
+    le: bytes ? showBytes(Uint8Array.from(bytes).reverse()) : T('value.negative'),
   };
 }
 
@@ -166,22 +169,22 @@ function numberOutputs(parsed: Parsed[]): Output[] {
     const f = forms(p.value);
     const hexBytes = f.bytes
       ? Array.from(f.bytes, (x) => x.toString(16).padStart(2, '0')).join(' ')
-      : '(negative number)';
+      : T('value.negative');
     return [
       {
         type: 'kv',
         entries: [
-          ['Read as', `base ${p.base}`],
-          ['Decimal', f.decimal],
-          ['Hex', f.hex],
-          ['Octal', f.octal],
-          ['Binary', f.binary],
-          ['Base36', f.base36],
-          ['Base62', f.base62],
-          ['Size', `${f.bits} bits, ${Math.ceil(f.bits / 8)} bytes`],
-          ['Bytes (hex)', hexBytes],
-          ['As text (big-endian)', f.be],
-          ['As text (little-endian)', f.le],
+          [T('kv.readAs'), T('value.base', { base: p.base })],
+          [T('col.decimal'), f.decimal],
+          [T('col.hex'), f.hex],
+          [T('col.octal'), f.octal],
+          [T('col.binary'), f.binary],
+          [T('col.base36'), f.base36],
+          [T('kv.base62'), f.base62],
+          [T('kv.size'), T('value.bitsBytes', { bits: f.bits, bytes: Math.ceil(f.bits / 8) })],
+          [T('kv.bytesHex'), hexBytes],
+          [T('kv.textBE'), f.be],
+          [T('kv.textLE'), f.le],
         ],
       },
     ];
@@ -194,14 +197,14 @@ function numberOutputs(parsed: Parsed[]): Output[] {
     {
       type: 'table',
       columns: [
-        'Input',
-        'Decimal',
-        'Hex',
-        'Octal',
-        'Binary',
-        'Base36',
-        'Text (big-endian)',
-        'Text (little-endian)',
+        T('col.input'),
+        T('col.decimal'),
+        T('col.hex'),
+        T('col.octal'),
+        T('col.binary'),
+        T('col.base36'),
+        T('col.textBE'),
+        T('col.textLE'),
       ],
       rows,
     },
@@ -210,7 +213,7 @@ function numberOutputs(parsed: Parsed[]): Output[] {
     const all = parsed.flatMap((p) => Array.from(bigintToBytes(p.value)));
     out.push({
       type: 'text',
-      label: 'All numbers as bytes, joined (big-endian)',
+      label: T('label.joined'),
       value: showBytes(Uint8Array.from(all)),
     });
   }
@@ -219,7 +222,7 @@ function numberOutputs(parsed: Parsed[]): Output[] {
 
 function textOutputs(input: string): Output[] {
   const text = input.replace(/\r?\n$/, '');
-  if (text === '') throw new ToolError('Type or paste the text to turn into an integer.');
+  if (text === '') throw new ToolError(T('error.emptyText'));
   const bytes = utf8Encode(text);
   const be = bytesToBigint(bytes);
   const le = bytesToBigint(Uint8Array.from(bytes).reverse());
@@ -227,12 +230,18 @@ function textOutputs(input: string): Output[] {
     {
       type: 'kv',
       entries: [
-        ['Integer (big-endian)', be.toString()],
-        ['Hex (big-endian)', `0x${be.toString(16)}`],
-        ['Integer (little-endian)', le.toString()],
-        ['Hex (little-endian)', `0x${le.toString(16)}`],
-        ['Binary (big-endian)', `0b${be.toString(2)}`],
-        ['Size', `${bytes.length} bytes, ${be === 0n ? 1 : be.toString(2).length} bits`],
+        [T('kv.integerBE'), be.toString()],
+        [T('kv.hexBE'), `0x${be.toString(16)}`],
+        [T('kv.integerLE'), le.toString()],
+        [T('kv.hexLE'), `0x${le.toString(16)}`],
+        [T('kv.binaryBE'), `0b${be.toString(2)}`],
+        [
+          T('kv.size'),
+          T('value.bytesBits', {
+            bytes: bytes.length,
+            bits: be === 0n ? 1 : be.toString(2).length,
+          }),
+        ],
       ],
     },
   ];
@@ -318,23 +327,20 @@ export default defineTool({
   detect({ text }) {
     const t = text?.trim();
     if (!t || t.length > 20000) return null;
-    if (/^\d{25,}$/.test(t))
-      return { score: 0.55, reason: 'A very large integer: maybe an RSA value (long_to_bytes)' };
-    if (/^0x[0-9a-f]{16,}$/i.test(t))
-      return { score: 0.55, reason: 'A long 0x hex number: try it as bytes' };
+    if (/^\d{25,}$/.test(t)) return { score: 0.55, reason: T('detect.bigInteger') };
+    if (/^0x[0-9a-f]{16,}$/i.test(t)) return { score: 0.55, reason: T('detect.hex') };
     return null;
   },
   run(input, { mode, base, custom }) {
     if (mode === 'text') return textOutputs(input);
     const tokens = input.split(/[\s,;]+/).filter(Boolean);
-    if (tokens.length === 0)
-      throw new ToolError('Enter a number (decimal, 0x hex, 0b binary, 0o octal), or several.');
+    if (tokens.length === 0) throw new ToolError(T('error.empty'));
     if (tokens.length > MAX_NUMBERS)
-      throw new ToolError(`Too many numbers (${tokens.length}); the limit is ${MAX_NUMBERS}.`);
+      throw new ToolError(T('error.tooMany', { n: tokens.length, max: MAX_NUMBERS }));
     let choice: number | 'auto' = 'auto';
     if (base === 'custom') {
       if (!Number.isInteger(custom) || custom < 2 || custom > 62)
-        throw new ToolError('The custom base must be a whole number from 2 to 62.');
+        throw new ToolError(T('error.customBase'));
       choice = custom;
     } else if (base !== 'auto') choice = Number(base);
     return numberOutputs(tokens.map((t) => parseNumber(t, choice)));

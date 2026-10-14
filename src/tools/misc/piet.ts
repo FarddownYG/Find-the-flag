@@ -2,11 +2,12 @@ import { decodeImageExact } from '../../core/decode-image';
 import { defineTool, number, text, toggle } from '../../core/define';
 import { ToolError } from '../../core/errors';
 import type { Output, RgbaImage } from '../../core/types';
+import { toolT } from '../../i18n/tool-text';
 import { u32le } from '../../lib/bytes';
 import { buildGrid, paletteProfile, type BuiltGrid } from './_piet-core';
 import {
-  CC_NAMES,
-  DP_NAMES,
+  ccName,
+  dpName,
   MAX_ATTEMPTS,
   OUTPUT_LIMIT,
   STACK_LIMIT,
@@ -14,6 +15,8 @@ import {
   unescapeInput,
   type PietResult,
 } from './_piet-vm';
+
+const T = toolT('piet');
 
 const STEP_LIMIT_MAX = 50_000_000;
 const TRACE_MAX = 5000;
@@ -44,22 +47,21 @@ function smallPicture(bytes: Uint8Array): RgbaImage | null {
 }
 
 const grouped = (n: number) => n.toLocaleString('en-US');
-const plural = (n: number, word: string) => `${grouped(n)} ${word}${n === 1 ? '' : 's'}`;
 const clamp = (v: number, lo: number, hi: number, fallback: number) =>
   Number.isFinite(v) ? Math.min(Math.max(Math.floor(v), lo), hi) : fallback;
 
 function stopText(r: PietResult, stepLimit: number): string {
   switch (r.stop) {
     case 'ended':
-      return `Program ended (no way out after ${MAX_ATTEMPTS} attempts in a row)`;
+      return T('value.stop.ended', { attempts: MAX_ATTEMPTS });
     case 'step-limit':
-      return `Step limit reached (${grouped(stepLimit)} steps)`;
+      return T('value.stop.stepLimit', { limit: grouped(stepLimit) });
     case 'output-limit':
-      return `Output limit reached (${grouped(OUTPUT_LIMIT)} characters)`;
+      return T('value.stop.outputLimit', { max: grouped(OUTPUT_LIMIT) });
     case 'stack-limit':
-      return `Stack limit reached (${grouped(STACK_LIMIT)} values)`;
+      return T('value.stop.stackLimit', { max: grouped(STACK_LIMIT) });
     case 'black-start':
-      return 'The top-left codel is black: the program can not start';
+      return T('value.stop.blackStart');
   }
 }
 
@@ -70,60 +72,69 @@ function notes(b: BuiltGrid, r: PietResult, unknown: string, stepLimit: number):
     out.push({
       type: 'note',
       level: 'info',
-      text: `The image size is not a multiple of the codel size (${b.codel} px): the leftover pixels on the right and bottom edges are ignored.`,
+      text: T('note.cropped', { codel: b.codel }),
     });
   }
   if (b.unknownCodels > 0) {
     const share = b.unknownCodels / (grid.width * grid.height);
     const what =
-      unknown === 'nearest' ? 'snapped to the nearest Piet colour' : `treated as ${unknown}`;
+      unknown === 'nearest'
+        ? T('value.snapped')
+        : unknown === 'black'
+          ? T('value.treatedBlack')
+          : T('value.treatedWhite');
+    const text = T('note.unknownCodels', {
+      count: b.unknownCodels,
+      n: grouped(b.unknownCodels),
+      share: (share * 100).toFixed(share < 0.1 ? 1 : 0),
+      what,
+    });
     out.push({
       type: 'note',
       level: share > 0.05 ? 'warn' : 'info',
-      text: `${plural(b.unknownCodels, 'codel')} (${(share * 100).toFixed(share < 0.1 ? 1 : 0)}%) ${b.unknownCodels === 1 ? 'is' : 'are'} not one of the 20 Piet colours, ${what}.${
+      text:
         share > 0.05 && unknown !== 'nearest'
-          ? ' If the picture was resized, anti-aliased or compressed, try "Nearest" and set the codel size by hand.'
-          : ''
-      }`,
+          ? `${text} ${T('note.tryNearest', { nearest: T('options.unknown.choices.nearest') })}`
+          : text,
     });
   }
   if (b.detected && b.codel === 1 && grid.blockCount > 2000) {
     out.push({
       type: 'note',
       level: 'warn',
-      text: `Codel size 1 was detected on a picture with ${grouped(grid.blockCount)} colour blocks. If the image was scaled or compressed, the real codel size is larger: set it by hand.`,
+      text: T('note.codelOne', { blocks: grouped(grid.blockCount) }),
     });
   }
   if (r.stop === 'step-limit') {
     out.push({
       type: 'note',
       level: 'warn',
-      text: `Stopped at the step limit (${grouped(stepLimit)} steps): the program probably loops forever, or needs a higher limit. Output so far is shown.`,
+      text: T('note.stepLimit', { limit: grouped(stepLimit) }),
     });
   } else if (r.stop === 'output-limit' || r.stop === 'stack-limit') {
     out.push({
       type: 'note',
       level: 'warn',
-      text: `${stopText(r, stepLimit)}: the program probably runs away. Output so far is shown.`,
+      text: T('note.runaway', { stop: stopText(r, stepLimit) }),
     });
   } else if (r.stop === 'black-start') {
     out.push({
       type: 'note',
       level: 'warn',
-      text: 'Execution starts on the top-left codel, which is black here. Is the picture cropped or padded with a border, or are other colours meant to be white?',
+      text: T('note.blackStart'),
     });
   } else if (r.steps === 0) {
     out.push({
       type: 'note',
       level: 'warn',
-      text: 'The pointer never left the first block: every way out of it is black or off the picture.',
+      text: T('note.stuck'),
     });
   }
   if (r.badChars) {
     out.push({
       type: 'note',
       level: 'warn',
-      text: `${plural(r.badChars, 'out(char) value')} ${r.badChars === 1 ? 'was' : 'were'} not a valid Unicode code point and print as U+FFFD.`,
+      text: T('note.badChars', { count: r.badChars, n: grouped(r.badChars) }),
     });
   }
   return out;
@@ -131,15 +142,29 @@ function notes(b: BuiltGrid, r: PietResult, unknown: string, stepLimit: number):
 
 function stats(b: BuiltGrid, r: PietResult, stepLimit: number, hasInput: boolean): Output {
   const { grid } = b;
+  const position = { x: r.x, y: r.y, dp: dpName(r.dp), cc: ccName(r.cc) };
   const entries: [string, string][] = [
-    ['Codel size', `${b.codel} px (${b.detected ? 'detected' : 'set manually'})`],
-    ['Image', `${b.imageWidth} x ${b.imageHeight} px = ${grid.width} x ${grid.height} codels`],
-    ['Colour blocks', grouped(grid.blockCount)],
-    ['Steps', grouped(r.steps)],
-    ['Termination', stopText(r, stepLimit)],
     [
-      'Final position',
-      `codel (${r.x}, ${r.y})${r.inWhite ? ' in white' : ''}, DP ${DP_NAMES[r.dp]}, CC ${CC_NAMES[r.cc]}`,
+      T('kv.codelSize'),
+      b.detected
+        ? T('value.codelDetected', { codel: b.codel })
+        : T('value.codelManual', { codel: b.codel }),
+    ],
+    [
+      T('kv.image'),
+      T('value.image', {
+        width: b.imageWidth,
+        height: b.imageHeight,
+        columns: grid.width,
+        rows: grid.height,
+      }),
+    ],
+    [T('kv.blocks'), grouped(grid.blockCount)],
+    [T('kv.steps'), grouped(r.steps)],
+    [T('kv.termination'), stopText(r, stepLimit)],
+    [
+      T('kv.position'),
+      r.inWhite ? T('value.positionWhite', position) : T('value.position', position),
     ],
   ];
   if (r.stack.length) {
@@ -147,33 +172,50 @@ function stats(b: BuiltGrid, r: PietResult, stepLimit: number, hasInput: boolean
       .slice(-8)
       .reverse()
       .map((v) => v.toString());
+    const depth = T('value.stackValues', {
+      count: r.stack.length,
+      n: grouped(r.stack.length),
+    });
     entries.push([
-      'Stack at end (top first)',
-      `${top.join(', ')}${r.stack.length > 8 ? ', ...' : ''}${r.stack.length > 1 ? ` (${grouped(r.stack.length)} values)` : ''}`,
+      T('kv.stackTop'),
+      `${top.join(', ')}${r.stack.length > 8 ? ', ...' : ''}${r.stack.length > 1 ? ` (${depth})` : ''}`,
     ]);
-  } else entries.push(['Stack at end', 'empty']);
-  if (hasInput) entries.push(['Input read', `${r.inputRead} of ${r.inputTotal} characters`]);
-  if (r.ignored) entries.push(['Ignored commands', grouped(r.ignored)]);
-  return { type: 'kv', label: 'Run', entries };
+  } else entries.push([T('kv.stackEnd'), T('value.empty')]);
+  if (hasInput) {
+    entries.push([
+      T('kv.inputRead'),
+      T('value.inputRead', { count: r.inputTotal, read: r.inputRead, total: r.inputTotal }),
+    ]);
+  }
+  if (r.ignored) entries.push([T('kv.ignored'), grouped(r.ignored)]);
+  return { type: 'kv', label: T('label.run'), entries };
 }
 
 function traceTable(r: PietResult): Output {
   const shown = r.trace.length;
   const label =
     shown < r.steps
-      ? `Trace (first ${grouped(shown)} of ${grouped(r.steps)} steps)`
-      : `Trace (${plural(shown, 'step')})`;
+      ? T('label.traceFirst', { count: r.steps, shown: grouped(shown), steps: grouped(r.steps) })
+      : T('label.trace', { count: shown, n: grouped(shown) });
+  const empty = T('value.empty');
   return {
     type: 'table',
     label,
-    columns: ['Step', 'Codel (x, y)', 'DP / CC', 'Command', 'Value', 'Stack top'],
+    columns: [
+      T('col.step'),
+      T('col.codel'),
+      T('col.pointers'),
+      T('col.command'),
+      T('col.value'),
+      T('col.stackTop'),
+    ],
     rows: r.trace.map((t) => [
       t.step,
       `(${t.x}, ${t.y})`,
-      `${DP_NAMES[t.dp]} / ${CC_NAMES[t.cc]}`,
+      `${dpName(t.dp)} / ${ccName(t.cc)}`,
       t.command || '-',
       t.value,
-      t.depth ? `${t.top} (${grouped(t.depth)} on stack)` : 'empty',
+      t.depth ? T('value.onStack', { top: t.top, depth: grouped(t.depth) }) : empty,
     ]),
   };
 }
@@ -252,13 +294,11 @@ export default defineTool({
       if (p.share >= 0.95 && p.hues >= 3 && p.colours >= 4) {
         return {
           score: named ? 0.85 : 0.7,
-          reason: named
-            ? 'Made of the 20 Piet colours, and the file name mentions Piet'
-            : 'Made of the 20 Piet colours (colour blocks, no shading)',
+          reason: named ? T('detect.paletteNamed') : T('detect.palette'),
         };
       }
     }
-    if (named) return { score: 0.6, reason: 'The file name mentions Piet' };
+    if (named) return { score: 0.6, reason: T('detect.named') };
     return null;
   },
   run({ image }, opts) {
@@ -273,9 +313,9 @@ export default defineTool({
       traceRows: clamp(opts.trace, 0, TRACE_MAX, 200),
     });
     const out: Output[] = notes(built, result, opts.unknown, stepLimit);
-    if (result.output) out.push({ type: 'text', label: 'Program output', value: result.output });
+    if (result.output) out.push({ type: 'text', label: T('label.output'), value: result.output });
     else if (result.stop !== 'black-start') {
-      out.push({ type: 'note', level: 'info', text: 'The program ran but printed nothing.' });
+      out.push({ type: 'note', level: 'info', text: T('note.printedNothing') });
     }
     out.push(stats(built, result, stepLimit, opts.input !== ''));
     if (result.trace.length) out.push(traceTable(result));

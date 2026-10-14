@@ -1,12 +1,16 @@
 import { defineTool } from '../../core/define';
 import { ToolError } from '../../core/errors';
 import type { Output } from '../../core/types';
+import { toolT } from '../../i18n/tool-text';
+
+const T = toolT('timestamp');
 
 const NS_PER_S = 1_000_000_000n;
 const MAX_DIGITS = 40;
 
 interface Epoch {
-  name: string;
+  /** Display name, in the interface language. */
+  name: () => string;
   /** Nanoseconds in one tick of this format. */
   unitNs: bigint;
   /** Unix nanoseconds of tick 0 (negative when the epoch is before 1970). */
@@ -14,39 +18,41 @@ interface Epoch {
 }
 
 const EPOCHS: Epoch[] = [
-  { name: 'Unix seconds', unitNs: NS_PER_S, offsetNs: 0n },
-  { name: 'Unix milliseconds', unitNs: 1_000_000n, offsetNs: 0n },
-  { name: 'Unix microseconds', unitNs: 1_000n, offsetNs: 0n },
-  { name: 'Unix nanoseconds', unitNs: 1n, offsetNs: 0n },
+  { name: () => T('value.epoch.unixSeconds'), unitNs: NS_PER_S, offsetNs: 0n },
+  { name: () => T('value.epoch.unixMilliseconds'), unitNs: 1_000_000n, offsetNs: 0n },
+  { name: () => T('value.epoch.unixMicroseconds'), unitNs: 1_000n, offsetNs: 0n },
+  { name: () => T('value.epoch.unixNanoseconds'), unitNs: 1n, offsetNs: 0n },
   {
-    name: 'Windows FILETIME (100 ns since 1601)',
+    name: () => T('value.epoch.filetime'),
     unitNs: 100n,
     offsetNs: -11_644_473_600n * NS_PER_S,
   },
   {
-    name: '.NET ticks (100 ns since year 1)',
+    name: () => T('value.epoch.dotnet'),
     unitNs: 100n,
     offsetNs: -62_135_596_800n * NS_PER_S,
   },
   {
-    name: 'Chrome / WebKit (µs since 1601)',
+    name: () => T('value.epoch.chrome'),
     unitNs: 1_000n,
     offsetNs: -11_644_473_600n * NS_PER_S,
   },
-  { name: 'Apple Cocoa (s since 2001)', unitNs: NS_PER_S, offsetNs: 978_307_200n * NS_PER_S },
   {
-    name: 'HFS+ / classic Mac (s since 1904)',
+    name: () => T('value.epoch.cocoa'),
+    unitNs: NS_PER_S,
+    offsetNs: 978_307_200n * NS_PER_S,
+  },
+  {
+    name: () => T('value.epoch.hfs'),
     unitNs: NS_PER_S,
     offsetNs: -2_082_844_800n * NS_PER_S,
   },
   {
-    name: 'Excel / OLE serial (days since 1899-12-30)',
+    name: () => T('value.epoch.excel'),
     unitNs: 86_400n * NS_PER_S,
     offsetNs: -2_209_161_600n * NS_PER_S,
   },
 ];
-
-const FAT_NAME = 'FAT / DOS date-time (local time)';
 
 function floorDiv(a: bigint, b: bigint): bigint {
   const q = a / b;
@@ -115,15 +121,15 @@ function interpretations(d: Decimal, title: string): Output[] {
   const best: number[] = [];
   const add = (name: string, hit: { iso: string; year: number } | null) => {
     if (hit && plausible(hit.year)) best.push(rows.length);
-    rows.push([name, hit?.iso ?? '-', hit && plausible(hit.year) ? 'yes' : '']);
+    rows.push([name, hit?.iso ?? '-', hit && plausible(hit.year) ? T('value.yes') : '']);
   };
-  for (const e of EPOCHS) add(e.name, isoFromUnixNs(toUnixNs(d, e)));
-  add(FAT_NAME, d.scale === 0 ? fatToIso(d.mantissa) : null);
+  for (const e of EPOCHS) add(e.name(), isoFromUnixNs(toUnixNs(d, e)));
+  add(T('value.epoch.fat'), d.scale === 0 ? fatToIso(d.mantissa) : null);
   const out: Output[] = [
     {
       type: 'table',
       label: title,
-      columns: ['Interpretation', 'UTC', 'Plausible (1990-2040)'],
+      columns: [T('col.interpretation'), T('col.utc'), T('col.plausible')],
       rows,
       highlight: best,
     },
@@ -132,7 +138,7 @@ function interpretations(d: Decimal, title: string): Output[] {
     out.push({
       type: 'note',
       level: 'info',
-      text: 'No interpretation lands between 1990 and 2040, so this may not be a timestamp (or not in a format listed here).',
+      text: T('note.implausible'),
     });
   }
   return out;
@@ -166,7 +172,7 @@ function parseDate(raw: string): bigint {
       Number(mi) > 59 ||
       Number(se) > 59
     ) {
-      throw new ToolError(`"${s}" is not a real calendar date or time.`);
+      throw new ToolError(T('error.notADate', { text: s }));
     }
     const sub = BigInt(frac.padEnd(9, '0') || '0');
     return (
@@ -176,9 +182,7 @@ function parseDate(raw: string): bigint {
   const hasZone = /(\b(Z|UTC|GMT)|[+-]\d{2}:?\d{2})\s*$/i.test(s);
   const ms = Date.parse(hasZone ? s : `${s} UTC`);
   if (Number.isNaN(ms)) {
-    throw new ToolError(
-      `Cannot read "${s}" as a number or a date. Try 2023-11-14T22:13:20Z, a Unix time such as 1700000000, or hex like 0x6553F100.`,
-    );
+    throw new ToolError(T('error.unreadable', { text: s }));
   }
   return BigInt(ms) * 1_000_000n;
 }
@@ -190,7 +194,7 @@ function datesToNumbers(ns: bigint): Output[] {
     const shifted = ns - e.offsetNs;
     const value = ratio(shifted, e.unitNs);
     const whole = shifted % e.unitNs === 0n ? shifted / e.unitNs : null;
-    rows.push([e.name, value, whole === null ? '' : hex(whole)]);
+    rows.push([e.name(), value, whole === null ? '' : hex(whole)]);
   }
   const filetime = (ns - EPOCHS[4]!.offsetNs) / 100n;
   if (filetime >= 0n && filetime < 1n << 64n) {
@@ -199,7 +203,7 @@ function datesToNumbers(ns: bigint): Output[] {
         .toString(16)
         .padStart(2, '0'),
     );
-    rows.push(['FILETIME as 8 bytes (little-endian)', bytes.join(' '), '']);
+    rows.push([T('value.epoch.filetimeBytes'), bytes.join(' '), '']);
   }
   const d = new Date(Number(floorDiv(ns, 1_000_000n)));
   const year = d.getUTCFullYear();
@@ -207,14 +211,14 @@ function datesToNumbers(ns: bigint): Output[] {
     const date = ((year - 1980) << 9) | ((d.getUTCMonth() + 1) << 5) | d.getUTCDate();
     const time = (d.getUTCHours() << 11) | (d.getUTCMinutes() << 5) | (d.getUTCSeconds() >> 1);
     const v = BigInt(date) * 65536n + BigInt(time);
-    rows.push([`${FAT_NAME}, 2 s resolution`, v.toString(), hex(v)]);
+    rows.push([T('value.epoch.fatResolution'), v.toString(), hex(v)]);
   }
   const shown = isoFromUnixNs(ns);
   return [
     {
       type: 'table',
-      label: `Numbers for ${shown?.iso ?? 'this instant'}`,
-      columns: ['Format', 'Value', 'Hex'],
+      label: shown ? T('label.numbersFor', { date: shown.iso }) : T('label.numbersForInstant'),
+      columns: [T('col.format'), T('col.value'), T('col.hex')],
       rows,
     },
   ];
@@ -238,21 +242,23 @@ function reverseHexBytes(digits: string): string {
 
 function numberOutputs(raw: string): Output[] | null {
   const cleaned = raw.replace(/_/g, '');
-  if (cleaned.length > MAX_DIGITS)
-    throw new ToolError(`That number is longer than ${MAX_DIGITS} digits.`);
+  if (cleaned.length > MAX_DIGITS) throw new ToolError(T('error.tooLong', { max: MAX_DIGITS }));
 
   const dec = decimalOf(cleaned);
-  if (dec) return interpretations(dec, `Interpretations of ${cleaned}`);
+  if (dec) return interpretations(dec, T('label.interpretations', { input: cleaned }));
 
   const prefixed = cleaned.match(/^0x([0-9a-f]+)$/i);
   if (prefixed) {
     const digits = prefixed[1]!.length % 2 ? `0${prefixed[1]!}` : prefixed[1]!;
-    const out = interpretations(hexNumber(digits), `Interpretations of ${cleaned} as a number`);
+    const out = interpretations(
+      hexNumber(digits),
+      T('label.interpretationsNumber', { input: cleaned }),
+    );
     if (digits.length === 8 || digits.length === 16) {
       out.push(
         ...interpretations(
           hexNumber(reverseHexBytes(digits)),
-          `Same bytes read little-endian (${reverseHexBytes(digits)})`,
+          T('label.sameLittleEndian', { hex: reverseHexBytes(digits) }),
         ),
       );
     }
@@ -268,9 +274,9 @@ function numberOutputs(raw: string): Output[] | null {
       return [
         ...interpretations(
           hexNumber(reverseHexBytes(digits)),
-          `Bytes ${digits.match(/../g)!.join(' ')} read little-endian (Windows, x86)`,
+          T('label.bytesLittleEndian', { bytes: digits.match(/../g)!.join(' ') }),
         ),
-        ...interpretations(hexNumber(digits), 'Same bytes read big-endian'),
+        ...interpretations(hexNumber(digits), T('label.sameBigEndian')),
       ];
     }
   }
@@ -320,15 +326,15 @@ export default defineTool({
   detect({ text }) {
     const t = text?.trim();
     if (!t || t.length > 64) return null;
-    if (/^1\d{9}$/.test(t)) return { score: 0.6, reason: 'Looks like Unix seconds' };
-    if (/^1\d{12}$/.test(t)) return { score: 0.55, reason: 'Looks like Unix milliseconds' };
-    if (/^13\d{16}$/.test(t)) return { score: 0.6, reason: 'Looks like a Windows FILETIME' };
-    if (ISO_RE.test(t) && t.length >= 10) return { score: 0.7, reason: 'A date and time' };
+    if (/^1\d{9}$/.test(t)) return { score: 0.6, reason: T('detect.unixSeconds') };
+    if (/^1\d{12}$/.test(t)) return { score: 0.55, reason: T('detect.unixMilliseconds') };
+    if (/^13\d{16}$/.test(t)) return { score: 0.6, reason: T('detect.filetime') };
+    if (ISO_RE.test(t) && t.length >= 10) return { score: 0.7, reason: T('detect.date') };
     return null;
   },
   run(input) {
     const text = input.trim();
-    if (!text) throw new ToolError('Enter a number (Unix time, FILETIME, hex...) or a date.');
+    if (!text) throw new ToolError(T('error.empty'));
     const fromNumber = numberOutputs(text);
     if (fromNumber) return fromNumber;
     return datesToNumbers(parseDate(text));

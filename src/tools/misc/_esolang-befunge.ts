@@ -1,5 +1,8 @@
 import { ToolError } from '../../core/errors';
+import { toolT } from '../../i18n/tool-text';
 import { ByteSink, grouped, InputStream, makeRng, type RunResult } from './_esolang-common';
+
+const T = toolT('esolang');
 
 /**
  * Befunge-93: the program is a grid of 80 columns by 25 lines, the instruction pointer moves over
@@ -22,18 +25,16 @@ const STACK_MAX = 1 << 23;
 export function loadBefunge(src: string): Int32Array {
   const lines = src.split(/\r\n|\r|\n/).map((line) => line.trimEnd());
   while (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
-  if (lines.length === 0) throw new ToolError('Paste a Befunge-93 program (a grid of characters).');
+  if (lines.length === 0) throw new ToolError(T('error.befungeEmpty'));
   if (lines.length > BEFUNGE_HEIGHT) {
-    throw new ToolError(
-      `Befunge-93 programs have at most ${BEFUNGE_HEIGHT} lines, but this one has ${lines.length}. It may be written for Befunge-98 or another language.`,
-    );
+    throw new ToolError(T('error.befungeLines', { max: BEFUNGE_HEIGHT, lines: lines.length }));
   }
   const grid = new Int32Array(BEFUNGE_WIDTH * BEFUNGE_HEIGHT).fill(32);
   for (let y = 0; y < lines.length; y++) {
     const line = lines[y]!;
     if (line.length > BEFUNGE_WIDTH) {
       throw new ToolError(
-        `Befunge-93 programs are at most ${BEFUNGE_WIDTH} columns wide, but line ${y + 1} has ${line.length} characters. It may be written for Befunge-98 or another language.`,
+        T('error.befungeWidth', { max: BEFUNGE_WIDTH, line: y + 1, length: line.length }),
       );
     }
     for (let x = 0; x < line.length; x++) grid[y * BEFUNGE_WIDTH + x] = line.charCodeAt(x);
@@ -265,9 +266,7 @@ export function runBefunge(
     if (probe && !stringMode && TURNS.has(cmd)) probe.turns++;
     if (stack.length > STACK_MAX) {
       stopped = 'error';
-      notes.push(
-        `The stack grew past ${grouped(STACK_MAX)} values after ${grouped(steps)} steps: the program pushes without ever popping.`,
-      );
+      notes.push(T('note.befungeStack', { max: grouped(STACK_MAX), steps: grouped(steps) }));
       break;
     }
     x += dx;
@@ -280,13 +279,16 @@ export function runBefunge(
     y = ((y % BEFUNGE_HEIGHT) + BEFUNGE_HEIGHT) % BEFUNGE_HEIGHT;
   }
   if (divisionsByZero > 0) {
-    notes.push(
-      `Division or modulo by zero happened ${grouped(divisionsByZero)} time(s); 0 was pushed each time (the original Befunge asks the user for a result).`,
-    );
+    notes.push(T('note.befungeDivZero', { count: divisionsByZero, n: grouped(divisionsByZero) }));
   }
   if (outsideGrid > 0) {
     notes.push(
-      `p or g used coordinates outside the ${BEFUNGE_WIDTH}x${BEFUNGE_HEIGHT} grid ${grouped(outsideGrid)} time(s): g pushed 0 and p did nothing.`,
+      T('note.befungeOutside', {
+        width: BEFUNGE_WIDTH,
+        height: BEFUNGE_HEIGHT,
+        count: outsideGrid,
+        n: grouped(outsideGrid),
+      }),
     );
   }
   return { output: sink.bytes(), steps, stopped, notes };

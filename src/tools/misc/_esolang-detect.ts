@@ -1,9 +1,12 @@
+import { toolT } from '../../i18n/tool-text';
 import type { Language } from './_esolang-common';
 import { looksLikeBefunge } from './_esolang-befunge';
 import { bracketsPair, pikalangWords } from './_esolang-brainfuck';
 import { tokenizeCow } from './_esolang-cow';
 import { deadfishVariantOf } from './_esolang-deadfish';
 import { isMalbolgeProgram, isNormalisedMalbolge } from './_esolang-malbolge';
+
+const T = toolT('esolang');
 
 const count = (src: string, pattern: RegExp) => (src.match(pattern) ?? []).length;
 const compactOf = (src: string) => src.replace(/\s+/g, '');
@@ -80,47 +83,49 @@ export interface Guess {
 /** Strict version for the home page's triage: only speaks up when the text really looks like code. */
 export function guessLanguage(sample: string): Guess | null {
   const t = sample.trim();
-  if (count(t, /\bOok[.?!]/gi) >= 4) return { language: 'ook', score: 0.95, reason: 'Ook! words' };
+  if (count(t, /\bOok[.?!]/gi) >= 4) {
+    return { language: 'ook', score: 0.95, reason: T('detect.ook') };
+  }
   if (count(t, /\bBlub[.?!]/gi) >= 4) {
-    return { language: 'blub', score: 0.95, reason: 'Blub words' };
+    return { language: 'blub', score: 0.95, reason: T('detect.blub') };
   }
   if (cowTokens(t, 0.9) >= 6) {
-    return { language: 'cow', score: 0.95, reason: 'COW instructions (moo, MOO, mOo…)' };
+    return { language: 'cow', score: 0.95, reason: T('detect.cow') };
   }
   const pika = pikalangWords(t);
   if (pika.known >= 6 && pika.known >= 0.95 * pika.words) {
-    return { language: 'pikalang', score: 0.9, reason: 'Pikalang words (pi, ka, pika, chu…)' };
+    return { language: 'pikalang', score: 0.9, reason: T('detect.pikalang') };
   }
   const fish = compactOf(t).length >= 8 ? deadfishVariantOf(t) : null;
   if (fish) {
     return {
       language: fish,
       score: 0.7,
-      reason: fish === 'deadfish' ? 'Only i d s o (Deadfish)' : 'Only x d k c (XKCD Deadfish)',
+      reason: fish === 'deadfish' ? T('detect.deadfish') : T('detect.xkcdDeadfish'),
     };
   }
   if (isMalbolgeProgram(t, 12)) {
     return {
       language: 'malbolge',
       score: 0.9,
-      reason: 'Every character is a valid Malbolge instruction at its position',
+      reason: T('detect.malbolge'),
     };
   }
   if (isNormalisedMalbolge(t, 16)) {
-    return { language: 'malbolge-normalized', score: 0.6, reason: 'Only i < / * j p o v' };
+    return { language: 'malbolge-normalized', score: 0.6, reason: T('detect.malbolgeNormalised') };
   }
   if (maybeBefunge(t) && looksLikeBefunge(t, true)) {
     return {
       language: 'befunge',
       score: 0.75,
-      reason: 'A Befunge-93 grid made of instructions that prints something and reaches @',
+      reason: T('detect.befunge'),
     };
   }
 
   const compact = compactOf(t);
   if (compact.length < 16) return null;
   if (looksLikeShortOok(compact) && compact.includes('?') && compact.includes('!')) {
-    return { language: 'short-ook', score: 0.7, reason: 'Only . ? ! (Short Ook)' };
+    return { language: 'short-ook', score: 0.7, reason: T('detect.shortOok') };
   }
   const bf = (compact.match(/[-+<>[\].,]/g) ?? []).length;
   let depth = 0;
@@ -134,23 +139,23 @@ export function guessLanguage(sample: string): Guess | null {
     return {
       language: 'reversefuck',
       score: 0.8,
-      reason: 'Only Brainfuck symbols, and the loops are written ]…[ (ReverseFuck)',
+      reason: T('detect.reversefuck'),
     };
   }
   if (balanced && depth === 0 && looksLikeCode) {
     const ratio = bf / compact.length;
     if (ratio >= 0.9) {
-      return { language: 'brainfuck', score: 0.9, reason: 'Only Brainfuck symbols' };
+      return { language: 'brainfuck', score: 0.9, reason: T('detect.brainfuck') };
     }
     if (ratio >= 0.75) {
-      return { language: 'brainfuck', score: 0.55, reason: 'Mostly Brainfuck symbols' };
+      return { language: 'brainfuck', score: 0.55, reason: T('detect.brainfuckMostly') };
     }
   }
   if (compact.length >= 24 && looksLikeAlphuck(compact)) {
     return {
       language: 'alphuck',
       score: 0.5,
-      reason: 'Only the letters a c e i j o p s (Alphuck)',
+      reason: T('detect.alphuck'),
     };
   }
   return null;
