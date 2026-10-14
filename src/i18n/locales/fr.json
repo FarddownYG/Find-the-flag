@@ -358,6 +358,7 @@
   "tool.audio-lab.note.quiet": "Le résultat est très faible (crête {db} dBFS) : ajoute « normalize » en fin de chaîne pour l’entendre.",
   "tool.audio-lab.note.related": "Des bips ou des tonalités dans le résultat ? Envoie-le vers {dtmf} ou {morse} avec « {sendTo} » sur le lecteur.",
   "tool.audio-lab.note.sideSilent": "Étape {n} : G − D est un silence total, les deux canaux sont identiques.",
+  "tool.audio-lab.note.tooShortSpectrogram": "Le résultat fait moins de {min} échantillons : trop court pour un spectrogramme.",
   "tool.audio-lab.options.chain.hint": "Appliquées de gauche à droite, séparées par des virgules : reverse · speed X (la hauteur suit ; 1/1.5 annule ×1.5) · stretch X (durée ×X, même hauteur) · tempo X · pitch N (demi-tons, même durée) · channel left / right / mid / side · normalize",
   "tool.audio-lab.options.chain.label": "Étapes",
   "tool.audio-lab.options.chain.placeholder": "reverse, speed 0.5, stretch 2, pitch -3, channel left",

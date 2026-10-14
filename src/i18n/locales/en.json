@@ -358,6 +358,7 @@
   "tool.audio-lab.note.quiet": "The result is very quiet (peak {db} dBFS): add “normalize” at the end of the chain to hear it.",
   "tool.audio-lab.note.related": "Beeps or dial tones in the result? Send it to {dtmf} or {morse} with “{sendTo}” on the player.",
   "tool.audio-lab.note.sideSilent": "Step {n}: L − R is pure silence, both channels are identical.",
+  "tool.audio-lab.note.tooShortSpectrogram": "The result is shorter than {min} samples: too short for a spectrogram.",
   "tool.audio-lab.options.chain.hint": "Applied left to right, separated by commas: reverse · speed X (pitch follows; 1/1.5 undoes ×1.5) · stretch X (duration ×X, same pitch) · tempo X · pitch N (semitones, same duration) · channel left / right / mid / side · normalize",
   "tool.audio-lab.options.chain.label": "Steps",
   "tool.audio-lab.options.chain.placeholder": "reverse, speed 0.5, stretch 2, pitch -3, channel left",

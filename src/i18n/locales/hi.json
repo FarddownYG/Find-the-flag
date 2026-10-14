@@ -358,6 +358,7 @@
   "tool.audio-lab.note.quiet": "परिणाम बहुत धीमा है (पीक {db} dBFS): उसे सुनने के लिए चेन के अंत में “normalize” जोड़ें।",
   "tool.audio-lab.note.related": "परिणाम में बीप या डायल टोन हैं? प्लेयर पर “{sendTo}” से इसे {dtmf} या {morse} में भेजें।",
   "tool.audio-lab.note.sideSilent": "चरण {n}: बायाँ − दायाँ पूरी तरह ख़ामोशी है, दोनों चैनल एक जैसे हैं।",
+  "tool.audio-lab.note.tooShortSpectrogram": "परिणाम {min} सैंपल से छोटा है: स्पेक्ट्रोग्राम के लिए बहुत छोटा।",
   "tool.audio-lab.options.chain.hint": "बाएँ से दाएँ लागू होते हैं, अल्पविराम से अलग: reverse · speed X (पिच साथ बदलती है; 1/1.5 ×1.5 को उलट देता है) · stretch X (अवधि ×X, पिच वही) · tempo X · pitch N (सेमीटोन, अवधि वही) · channel left / right / mid / side · normalize",
   "tool.audio-lab.options.chain.label": "चरण",
   "tool.audio-lab.options.chain.placeholder": "reverse, speed 0.5, stretch 2, pitch -3, channel left",

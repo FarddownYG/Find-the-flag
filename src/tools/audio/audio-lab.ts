@@ -16,7 +16,12 @@ import {
   timeStretch,
   toDb,
 } from './_audio-lab-dsp';
-import { computeSpectrogram, renderSpectrogram, type Spectrogram } from './spectrogram';
+import {
+  MIN_SAMPLES,
+  computeSpectrogram,
+  renderSpectrogram,
+  type Spectrogram,
+} from './spectrogram';
 
 const T = toolT('audio-lab');
 
@@ -556,11 +561,22 @@ export default defineTool({
       },
     );
 
-    const image = renderSpectrogram(resultSpectrogram(out, fs), {
-      colormap: 'inferno',
-      floor: 90,
-      ceiling: 0,
-    });
+    // A result of a few samples has no spectrogram column: say so instead of failing.
+    const tooShort = (out[0]?.length ?? 0) < MIN_SAMPLES;
+    const image = tooShort
+      ? null
+      : renderSpectrogram(resultSpectrogram(out, fs), {
+          colormap: 'inferno',
+          floor: 90,
+          ceiling: 0,
+        });
+    if (tooShort) {
+      notes.push({
+        type: 'note',
+        level: 'info',
+        text: T('note.tooShortSpectrogram', { min: MIN_SAMPLES }),
+      });
+    }
     const stem = baseName(audio.name);
 
     const result: Output[] = [
@@ -584,12 +600,14 @@ export default defineTool({
         rows: lab.rows,
       });
     }
-    result.push({
-      type: 'image',
-      label: T('label.spectrogram', { max: Math.round(fs / 2) }),
-      image,
-      filename: `${stem}-lab-spectrogram.png`,
-    });
+    if (image) {
+      result.push({
+        type: 'image',
+        label: T('label.spectrogram', { max: Math.round(fs / 2) }),
+        image,
+        filename: `${stem}-lab-spectrogram.png`,
+      });
+    }
     return result;
   },
 });

@@ -20,7 +20,8 @@ const MAX_ROWS = 1024;
  * are taken inside it and the loudest value is kept, so short sounds in long files still show. */
 const MAX_WINDOWS_PER_COLUMN = 4;
 /** Shortest slice worth transforming. */
-const MIN_SAMPLES = 64;
+/** Fewer samples than this cannot make a single spectrogram column. */
+export const MIN_SAMPLES = 64;
 
 export interface SpectrogramParams {
   fftSize: number;

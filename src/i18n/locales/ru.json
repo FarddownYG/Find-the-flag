@@ -392,6 +392,7 @@
   "tool.audio-lab.note.quiet": "Результат очень тихий (пик {db} dBFS): добавьте «normalize» в конец цепочки, чтобы его услышать.",
   "tool.audio-lab.note.related": "В результате слышны писки или тоны набора? Отправьте его в «{dtmf}» или «{morse}» через «{sendTo}» у плеера.",
   "tool.audio-lab.note.sideSilent": "Шаг {n}: Л − П — полная тишина, оба канала одинаковы.",
+  "tool.audio-lab.note.tooShortSpectrogram": "Результат короче {min} отсчётов: слишком короткий для спектрограммы.",
   "tool.audio-lab.options.chain.hint": "Применяются слева направо, через запятую: reverse · speed X (высота меняется вместе со скоростью; 1/1.5 отменяет ×1.5) · stretch X (длительность ×X, высота та же) · tempo X · pitch N (полутоны, длительность та же) · channel left / right / mid / side · normalize",
   "tool.audio-lab.options.chain.label": "Шаги",
   "tool.audio-lab.options.chain.placeholder": "reverse, speed 0.5, stretch 2, pitch -3, channel left",
