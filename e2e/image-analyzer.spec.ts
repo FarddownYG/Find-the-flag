@@ -151,16 +151,25 @@ test('image analyzer: comparing the photo with itself', async ({ page }) => {
 
 test('image analyzer: real file inputs, second file, links, and no trace left', async ({
   page,
+  baseURL,
 }) => {
   const { requests, errors } = await watch(page);
   // Any request to another origin than the app (and the stubbed Google page) is a failure.
-  await page.context().route(/^https?:\/\/(?!localhost:4173)/, (route) => {
-    const u = route.request().url();
-    if (u.startsWith('https://www.google.com/'))
-      return route.fulfill({ status: 200, contentType: 'text/html', body: '<title>stub</title>' });
-    if (u.startsWith(`https://${TILE_HOST}/`)) return route.fallback();
-    return route.abort();
-  });
+  const appOrigin = new URL(baseURL ?? 'http://localhost:4173/').origin;
+  await page.context().route(
+    (url) => url.origin !== appOrigin,
+    (route) => {
+      const u = route.request().url();
+      if (u.startsWith('https://www.google.com/'))
+        return route.fulfill({
+          status: 200,
+          contentType: 'text/html',
+          body: '<title>stub</title>',
+        });
+      if (u.startsWith(`https://${TILE_HOST}/`)) return route.fallback();
+      return route.abort();
+    },
+  );
   await page.goto('./#/tool/image-analyzer');
   const self = new URL(page.url()).origin;
   const startUrl = page.url();
