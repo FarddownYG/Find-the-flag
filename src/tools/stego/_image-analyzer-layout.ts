@@ -1,3 +1,4 @@
+import { toolT } from '../../i18n/tool-text';
 import {
   bytesEqualAt,
   concatBytes,
@@ -13,11 +14,16 @@ import { parseGif, type GifParse } from './_gif';
 import { appIdentifier, parseJpeg, type JpegParse } from './_jpeg';
 import { parsePng, type PngParse } from './_png';
 
+const T = toolT('image-analyzer');
+
 /** A byte range of the file and what it is ("APP1 Exif", "IDAT chunk", "image data"...). */
 export interface Region {
   start: number;
   end: number;
+  /** English name, which the checks below match ("eXIf chunk", "zTXt chunk"...). */
   label: string;
+  /** The same name as the user reads it (translated). */
+  text: string;
   /** Compressed pixels: signatures found in there are coincidences. */
   imageData: boolean;
 }
@@ -71,58 +77,75 @@ function containerOf(bytes: Uint8Array): Signature | null {
 }
 
 /** Short label of an APPn segment: "APP1 Exif", "APP1 XMP", "APP13 Photoshop/IPTC"... */
-function appLabel(name: string, id: string): string {
-  const short = id.startsWith('http://ns.adobe.com/xap/1.0/')
-    ? 'XMP'
+function appLabel(name: string, id: string): { label: string; text: string } {
+  const [short, shown] = id.startsWith('http://ns.adobe.com/xap/1.0/')
+    ? ['XMP', 'XMP']
     : id.startsWith('http://ns.adobe.com/xmp/extension')
-      ? 'XMP extension'
+      ? ['XMP extension', T('region.xmp-extension')]
       : id.startsWith('Photoshop')
-        ? 'Photoshop/IPTC'
+        ? ['Photoshop/IPTC', 'Photoshop/IPTC']
         : id === 'ICC_PROFILE'
-          ? 'ICC profile'
-          : id;
-  return short ? `${name} ${short}` : name;
+          ? ['ICC profile', T('region.icc-profile')]
+          : [id, id];
+  return short
+    ? { label: `${name} ${short}`, text: `${name} ${shown}` }
+    : { label: name, text: name };
 }
 
 const CODING_TABLES: Record<number, string> = {
   0xc4: 'DHT (Huffman tables)',
   0xdb: 'DQT (quantisation tables)',
 };
+const codingText = (marker: number) =>
+  marker === 0xc4 ? T('region.dht') : marker === 0xdb ? T('region.dqt') : null;
 
 function jpegRegions(b: Uint8Array, j: JpegParse): Region[] {
   const out: Region[] = [];
   for (const s of j.segments) {
     if (s.marker === 0xda) {
       const scanStart = s.dataStart + s.dataLength;
-      out.push({ start: s.offset, end: scanStart, label: 'SOS (scan header)', imageData: false });
+      out.push({
+        start: s.offset,
+        end: scanStart,
+        label: 'SOS (scan header)',
+        text: T('region.sos'),
+        imageData: false,
+      });
       out.push({
         start: scanStart,
         end: s.offset + s.length,
         label: 'image data',
+        text: T('region.image-data'),
         imageData: true,
       });
       continue;
     }
-    const label =
+    const { label, text } =
       s.marker >= 0xe0 && s.marker <= 0xef
         ? appLabel(s.name, appIdentifier(b, s))
         : s.marker === 0xfe
-          ? 'COM (comment)'
-          : (CODING_TABLES[s.marker] ?? s.name);
+          ? { label: 'COM (comment)', text: T('region.com') }
+          : {
+              label: CODING_TABLES[s.marker] ?? s.name,
+              text: codingText(s.marker) ?? s.name,
+            };
     // Huffman and quantisation tables are bytes of the codec, like the pixels themselves.
     const imageData = s.marker in CODING_TABLES;
-    out.push({ start: s.offset, end: s.offset + s.length, label, imageData });
+    out.push({ start: s.offset, end: s.offset + s.length, label, text, imageData });
   }
   return out;
 }
 
 function pngRegions(p: PngParse): Region[] {
-  const out: Region[] = [{ start: 0, end: 8, label: 'PNG signature', imageData: false }];
+  const out: Region[] = [
+    { start: 0, end: 8, label: 'PNG signature', text: T('region.png-signature'), imageData: false },
+  ];
   for (const c of p.chunks) {
     out.push({
       start: c.offset,
       end: c.dataStart + c.length + 4,
       label: `${c.type} chunk`,
+      text: T('region.chunk', { type: c.type }),
       imageData: c.type === 'IDAT' || c.type === 'fdAT',
     });
   }
@@ -134,6 +157,7 @@ function gifRegions(g: GifParse): Region[] {
     start: k.offset,
     end: k.offset + k.length,
     label: k.kind,
+    text: k.kind,
     imageData: k.kind.startsWith('Image '),
   }));
 }
@@ -234,6 +258,7 @@ export function analyseLayout(bytes: Uint8Array): Layout {
             start: c.offset,
             end: c.dataStart + c.size + (c.size & 1),
             label: `${c.id.trim()} chunk`,
+            text: T('region.chunk', { type: c.id.trim() }),
             imageData: RIFF_PIXELS.has(c.id),
           }));
   if (end !== null && end < bytes.length) {
@@ -241,6 +266,7 @@ export function analyseLayout(bytes: Uint8Array): Layout {
       start: end,
       end: bytes.length,
       label: 'after the end of the image',
+      text: T('region.after-end-of-image'),
       imageData: false,
     });
   }
@@ -349,7 +375,8 @@ export function embeddedFiles(
       end: f.end,
       sig: f.sig,
       how: f.how,
-      where: region?.label ?? (layout.end !== null && f.start >= layout.end ? 'after the end' : ''),
+      where:
+        region?.text ?? (layout.end !== null && f.start >= layout.end ? T('where.after-end') : ''),
       truncated: f.truncated,
     });
   }

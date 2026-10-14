@@ -1,5 +1,8 @@
 import { ToolError } from '../../core/errors';
 import type { RgbaImage } from '../../core/types';
+import { toolT } from '../../i18n/tool-text';
+
+const T = toolT('channel-reveal');
 
 /**
  * Colour-channel isolation and amplification (pure, no DOM).
@@ -119,10 +122,14 @@ export const CHANNEL_INFO: readonly {
 
 export function channelInfo(ch: Channel): { id: Channel; name: string; formula: string } {
   const info = CHANNEL_INFO.find((c) => c.id === ch);
-  if (!info)
-    throw new ToolError(`Unknown channel "${String(ch)}". Pick R, G, B, A, C, M, Y, K or luma.`);
+  if (!info) throw new ToolError(T('error.unknown-channel', { channel: String(ch) }));
   return info;
 }
+
+/** The channel's name as the user reads it ("Blue"); CHANNEL_INFO keeps the English one. */
+export const channelName = (ch: Channel): string => T(`value.channel.${channelInfo(ch).id}`);
+/** "Blue channel", translated. */
+export const channelOf = (ch: Channel): string => T(`value.channel-of.${channelInfo(ch).id}`);
 
 // ---------- channel values ----------
 
@@ -289,12 +296,12 @@ export function channelStats(img: RgbaImage, ch: Channel): ChannelStats {
 
 /** A one-line reading of the statistics, or null when the channel looks like ordinary content. */
 export function statsHint(ch: Channel, s: ChannelStats): string | null {
-  const name = channelInfo(ch).name;
+  const channel = channelOf(ch);
   if (s.max === s.min) {
-    return `${name} channel is constant (${s.min}): nothing is hidden in it, try another channel.`;
+    return T('note.constant', { channel, min: s.min });
   }
   if (s.max - s.min <= FAINT_SPREAD) {
-    return `${name} channel spans only ${s.min}-${s.max}: something faint is there.`;
+    return T('note.faint', { channel, min: s.min, max: s.max });
   }
   return null;
 }
@@ -338,10 +345,7 @@ export function normalizeCrop(img: RgbaImage, crop?: Rect): CropInfo {
     y = Math.max(0, y);
   }
   if (x >= img.width || y >= img.height) {
-    throw new ToolError(
-      `The crop starts at (${x}, ${y}), outside the ${img.width}×${img.height} image. ` +
-        'Use X below the width and Y below the height, or set the crop back to 0.',
-    );
+    throw new ToolError(T('error.crop-outside', { x, y, w: img.width, h: img.height }));
   }
   const maxW = img.width - x;
   const maxH = img.height - y;

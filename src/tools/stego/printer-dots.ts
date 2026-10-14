@@ -1,10 +1,12 @@
 import { bool, defineTool, number, select } from '../../core/define';
 import type { Output, RgbaImage } from '../../core/types';
+import { toolT } from '../../i18n/tool-text';
 import {
   CHANNEL_INFO,
   DEFAULT_REVEAL,
   buildLut,
   channelInfo,
+  channelName,
   normalizeCrop,
   type Rect,
 } from './_channel';
@@ -15,11 +17,11 @@ import {
   SEPARATOR_COLUMN,
   columnValue,
   decodeDocuColor,
-  describeOrientation,
   mappedColumns,
   matrixToText,
   orient,
   orientationKey,
+  orientationText,
   singleDotFix,
   type Decoded,
   type Mapping,
@@ -34,7 +36,6 @@ import {
   parityCell,
   parityOption,
   parityText,
-  plural,
   printed,
   readMapping,
   serialText,
@@ -72,7 +73,7 @@ import {
 // (https://github.com/dfd-tud/deda, libdeda/pattern_handler.py, Pattern4: dot pitch 0.04 inch).
 // Both are summarised in _docucolor.ts. No code was copied.
 
-const LOCAL = 'Processed locally — nothing uploaded.';
+const T = toolT('printer-dots');
 /** Cells sampled at most (a 2-px pitch over a 12-megapixel scan would be 3 million). */
 const MAX_CELLS = 2_000_000;
 const MAX_ROTATION = 45;
@@ -300,17 +301,14 @@ export default defineTool({
       if (ok(o.rows) && ok(o.cols)) {
         tileRows = o.rows;
         tileCols = o.cols;
-      } else
-        warn(
-          `Tile size ${o.cols} × ${o.rows} ignored: columns and rows must be whole numbers from 2 to 32. Using the DocuColor 15 × 8.`,
-        );
+      } else warn(T('warn.tile-size', { cols: o.cols, rows: o.rows }));
     }
     const docu = tileRows === ROWS && tileCols === COLS;
     const odd = !o.advanced || o.parity === 'odd';
     let mapping: Mapping = DEFAULT_MAPPING;
     if (o.advanced && docu) {
       const r = readMapping(o);
-      if ('problem' in r) warn(`Column mapping ignored: ${r.problem} Using the EFF mapping.`);
+      if ('problem' in r) warn(T('warn.mapping-ignored', { problem: r.problem }));
       else mapping = r.mapping;
     }
     const mapped = docu ? mappedColumns(mapping) : new Map<number, string>();
@@ -318,7 +316,7 @@ export default defineTool({
     let manualPitchX: number | null = o.advanced && o.pitchX > 0 ? o.pitchX : null;
     let manualPitchY: number | null = o.advanced && o.pitchY > 0 ? o.pitchY : manualPitchX;
     if ((manualPitchX ?? 2) < 2 || (manualPitchY ?? 2) < 2) {
-      warn('A pitch below 2 px is ignored: the pitch is measured automatically.');
+      warn(T('warn.pitch'));
       manualPitchX = null;
       manualPitchY = null;
     }
@@ -326,9 +324,7 @@ export default defineTool({
     if (o.advanced && !o.autoRotation) {
       rotation = Number.isFinite(o.rotation) ? o.rotation : 0;
       if (Math.abs(rotation) > MAX_ROTATION) {
-        warn(
-          `Rotation ${rotation}° is outside ±${MAX_ROTATION}° and was clamped: quarter and half turns are what Orientation is for.`,
-        );
+        warn(T('warn.rotation', { rotation, max: MAX_ROTATION }));
         rotation = Math.sign(rotation) * MAX_ROTATION;
       }
     }
@@ -340,55 +336,75 @@ export default defineTool({
     const rect = crop.rect;
     if (crop.adjusted)
       warn(
-        `The region did not fit the ${image.width}×${image.height} image and was adjusted to ${rect.w}×${rect.h} px at (${rect.x}, ${rect.y}).`,
+        T('warn.region-adjusted', {
+          iw: image.width,
+          ih: image.height,
+          w: rect.w,
+          h: rect.h,
+          x: rect.x,
+          y: rect.y,
+        }),
       );
     if (rect.w * rect.h > 4_000_000)
       notes.push({
         type: 'note',
         level: 'info',
-        text: `Large region (${f1((rect.w * rect.h) / 1e6)} megapixels): the first run takes a moment (later changes reuse the detection). A region around a few tiles is instant.`,
+        text: T('note.large-region', { mp: f1((rect.w * rect.h) / 1e6) }),
       });
     const { sig, det } = detectCached(image, rect, o.channel, o.inkOnly, o.threshold);
     const info = channelInfo(o.channel);
     const display = makeDisplay(sig, det, o);
     const statsBlock = (): Output => ({
       type: 'kv',
-      label: 'Channel statistics',
+      label: T('label.stats'),
       entries: [
         [
-          'Channel',
-          `${info.name} (${info.formula})${
-            sig.inkOnly
-              ? ', colour ink only'
-              : o.inkOnly
-                ? ' (colour ink only does not apply to this channel)'
-                : ''
+          T('kv.channel'),
+          `${channelName(o.channel)} (${info.formula})${
+            sig.inkOnly ? T('value.ink-only') : o.inkOnly ? T('value.ink-only-na') : ''
           }`,
         ],
         [
-          'Region',
+          T('kv.region'),
           crop.whole
-            ? `${rect.w}×${rect.h} px (whole image)`
-            : `${rect.w}×${rect.h} px at (${rect.x}, ${rect.y}) of ${image.width}×${image.height}`,
+            ? T('value.region-whole', { w: rect.w, h: rect.h })
+            : T('value.region-part', {
+                w: rect.w,
+                h: rect.h,
+                x: rect.x,
+                y: rect.y,
+                iw: image.width,
+                ih: image.height,
+              }),
         ],
-        ['Range', `${sig.stats.min}–${sig.stats.max}`],
-        ['Mean', f2(sig.stats.mean)],
+        [T('kv.range'), `${sig.stats.min}–${sig.stats.max}`],
+        [T('kv.mean'), f2(sig.stats.mean)],
         ['p1', String(sig.stats.p1)],
         ['p99', String(sig.stats.p99)],
         [
-          'Dot threshold',
-          `${det.threshold} levels above the local paper (${det.auto ? `auto; contrast noise ${f1(det.noise)}` : 'manual'})`,
+          T('kv.dot-threshold'),
+          det.auto
+            ? T('value.threshold-auto', { t: det.threshold, noise: f1(det.noise) })
+            : T('value.threshold-manual', { t: det.threshold }),
         ],
         [
-          'Blobs',
-          `${det.blobs} found, ${det.dots.length} kept as dots (typical ${det.typicalArea} px, contrast ${f1(det.peak)}), ${det.rejectedFaint} too faint (noise), ${det.rejectedSmall} too small, ${det.rejectedLarge} too large or elongated${det.truncated ? ' (stopped: too many)' : ''}`,
+          T('kv.blobs'),
+          `${T('value.blobs', {
+            blobs: det.blobs,
+            dots: det.dots.length,
+            area: det.typicalArea,
+            peak: f1(det.peak),
+            faint: det.rejectedFaint,
+            small: det.rejectedSmall,
+            large: det.rejectedLarge,
+          })}${det.truncated ? T('value.blobs-stopped') : ''}`,
         ],
       ],
     });
-    const localNote: Output = { type: 'note', level: 'info', text: LOCAL };
+    const localNote: Output = { type: 'note', level: 'info', text: T('note.local') };
     const plainPicture = (): Output => ({
       type: 'image',
-      label: `Revealed region (${display.name})`,
+      label: T('label.revealed', { view: display.name }),
       image: poolLevel(display, rect, OVERLAY_MAX_SIDE),
       filename: 'printer-dots-reveal.png',
     });
@@ -402,10 +418,7 @@ export default defineTool({
 
     // ---------- 2. grid ----------
     const points = det.dots;
-    if (det.truncated)
-      return giveUp(
-        `Too many specks (over ${det.blobs}): the dot threshold is too low for this scan. Raise Dot threshold, or set a region around the dots.`,
-      );
+    if (det.truncated) return giveUp(T('error.too-many', { blobs: det.blobs }));
     if (points.length < 4 && !(allManual && manualOrigin))
       return giveUp(noDotsAdvice(o, sig, det, crop.whole));
 
@@ -428,9 +441,9 @@ export default defineTool({
         const est = allManual ? null : estimateBasis(points);
         if (!allManual && !est)
           return giveUp(
-            `Found ${plural(points.length, 'dot')} but they do not show a regular spacing to measure a grid from. ${
-              crop.whole ? 'Set a region around the dots, or' : 'Widen the region, or'
-            } turn on "Manual grid and column mapping" and set Pitch and Rotation.`,
+            T(crop.whole ? 'error.no-spacing-whole' : 'error.no-spacing-region', {
+              count: points.length,
+            }),
           );
         const params = {
           pitchX: manualPitchX ?? est?.pitchX ?? 0,
@@ -451,9 +464,7 @@ export default defineTool({
       inliers = fit.inliers;
       rms = fit.rms;
       if (points.length >= 10 && inliers < 0.6 * points.length)
-        warn(
-          `Only ${inliers} of ${points.length} dots sit on the fitted grid: the fit may be off. Set a region around the dots, or set the pitch and rotation by hand.`,
-        );
+        warn(T('warn.inliers', { inliers, n: points.length }));
     }
     const lp = latticeParams(lattice);
     const pitchMin = Math.min(lp.pitchX, lp.pitchY);
@@ -472,19 +483,19 @@ export default defineTool({
     const grid = sameGrid ? memo.grid : sampleGrid(lattice, rect, isDot, MAX_CELLS);
     if (!grid)
       return giveUp(
-        `A ${f2(lp.pitchX)} px pitch gives more than ${MAX_CELLS.toLocaleString('en')} cells in this region: set a larger pitch or a smaller region.`,
+        T('error.too-many-cells', { pitch: f2(lp.pitchX), max: MAX_CELLS.toLocaleString('en') }),
       );
     const fitEntries = (): [string, string][] => {
-      const manual = (m: boolean) => (m ? ' (manual)' : '');
+      const manual = (m: boolean) => (m ? T('value.manual') : '');
       return [
         [
-          'Pitch',
+          T('kv.pitch'),
           `${f2(lp.pitchX)} × ${f2(lp.pitchY)} px${manual(manualPitchX !== null || manualPitchY !== null)}`,
         ],
-        ['Rotation', `${f2(lp.rotation)}°${manual(rotation !== null)}`],
+        [T('kv.rotation'), `${f2(lp.rotation)}°${manual(rotation !== null)}`],
         [
-          'Dots',
-          `${points.length} detected${allManual && manualOrigin ? '' : `, ${inliers} on the grid (rms ${f2(rms)} cell)`}`,
+          T('kv.dots'),
+          `${T('value.dots-detected', { n: points.length })}${allManual && manualOrigin ? '' : T('value.dots-on-grid', { inliers, rms: f2(rms) })}`,
         ],
       ];
     };
@@ -511,8 +522,13 @@ export default defineTool({
           type: 'note',
           level: 'error',
           text: manualOrigin
-            ? `No ${tileCols} × ${tileRows} window fits inside the region at origin (${f1(manualOrigin.x)}, ${f1(manualOrigin.y)}) in the orientations tried. Move the origin or widen the region.`
-            : `The region holds no complete ${tileCols} × ${tileRows} window of the fitted grid (${grid.w} × ${grid.h} cells). Widen the region.`,
+            ? T('error.no-window-origin', {
+                cols: tileCols,
+                rows: tileRows,
+                x: f1(manualOrigin.x),
+                y: f1(manualOrigin.y),
+              })
+            : T('error.no-window', { cols: tileCols, rows: tileRows, gw: grid.w, gh: grid.h }),
         },
         ...notes,
         localNote,
@@ -613,8 +629,12 @@ export default defineTool({
           type: 'note',
           level: 'error',
           text: res.sparse
-            ? `No ${tileCols} × ${tileRows} window of the fitted grid holds enough dots to be a tile (at least ${Math.max(tileCols, tileRows) - 1}). Check the pitch, the origin and the dot threshold, or set a region around the dots.`
-            : `Every ${tileCols} × ${tileRows} window of the fitted grid is empty: no dot sits on a cell centre. Check the origin, the pitch and the dot threshold.`,
+            ? T('error.sparse', {
+                cols: tileCols,
+                rows: tileRows,
+                min: Math.max(tileCols, tileRows) - 1,
+              })
+            : T('error.empty-windows', { cols: tileCols, rows: tileRows }),
         },
         ...notes,
         localNote,
@@ -624,12 +644,13 @@ export default defineTool({
       ];
     const d = chosen.decoded;
     const copies = manualOrigin ? null : countCopies(grid, chosen.window, 3);
-    const triedText = autoOrientation ? 'tried all 8 orientations' : 'tried the chosen orientation';
+    const triedText = autoOrientation ? T('value.tried-all') : T('value.tried-chosen');
     const where = manualOrigin
-      ? 'at the given origin'
-      : `of ${plural(res.examined, 'window position')}`;
+      ? T('value.at-origin')
+      : T('value.of-positions', { count: res.examined });
     const topLeft = cellCenter(lattice, grid.i0 + chosen.hit.x, grid.j0 + chosen.hit.y);
-    const copiesText = copies && copies.exact > 1 ? `; ${copies.exact} identical copies` : '';
+    const copiesText = copies && copies.exact > 1 ? T('value.copies', { count: copies.exact }) : '';
+    const parityOf = T(odd ? 'value.parity-of.odd' : 'value.parity-of.even');
 
     // ---------- verdict ----------
     if (docu && d) {
@@ -637,38 +658,47 @@ export default defineTool({
         head.push({
           type: 'note',
           level: 'success',
-          text: `Parity OK — high confidence: every column and every row but the top one holds an ${odd ? 'odd' : 'even'} number of dots, the values are a valid date and serial, and ${outvoted.length ? 'every other reading that passes is outvoted ten to one' : 'no other reading passes'}${copiesText}.`,
+          text: T('note.sure', {
+            parity: T(odd ? 'value.dots-count.odd' : 'value.dots-count.even'),
+            others: outvoted.length ? T('value.others-outvoted') : T('value.no-other'),
+            copies: copiesText,
+          }),
         });
       } else if (status === 'ambiguous') {
         const second = credible[1]!;
         const why =
           chosen.separatorFull && !second.separatorFull
-            ? 'its column 10 is all dots, as the EFF describes the separator'
+            ? T('value.why-separator')
             : chosen.count > second.count
-              ? `it is seen most often (${plural(chosen.count, 'window')} against ${second.count})`
-              : 'it was found first';
+              ? T('value.why-most', { count: chosen.count, other: second.count })
+              : T('value.why-first');
         head.push({
           type: 'note',
           level: 'warn',
-          text: `Parity OK, but ${credible.length} different readings pass parity with valid values: the tile boundary or orientation is ambiguous (tiles printed edge to edge, a mirrored read, or two different tiles). Shown: the likeliest, because ${why}. This is not a certain reading — compare the candidates below.`,
+          text: T('note.ambiguous', { count: credible.length, why }),
         });
       } else if (status === 'implausible') {
         head.push({
           type: 'note',
           level: 'warn',
-          text: `Parity OK, but the values are not a real date or serial (${d.issues.join('; ')}): grid structure or a wrong column mapping, not a reading. Check the column mapping, the orientation and the dot threshold.`,
+          text: T('note.implausible', { issues: d.issues.join('; ') }),
         });
       } else {
         head.push({
           type: 'note',
           level: 'error',
-          text: `Parity FAILED in ${parityText(d.parity)} — ${triedText}; the reading is uncertain. What follows is the closest window ${where}: a best guess, not a reading.`,
+          text: T('note.failed', { bad: parityText(d.parity), tried: triedText, where }),
         });
         const guess = singleDotFix(chosen.tile, odd);
         const alt = guess ? decodeDocuColor(guess.matrix, mapping, odd) : null;
         if (guess && alt?.plausible)
           warn(
-            `One misread dot would explain it: with row ${guess.row}, column ${guess.col} flipped, parity passes and the tile reads ${printed(alt.fields)}, serial ${alt.fields.serial}. Check that cell on the picture — this is a hypothesis, not a reading.`,
+            T('warn.one-dot', {
+              row: guess.row,
+              col: guess.col,
+              printed: printed(alt.fields),
+              serial: alt.fields.serial,
+            }),
           );
       }
     } else {
@@ -677,8 +707,20 @@ export default defineTool({
         type: 'note',
         level: passed ? 'info' : 'error',
         text: passed
-          ? `${passGroups.length > 1 ? `${passGroups.length} different ${tileCols} × ${tileRows} windows pass` : `A ${tileCols} × ${tileRows} window passes`} ${odd ? 'odd' : 'even'} parity on every column and every row but the top one${copiesText}. Without the DocuColor 15 × 8 layout this is structure only: the bits are shown, not decoded.`
-          : `No ${tileCols} × ${tileRows} window passes ${odd ? 'odd' : 'even'} parity (${triedText}); the closest ${where} is shown.`,
+          ? T(passGroups.length > 1 ? 'note.structure-many' : 'note.structure-one', {
+              count: passGroups.length,
+              cols: tileCols,
+              rows: tileRows,
+              parity: parityOf,
+              copies: copiesText,
+            })
+          : T('note.structure-none', {
+              cols: tileCols,
+              rows: tileRows,
+              parity: parityOf,
+              tried: triedText,
+              where,
+            }),
       });
     }
     if (outvoted.length && (status === 'sure' || status === 'ambiguous')) {
@@ -686,17 +728,24 @@ export default defineTool({
       notes.push({
         type: 'note',
         level: 'info',
-        text: `${plural(outvoted.length, 'other reading')} also ${outvoted.length === 1 ? 'passes' : 'pass'} parity, but in very few windows (e.g. ${printed(o0.decoded!.fields)}, serial ${o0.decoded!.fields.serial}: ${plural(o0.count, 'window')} against ${chosen.count}): misread copies, outvoted at least ${VOTE} to 1.`,
+        text: T('note.outvoted', {
+          count: outvoted.length,
+          printed: printed(o0.decoded!.fields),
+          serial: o0.decoded!.fields.serial,
+          windows: T('value.windows', { count: o0.count }),
+          chosen: chosen.count,
+          vote: VOTE,
+        }),
       });
     }
     if (rescued)
       warn(
-        `${plural(passGroups.length, 'other window')} ${passGroups.length === 1 ? 'passes' : 'pass'} parity but read${passGroups.length === 1 ? 's' : ''} impossible values (e.g. ${passGroups[0]!.decoded!.issues[0]}): grid structure, not a tile. The window shown fails parity but is one dot away from a valid reading.`,
+        T('warn.rescued', {
+          count: passGroups.length,
+          issue: String(passGroups[0]!.decoded!.issues[0]),
+        }),
       );
-    if (res.truncated)
-      warn(
-        `More than ${res.passing.length} windows pass parity: the grid or the threshold is probably wrong.`,
-      );
+    if (res.truncated) warn(T('warn.too-many-passing', { n: res.passing.length }));
     const maker = d ? makerNote(d) : null;
     if (maker) notes.push(maker);
     const custom = docu ? mappingNote(mapping) : null;
@@ -706,16 +755,21 @@ export default defineTool({
     if (docu && d) {
       const suffix = {
         sure: '',
-        ambiguous: ' (ambiguous)',
-        implausible: ' (not plausible)',
-        failed: ' (guess — parity failed)',
+        ambiguous: T('value.suffix-ambiguous'),
+        implausible: T('value.suffix-implausible'),
+        failed: T('value.suffix-guess'),
       }[status];
       head.push({
         type: 'kv',
         entries: [
-          ['Printed', `${dateText(d)}${suffix}`],
-          ['Serial', `${serialText(d)}${suffix}`],
-          ['Parity', d.parity.ok ? 'OK' : `FAILED (${parityText(d.parity)})`],
+          [T('kv.printed'), `${dateText(d)}${suffix}`],
+          [T('kv.serial'), `${serialText(d)}${suffix}`],
+          [
+            T('kv.parity'),
+            d.parity.ok
+              ? T('value.parity-ok')
+              : T('value.parity-failed', { bad: parityText(d.parity) }),
+          ],
         ],
       });
     }
@@ -758,59 +812,73 @@ export default defineTool({
     // ---------- details ----------
     const details: [string, string][] = [
       [
-        'Orientation',
-        `${describeOrientation(shape.orientation)} (${autoOrientation ? 'auto' : 'forced'})`,
+        T('kv.orientation'),
+        `${orientationText(shape.orientation)} (${autoOrientation ? T('value.auto') : T('value.forced')})`,
       ],
       ...fitEntries(),
       [
-        'Origin',
-        `(${f1(topLeft.x)}, ${f1(topLeft.y)}) = centre of the tile’s top-left cell as seen${manualOrigin ? ' (manual)' : ''}`,
+        T('kv.origin'),
+        `${T('value.origin', { x: f1(topLeft.x), y: f1(topLeft.y) })}${manualOrigin ? T('value.manual') : ''}`,
       ],
     ];
     if (copies)
       details.push([
-        'Tile copies',
-        `${copies.exact} identical${copies.near ? `, ${copies.near} more with 1–3 differing dots (misprints or misreads)` : ''}`,
+        T('kv.copies'),
+        `${T('value.identical', { n: copies.exact })}${copies.near ? T('value.near-copies', { n: copies.near }) : ''}`,
       ]);
 
     const out: Output[] = [...head, ...notes, localNote, ...overlay.blocks];
-    out.push({ type: 'kv', label: 'Grid fit', entries: details });
+    out.push({ type: 'kv', label: T('label.grid-fit'), entries: details });
 
     // ---------- tables ----------
     if (docu && d) out.push(columnTable(d, mapping));
     if (docu && valid.length > 1)
       out.push({
         type: 'table',
-        label: `Readings that pass parity with valid values (${valid.length})`,
-        columns: ['Printed', 'Serial', 'Windows', 'Col 10 full', 'Orientation'],
+        label: T('label.readings', { n: valid.length }),
+        columns: [
+          T('col.printed'),
+          T('col.serial'),
+          T('col.windows'),
+          T('col.col10'),
+          T('col.orientation'),
+        ],
         rows: [...credible, ...outvoted]
           .slice(0, 12)
           .map((g) => [
             printed(g.decoded!.fields),
             g.decoded!.fields.serial,
             g.count,
-            g.separatorFull ? 'yes' : 'no',
+            g.separatorFull ? T('value.yes') : T('value.no'),
             shortOrientation(g.shape.orientation),
           ]),
         highlight: [0],
       });
     const perOrientation = shapes.map((s, k) => {
       const name = shortOrientation(s.orientation);
-      if (!allowed[k]) return [name, 'not tried', '', '', '', ''];
+      if (!allowed[k]) return [name, T('value.not-tried'), '', '', '', ''];
       const own =
         passGroups.find((g) => g.hit.shape === k) ??
         (valid.length ? undefined : nearGroups().find((g) => g.hit.shape === k));
       const hit = (chosen.hit.shape === k ? chosen : own)?.hit ?? res.perShape[k];
-      if (!hit) return [name, 'no window', '', '', '', ''];
+      if (!hit) return [name, T('value.no-window'), '', '', '', ''];
       const tile = orient(windowCells(grid, hit.x, hit.y, s.h, s.w), s.orientation);
       const p = cellCenter(lattice, grid.i0 + hit.x, grid.j0 + hit.y);
       const pos = `${Math.round(p.x)},${Math.round(p.y)}`;
-      if (!docu) return [name, hit.errors ? `FAIL ×${hit.errors}` : 'OK', '', '', '', pos];
+      if (!docu)
+        return [
+          name,
+          hit.errors ? T('value.fail-times', { n: hit.errors }) : T('value.cell-ok'),
+          '',
+          '',
+          '',
+          pos,
+        ];
       const td = decodeDocuColor(tile, mapping, odd);
       return [
         name,
         parityCell(td.parity),
-        td.plausible ? 'yes' : 'no',
+        td.plausible ? T('value.yes') : T('value.no'),
         dateText(td),
         serialText(td),
         pos,
@@ -818,14 +886,21 @@ export default defineTool({
     });
     out.push({
       type: 'table',
-      label: `Orientations tried (best window of each; ${plural(res.examined, 'window position')} searched)`,
-      columns: ['Orientation', 'Parity', 'Valid', 'Printed', 'Serial', 'At (px)'],
+      label: T('label.orientations', { count: res.examined }),
+      columns: [
+        T('col.orientation'),
+        T('col.parity'),
+        T('col.valid'),
+        T('col.printed'),
+        T('col.serial'),
+        T('col.at'),
+      ],
       rows: perOrientation,
       highlight: [chosen.hit.shape],
     });
     out.push({
       type: 'text',
-      label: `Tile as read (● dot, · none; row 1 and column 1 are parity)${docu ? ' — pipe it to “Printer dots — DocuColor matrix”' : ''}`,
+      label: `${T('label.tile')}${docu ? T('label.tile-pipe') : ''}`,
       value: matrixToText(chosen.tile),
     });
     out.push(statsBlock());
@@ -860,12 +935,12 @@ function makeDisplay(
       const level = Math.round(255 * t);
       lut[c] = o.invert ? level : 255 - level;
     }
-    return { source: det.contrast, lut, dotsBright: o.invert, name: 'dots, paper removed' };
+    return { source: det.contrast, lut, dotsBright: o.invert, name: T('value.view-dots') };
   }
   const stretch = o.stretch === 'dots' ? 'auto' : o.stretch;
   const lut = buildLut(sig.hist, { invert: o.invert, stretch, gain, gamma, threshold: 0 });
-  const name = `${sig.inkOnly ? 'colour ink' : 'channel'}, ${stretch === 'auto' ? 'auto stretch' : stretch}${
-    o.stretch === 'dots' ? ' — no dots to scale the dots view' : ''
+  const name = `${sig.inkOnly ? T('value.view-ink') : T('value.view-channel')}, ${T(`value.view-stretch.${stretch}`)}${
+    o.stretch === 'dots' ? T('value.view-no-dots') : ''
   }`;
   return { source: sig.raw, lut, dotsBright: sig.darkDots === o.invert, name };
 }
@@ -878,20 +953,20 @@ function noDotsAdvice(
   whole: boolean,
 ): string {
   const tips: string[] = [];
-  if (o.channel !== 'b' && o.channel !== 'y')
-    tips.push('yellow dots only show in the Blue or Yellow channel');
-  else if (!sig.inkOnly) tips.push('turn on Colour ink only (drops text and shading)');
-  if (!det.auto) tips.push(`lower Dot threshold (now ${det.threshold}), or 0 for automatic`);
-  else if (det.rejectedLarge > det.dots.length)
+  // Whether a tip already says to set a region (the large-blobs one does).
+  let regionTip = false;
+  if (o.channel !== 'b' && o.channel !== 'y') tips.push(T('tip.channel'));
+  else if (!sig.inkOnly) tips.push(T('tip.ink-only'));
+  if (!det.auto) tips.push(T('tip.lower-threshold', { t: det.threshold }));
+  else if (det.rejectedLarge > det.dots.length) {
+    tips.push(T('tip.large-blobs', { count: det.rejectedLarge }));
+    regionTip = true;
+  } else
     tips.push(
-      `${plural(det.rejectedLarge, 'blob was', 'blobs were')} too large or elongated to be dots (text, logos, colour areas): set a region around the dots`,
+      T('tip.fainter', { t: det.threshold, try: Math.max(1, Math.ceil(det.threshold / 2)) }),
     );
-  else
-    tips.push(
-      `dots fainter than ${det.threshold} levels above the paper are missed: try a Dot threshold of ${Math.max(1, Math.ceil(det.threshold / 2))}`,
-    );
-  if (whole && !tips.some((t) => t.includes('region'))) tips.push('set a region around the dots');
-  return `No tracking dots found in the region (${plural(det.dots.length, 'dot-sized blob')}; contrast threshold ${det.threshold}). Try: ${tips.join('; ')}.`;
+  if (whole && !regionTip) tips.push(T('tip.region'));
+  return T('error.no-dots', { count: det.dots.length, t: det.threshold, tips: tips.join('; ') });
 }
 
 /** The fit picture: a view around the tile window (or the whole region when it is small). */
@@ -935,19 +1010,19 @@ function overlayBlock(
     blocks.push({
       type: 'note',
       level: 'warn',
-      text: `Zoom lowered from ×${wanted} to ×${zoom} to keep the fit picture under ${OVERLAY_MAX_SIDE} px; set a smaller region to zoom further.`,
+      text: T('warn.zoom-lowered', { asked: wanted, used: zoom, max: OVERLAY_MAX_SIDE }),
     });
   let image: RgbaImage;
   let label: string;
   if (Math.max(view.w, view.h) > OVERLAY_MAX_SIDE) {
     // Too big to draw cell by cell: the revealed region reduced, keeping the dots, no grid.
     image = poolLevel(display, rect, OVERLAY_MAX_SIDE);
-    label = `Revealed region reduced to ${image.width}×${image.height} (the grid is too fine to draw at this size; set a region to see it)`;
+    label = T('label.reduced', { w: image.width, h: image.height });
   } else {
     image = renderOverlay({ display, rect, view, zoom, lattice, grid, window: win, labels });
     label = win
-      ? `Fit (×${zoom}): cyan = tile window, green ring = dot, orange = empty, blue = parity row and column${win.badRows.length || win.badCols.length ? ', red = parity failure' : ''}; numbers = tile rows and columns`
-      : `Fitted grid (×${zoom})`;
+      ? T(win.badRows.length || win.badCols.length ? 'label.fit-bad' : 'label.fit', { zoom })
+      : T('label.fitted', { zoom });
   }
   blocks.push({ type: 'image', label, image, filename: 'printer-dots-fit.png' });
   return { blocks };

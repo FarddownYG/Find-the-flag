@@ -1,6 +1,9 @@
 import { DEFAULT_FLAG_PATTERN, findFlags, KNOWN_PREFIX } from '../../core/flags';
+import { toolT } from '../../i18n/tool-text';
 import { fromBase64, fromHex, isValidUtf8, utf8Decode } from '../../lib/bytes';
 import type { ImageMeta, MetaRow } from './_image-analyzer-meta';
+
+const T = toolT('image-analyzer');
 
 /** Findings, one line per label: a second value for the same label joins the first. */
 export class Findings {
@@ -23,10 +26,13 @@ export const oneLine = (s: string, max = 160) => {
 
 type Source = [group: string, tag: RegExp, name: string];
 
-/** CTF-relevant text fields, grouped so that the same value from EXIF, XMP and IPTC is one line. */
-const TEXT_FINDINGS: { label: string; sources: Source[] }[] = [
+/**
+ * CTF-relevant text fields, grouped so that the same value from EXIF, XMP and IPTC is one line.
+ * `key`: the Findings label, tool.image-analyzer.finding.<key>.
+ */
+const TEXT_FINDINGS: { key: string; sources: Source[] }[] = [
   {
-    label: 'Description',
+    key: 'description',
     sources: [
       ['IFD0', /^ImageDescription$/, 'EXIF'],
       ['XMP', /^dc:description$/, 'XMP'],
@@ -36,7 +42,7 @@ const TEXT_FINDINGS: { label: string; sources: Source[] }[] = [
     ],
   },
   {
-    label: 'User comment',
+    key: 'user-comment',
     sources: [
       ['ExifIFD', /^UserComment$/, 'EXIF'],
       ['IFD0', /^XPComment$/, 'Windows'],
@@ -45,7 +51,7 @@ const TEXT_FINDINGS: { label: string; sources: Source[] }[] = [
     ],
   },
   {
-    label: 'Title',
+    key: 'title',
     sources: [
       ['IFD0', /^(XPTitle|XPSubject|DocumentName)$/, 'EXIF'],
       ['XMP', /^(dc:title|photoshop:Headline)$/, 'XMP'],
@@ -54,7 +60,7 @@ const TEXT_FINDINGS: { label: string; sources: Source[] }[] = [
     ],
   },
   {
-    label: 'Author / artist',
+    key: 'author',
     sources: [
       ['IFD0', /^(Artist|XPAuthor)$/, 'EXIF'],
       ['XMP', /^(dc:creator|tiff:Artist)$/, 'XMP'],
@@ -63,7 +69,7 @@ const TEXT_FINDINGS: { label: string; sources: Source[] }[] = [
     ],
   },
   {
-    label: 'Camera owner',
+    key: 'camera-owner',
     sources: [
       ['ExifIFD', /^(OwnerName|CameraOwnerName)$/, 'EXIF'],
       ['IFD0', /^(OwnerName|CameraOwnerName)$/, 'EXIF'],
@@ -71,14 +77,14 @@ const TEXT_FINDINGS: { label: string; sources: Source[] }[] = [
     ],
   },
   {
-    label: 'Serial number',
+    key: 'serial',
     sources: [
       ['ExifIFD', /^(SerialNumber|BodySerialNumber|LensSerialNumber)$/, 'EXIF'],
       ['XMP', /^\w+:(SerialNumber|BodySerialNumber)$/, 'XMP'],
     ],
   },
   {
-    label: 'Copyright',
+    key: 'copyright',
     sources: [
       ['IFD0', /^Copyright$/, 'EXIF'],
       ['XMP', /^dc:rights$/, 'XMP'],
@@ -87,7 +93,7 @@ const TEXT_FINDINGS: { label: string; sources: Source[] }[] = [
     ],
   },
   {
-    label: 'Software',
+    key: 'software',
     sources: [
       ['IFD0', /^(Software|ProcessingSoftware|HostComputer)$/, 'EXIF'],
       ['XMP', /^xmp:CreatorTool$/, 'XMP'],
@@ -95,7 +101,7 @@ const TEXT_FINDINGS: { label: string; sources: Source[] }[] = [
     ],
   },
   {
-    label: 'Keywords',
+    key: 'keywords',
     sources: [
       ['IPTC', /^Keywords$/, 'IPTC'],
       ['XMP', /^dc:subject$/, 'XMP'],
@@ -103,7 +109,7 @@ const TEXT_FINDINGS: { label: string; sources: Source[] }[] = [
     ],
   },
   {
-    label: 'Place names',
+    key: 'place-names',
     sources: [
       [
         'IPTC',
@@ -114,20 +120,20 @@ const TEXT_FINDINGS: { label: string; sources: Source[] }[] = [
     ],
   },
   {
-    label: 'Instructions',
+    key: 'instructions',
     sources: [
       ['IPTC', /^SpecialInstructions$/, 'IPTC'],
       ['XMP', /^photoshop:Instructions$/, 'XMP'],
     ],
   },
   {
-    label: 'ICC profile text',
+    key: 'icc-text',
     sources: [
       ['ICC', /^(ProfileDescription|ProfileCopyright|DeviceMfgDesc|DeviceModelDesc)$/, 'ICC'],
     ],
   },
-  { label: 'JPEG comment', sources: [['JPEG comment', /./, 'COM']] },
-  { label: 'GIF comment', sources: [['GIF comment', /./, 'GIF']] },
+  { key: 'jpeg-comment', sources: [['JPEG comment', /./, 'COM']] },
+  { key: 'gif-comment', sources: [['GIF comment', /./, 'GIF']] },
 ];
 
 /** XMP namespaces that hold technical data; anything else (custom namespaces) is free text. */
@@ -200,8 +206,8 @@ export function textFindings(rows: MetaRow[], f: Findings): TextHit[] {
     const value = [...byValue].map(([v, s]) => `${v} (${s.join(', ')})`).join(' | ');
     f.add(label, oneLine(value, 240));
   };
-  for (const { label, sources } of TEXT_FINDINGS) {
-    if (label === 'ICC profile text' && (standardIcc || iccDesc === undefined)) continue;
+  for (const { key, sources } of TEXT_FINDINGS) {
+    if (key === 'icc-text' && (standardIcc || iccDesc === undefined)) continue;
     const found: { row: MetaRow; source: string }[] = [];
     for (const row of rows) {
       const src = sources.find(([g, re]) => g === row.group && re.test(row.tag));
@@ -210,12 +216,14 @@ export function textFindings(rows: MetaRow[], f: Findings): TextHit[] {
         used.add(row);
       }
     }
-    add(label, found);
+    add(T(`finding.${key}`), found);
   }
   for (const row of rows) {
     if (used.has(row) || !meaningful(row.value)) continue;
     if (row.group === 'PNG text')
-      add(`PNG text "${row.tag.replace(/^\w+ /, '')}"`, [{ row, source: row.tag.split(' ')[0]! }]);
+      add(T('finding.png-text', { name: row.tag.replace(/^\w+ /, '') }), [
+        { row, source: row.tag.split(' ')[0]! },
+      ]);
     if (row.group === 'XMP' && !TECHNICAL_XMP.has(row.tag.split(':')[0]!)) {
       add(`XMP ${row.tag}`, [{ row, source: 'XMP' }]);
     }
@@ -239,7 +247,12 @@ export function cameraAndDate(meta: ImageMeta, f: Findings): void {
     make && model && model.toLowerCase().startsWith(make.toLowerCase().split(' ')[0]!)
       ? model
       : [make, model].filter(Boolean).join(' ');
-  if (body || lens) f.add('Camera', [body, lens ? `lens ${lens}` : ''].filter(Boolean).join(', '));
+  if (body || lens) {
+    f.add(
+      T('finding.camera'),
+      [body, lens ? T('finding.lens', { lens }) : ''].filter(Boolean).join(', '),
+    );
+  }
 
   const dates: [unknown, unknown, string][] = [
     [exif.DateTimeOriginal, exif.OffsetTimeOriginal, 'DateTimeOriginal'],
@@ -253,7 +266,7 @@ export function cameraAndDate(meta: ImageMeta, f: Findings): void {
     const d = str(date);
     if (!d || /^[0\s:.-]+$/.test(d)) continue;
     const o = str(offset);
-    f.add('Taken', `${d}${o ? ` ${o}` : ''} (${tag})`);
+    f.add(T('finding.taken'), `${d}${o ? ` ${o}` : ''} (${tag})`);
     break;
   }
 }

@@ -1,3 +1,4 @@
+import { toolT } from '../../i18n/tool-text';
 import { isValidUtf8, latin1Decode, latin1Encode, u16be, utf8Decode } from '../../lib/bytes';
 import {
   bytesOfLike,
@@ -17,6 +18,8 @@ import {
 import type { Layout } from './_image-analyzer-layout';
 import { isSof, jpegComments } from './_jpeg';
 import { pngTexts, pngTime } from './_png';
+
+const T = toolT('image-analyzer');
 
 /** One line of the flat metadata table. */
 export interface MetaRow {
@@ -183,6 +186,8 @@ const firstNumber = (v: unknown): number | null => {
 };
 
 const NORTH_REF: Record<string, string> = { T: 'true north', M: 'magnetic north' };
+/** The same, for GPS details: tool.image-analyzer.gps.north.<key>. */
+const NORTH_KEY: Record<string, string> = { T: 'true', M: 'magnetic' };
 const SPEED_REF: Record<string, string> = { K: 'km/h', M: 'mph', N: 'knots' };
 const COMPRESSION: Record<number, string> = {
   1: 'uncompressed',
@@ -331,7 +336,7 @@ const hex = (n: number) => `0x${n.toString(16)}`;
 function findTiffBlocks(bytes: Uint8Array, s: Structure): { where: string; offset: number }[] {
   const out: { where: string; offset: number }[] = [];
   if (s.sig?.id === 'tiff-le' || s.sig?.id === 'tiff-be')
-    return [{ where: 'the TIFF file', offset: 0 }];
+    return [{ where: T('where.tiff-file'), offset: 0 }];
   const withHeader = (at: number) =>
     latin1Decode(bytes.subarray(at, at + 6)) === 'Exif\0\0' ? at + 6 : at;
   for (const seg of s.jpeg?.segments ?? []) {
@@ -340,15 +345,21 @@ function findTiffBlocks(bytes: Uint8Array, s: Structure): { where: string; offse
       latin1Decode(bytes.subarray(seg.dataStart, seg.dataStart + 4)) !== 'Exif'
     )
       continue;
-    out.push({ where: `APP1 at ${hex(seg.offset)}`, offset: seg.dataStart + 6 });
+    out.push({ where: T('where.app1-at', { offset: hex(seg.offset) }), offset: seg.dataStart + 6 });
   }
   for (const c of s.png?.chunks ?? []) {
     if (c.type === 'eXIf')
-      out.push({ where: `eXIf chunk at ${hex(c.offset)}`, offset: withHeader(c.dataStart) });
+      out.push({
+        where: T('where.png-exif-at', { offset: hex(c.offset) }),
+        offset: withHeader(c.dataStart),
+      });
   }
   for (const c of s.riff) {
     if (c.id === 'EXIF')
-      out.push({ where: `EXIF chunk at ${hex(c.offset)}`, offset: withHeader(c.dataStart) });
+      out.push({
+        where: T('where.webp-exif-at', { offset: hex(c.offset) }),
+        offset: withHeader(c.dataStart),
+      });
   }
   return out;
 }
@@ -371,8 +382,8 @@ function readBlocks(bytes: Uint8Array, s: Structure): ExifBlock[] {
     if (!read) {
       const problem =
         t.length < 4
-          ? `the EXIF block (${where}) is cut before its TIFF header.`
-          : `the EXIF block (${where}) does not start with a TIFF header (II*\\0 or MM\\0*).`;
+          ? T('problem.cut-before-tiff', { where })
+          : T('problem.no-tiff-header', { where });
       out.push({ where, offset, groups: {}, problems: [problem], thumbnail: null });
       continue;
     }
@@ -488,8 +499,8 @@ export async function readMetadata(
 
   const rows: MetaRow[] = [];
   const dims = dimensions(bytes, structure, exif);
-  rows.push({ group: 'File', tag: 'Type', value: file.type ?? 'unknown' });
-  rows.push({ group: 'File', tag: 'Size', value: `${file.size} bytes` });
+  rows.push({ group: 'File', tag: 'Type', value: file.type ?? T('value.unknown') });
+  rows.push({ group: 'File', tag: 'Size', value: T('value.bytes', { count: file.size }) });
   if (dims) rows.push({ group: 'File', tag: 'Dimensions', value: dims });
 
   for (const [name, value] of Object.entries(exif)) {
@@ -635,77 +646,87 @@ export function readGps(meta: ImageMeta): GpsInfo | null {
         : (meta.blocks.find((_, i) => primary.source === `EXIF #${i + 1} GPS IFD`)?.groups.gps ??
           {});
   const details: [string, string][] = [
-    ['Latitude', primary.lat.toFixed(6)],
-    ['Longitude', primary.lon.toFixed(6)],
+    [T('gps.latitude'), primary.lat.toFixed(6)],
+    [T('gps.longitude'), primary.lon.toFixed(6)],
   ];
   const rawLat =
     dmsText(src.GPSLatitude) ?? (typeof src.GPSLatitude === 'string' ? src.GPSLatitude : null);
   const rawLon =
     dmsText(src.GPSLongitude) ?? (typeof src.GPSLongitude === 'string' ? src.GPSLongitude : null);
   const ref = (v: unknown) => (typeof v === 'string' && v ? ` ${v}` : '');
-  if (rawLat) details.push(['Raw latitude', `${rawLat}${ref(src.GPSLatitudeRef)}`]);
-  if (rawLon) details.push(['Raw longitude', `${rawLon}${ref(src.GPSLongitudeRef)}`]);
+  if (rawLat) details.push([T('gps.raw-latitude'), `${rawLat}${ref(src.GPSLatitudeRef)}`]);
+  if (rawLon) details.push([T('gps.raw-longitude'), `${rawLon}${ref(src.GPSLongitudeRef)}`]);
   for (const missing of primary.missingRefs) {
     const isLat = missing === 'GPSLatitudeRef';
     const v = isLat ? primary.lat : primary.lon;
     details.push([
-      'Hemisphere',
-      `unknown: ${missing} is missing, so the ${isLat ? 'latitude' : 'longitude'} is ${fmtNum(Math.abs(v))} ${isLat ? 'N or S' : 'E or W'} (${isLat ? 'N' : 'E'} assumed; it could be ${(-Math.abs(v)).toFixed(6)})`,
+      T('gps.hemisphere'),
+      T(isLat ? 'gps.hemisphere-lat' : 'gps.hemisphere-lon', {
+        ref: missing,
+        abs: fmtNum(Math.abs(v)),
+        neg: (-Math.abs(v)).toFixed(6),
+      }),
     ]);
   }
-  details.push(['Source', primary.source]);
+  details.push([T('gps.source'), primary.source]);
 
   const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
   const alt = num(src.GPSAltitude);
   if (alt !== null) {
     const below = firstNumber(src.GPSAltitudeRef) === 1;
-    details.push(['Altitude', `${fmtNum(alt)} m ${below ? 'below' : 'above'} sea level`]);
+    details.push([
+      T('gps.altitude'),
+      T(below ? 'gps.below-sea' : 'gps.above-sea', { alt: fmtNum(alt) }),
+    ]);
   }
   const bearing = (value: unknown, refValue: unknown) => {
     const n = num(value);
     if (n === null) return null;
-    const r = typeof refValue === 'string' ? NORTH_REF[refValue] : undefined;
-    return `${fmtNum(n)}°${r ? ` (${r})` : ''}`;
+    const r = typeof refValue === 'string' ? NORTH_KEY[refValue] : undefined;
+    return `${fmtNum(n)}°${r ? ` (${T(`gps.north.${r}`)})` : ''}`;
   };
   const dir = bearing(src.GPSImgDirection, src.GPSImgDirectionRef);
-  if (dir) details.push(['Direction', dir]);
+  if (dir) details.push([T('gps.direction'), dir]);
   const track = bearing(src.GPSTrack, src.GPSTrackRef);
-  if (track) details.push(['Track (movement)', track]);
+  if (track) details.push([T('gps.track'), track]);
   const speed = num(src.GPSSpeed);
   if (speed !== null) {
-    const unit = typeof src.GPSSpeedRef === 'string' ? (SPEED_REF[src.GPSSpeedRef] ?? '') : '';
-    details.push(['Speed', `${fmtNum(speed)}${unit ? ` ${unit}` : ''}`]);
+    const unit =
+      typeof src.GPSSpeedRef === 'string' && SPEED_REF[src.GPSSpeedRef]
+        ? T(`gps.speed-unit.${src.GPSSpeedRef}`)
+        : '';
+    details.push([T('gps.speed'), `${fmtNum(speed)}${unit ? ` ${unit}` : ''}`]);
   }
   const date = typeof src.GPSDateStamp === 'string' ? src.GPSDateStamp.replace(/:/g, '-') : null;
   const time = timeText(src.GPSTimeStamp);
   if (date || time) {
     details.push([
-      'GPS date/time',
+      T('gps.datetime'),
       `${[date, time].filter(Boolean).join(' ')}${time ? ' UTC' : ''}`,
     ]);
   }
   if (typeof src.GPSMapDatum === 'string' && src.GPSMapDatum)
-    details.push(['Map datum', src.GPSMapDatum]);
+    details.push([T('gps.map-datum'), src.GPSMapDatum]);
   if (typeof src.GPSSatellites === 'string' && src.GPSSatellites) {
-    details.push(['Satellites', src.GPSSatellites]);
+    details.push([T('gps.satellites'), src.GPSSatellites]);
   }
   const hErr = num(src.GPSHPositioningError);
-  if (hErr !== null) details.push(['Horizontal error', `${fmtNum(hErr)} m`]);
+  if (hErr !== null) details.push([T('gps.horizontal-error'), `${fmtNum(hErr)} m`]);
   const dop = num(src.GPSDOP);
-  if (dop !== null) details.push(['Dilution of precision', fmtNum(dop)]);
-  for (const [tag, label] of [
-    ['GPSProcessingMethod', 'Processing method'],
-    ['GPSAreaInformation', 'Area information'],
+  if (dop !== null) details.push([T('gps.dop'), fmtNum(dop)]);
+  for (const [tag, key] of [
+    ['GPSProcessingMethod', 'gps.processing-method'],
+    ['GPSAreaInformation', 'gps.area-information'],
   ] as const) {
     if (src[tag] !== undefined) {
       const text = typeof src[tag] === 'string' ? src[tag] : formatValue('gps', tag, src[tag]);
-      if (text) details.push([label, text]);
+      if (text) details.push([T(key), text]);
     }
   }
   const dLat = toDecimal(src.GPSDestLatitude, src.GPSDestLatitudeRef);
   const dLon = toDecimal(src.GPSDestLongitude, src.GPSDestLongitudeRef);
   if (dLat && dLon) {
-    details.push(['Destination', `${dLat.value.toFixed(6)}, ${dLon.value.toFixed(6)}`]);
+    details.push([T('gps.destination'), `${dLat.value.toFixed(6)}, ${dLon.value.toFixed(6)}`]);
   }
   return { ...primary, valid: primary.problem === null, details, others };
 }

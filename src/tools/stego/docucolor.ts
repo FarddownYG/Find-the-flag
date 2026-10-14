@@ -1,6 +1,7 @@
 import { bool, defineTool, select, toggle } from '../../core/define';
 import { ToolError } from '../../core/errors';
 import type { Output } from '../../core/types';
+import { toolT } from '../../i18n/tool-text';
 import {
   COLS,
   ROWS,
@@ -8,11 +9,12 @@ import {
   bestOrientations,
   centuryText,
   decodeDocuColor,
-  describeOrientation,
   encodeDocuColor,
+  fieldLabel,
   mappedColumns,
   matrixToText,
   orientationKey,
+  orientationText,
   parityCheck,
   parseMatrixText,
   renderMatrix,
@@ -40,8 +42,7 @@ import {
 // (https://w2.eff.org/Privacy/printers/docucolor/) and DEDA (https://github.com/dfd-tud/deda).
 // Details and the reasoning behind the parity rule are in _docucolor.ts.
 
-const ENCODE_HELP =
-  'To encode, write the date and time as YYYY-MM-DD HH:MM, then the serial digits, e.g. "2024-03-14 15:09 12345678".';
+const T = toolT('docucolor');
 
 /**
  * Encode input: 'YYYY-MM-DD HH:MM' (or with a T) and optional serial digits, in any order; the
@@ -50,12 +51,16 @@ const ENCODE_HELP =
  */
 function parseEncodeInput(s: string): DocuFields {
   const m = /(\d{4})-(\d{1,2})-(\d{1,2})[ T]+(\d{1,2}):(\d{1,2})/.exec(s);
-  if (!m) throw new ToolError(`${ENCODE_HELP} Got "${s.trim().slice(0, 40)}".`);
+  if (!m) {
+    throw new ToolError(
+      `${T('error.encode-help')} ${T('error.encode-got', { got: s.trim().slice(0, 40) })}`,
+    );
+  }
   const rest = `${s.slice(0, m.index)} ${s.slice(m.index + m[0].length)}`
     .replace(/printed|serial|:/gi, ' ')
     .trim();
   if (!/^[\d\s-]*$/.test(rest))
-    throw new ToolError(`The serial number must be digits; got "${rest.slice(0, 40)}".`);
+    throw new ToolError(T('error.serial-not-digits', { got: rest.slice(0, 40) }));
   const when = m[0];
   const [year, month, day, hour, minute] = m.slice(1).map(Number) as [
     number,
@@ -66,8 +71,8 @@ function parseEncodeInput(s: string): DocuFields {
   ];
   const real = new Date(Date.UTC(year, month - 1, day));
   if (month < 1 || month > 12 || real.getUTCDate() !== day || real.getUTCMonth() !== month - 1)
-    throw new ToolError(`${when} is not a calendar date.`);
-  if (hour > 23 || minute > 59) throw new ToolError(`${when} is not a time of day.`);
+    throw new ToolError(T('error.not-a-date', { when }));
+  if (hour > 23 || minute > 59) throw new ToolError(T('error.not-a-time', { when }));
   return { year, month, day, hour, minute, serial: rest.replace(/[\s-]/g, '') };
 }
 
@@ -195,7 +200,7 @@ export default defineTool({
     return {
       score: /[●·]/.test(text) ? 0.85 : 0.55,
       options: { mode: 'decode' },
-      reason: `${lines.length} rows of ${width} dots: a DocuColor tracking tile`,
+      reason: T('detect.tile', { rows: lines.length, cols: width }),
     };
   },
   run(input, o) {
@@ -204,12 +209,12 @@ export default defineTool({
     const odd = o.parity === 'odd';
 
     if (o.mode === 'encode') {
-      if (!input.trim()) throw new ToolError(ENCODE_HELP);
+      if (!input.trim()) throw new ToolError(T('error.encode-help'));
       const fields = parseEncodeInput(input);
       const [first, last] = yearRange(mapping.century);
       if (fields.year < first || fields.year > last)
         throw new ToolError(
-          `The year column holds two digits: with the century set to ${centuryText(mapping.century)} the year must be ${first}-${last}. Change Century for other years.`,
+          T('error.year-range', { century: centuryText(mapping.century), first, last }),
         );
       const out: Output[] = [];
       const extras: Partial<Record<number, number>> = {};
@@ -218,7 +223,10 @@ export default defineTool({
         out.push({
           type: 'note',
           level: 'warn',
-          text: `Column ${SEPARATOR_COLUMN} is mapped to the ${mapped.get(SEPARATOR_COLUMN)}, so it is not filled as a separator.`,
+          text: T('note.separator-mapped', {
+            col: SEPARATOR_COLUMN,
+            field: fieldLabel(mapped.get(SEPARATOR_COLUMN)!),
+          }),
         });
       const m = encodeDocuColor(fields, mapping, extras, odd);
       const back = decodeDocuColor(m, mapping, odd);
@@ -229,30 +237,37 @@ export default defineTool({
           ? {
               type: 'note',
               level: 'success',
-              text: `Round trip OK: the tile decodes back to ${printed(fields)}, serial ${serial}, ${odd ? 'odd' : 'even'} parity.`,
+              text: T('note.round-trip-ok', {
+                printed: printed(fields),
+                serial,
+                parity: T(odd ? 'value.parity-of.odd' : 'value.parity-of.even'),
+              }),
             }
           : {
               type: 'note',
               level: 'error',
-              text: `Round trip FAILED: the tile decodes to ${printed(back.fields)}, serial ${back.fields.serial}.`,
+              text: T('note.round-trip-failed', {
+                printed: printed(back.fields),
+                serial: back.fields.serial,
+              }),
             },
       );
       out.push(
         {
           type: 'kv',
           entries: [
-            ['Printed', printed(fields)],
-            ['Serial', serial],
+            [T('kv.printed'), printed(fields)],
+            [T('kv.serial'), serial],
           ],
         },
         {
           type: 'text',
-          label: 'Dot matrix (● dot, · none; row 1 and column 1 are parity)',
+          label: T('label.dot-matrix'),
           value: matrixToText(m),
         },
         {
           type: 'image',
-          label: 'One tile (enlarged; parity row and column tinted)',
+          label: T('label.tile-image'),
           image: renderMatrix(m),
           filename: 'docucolor-tile.png',
         },
@@ -261,19 +276,18 @@ export default defineTool({
       return out;
     }
 
-    if (!input.trim())
-      throw new ToolError(
-        `Paste the dot matrix: ${ROWS} rows × ${COLS} columns (or ${COLS} × ${ROWS}), one row per line, with 1/x/● for a dot and 0/./· for none.`,
-      );
+    if (!input.trim()) throw new ToolError(T('error.paste', { rows: ROWS, cols: COLS }));
     const tries = bestOrientations(parseMatrixText(input), mapping, odd);
     let chosen = tries[0]!;
     if (o.orientation !== 'auto') {
       const forced = tries.find((t) => orientationKey(t.orientation) === o.orientation);
       if (!forced)
         throw new ToolError(
-          `That orientation does not give an ${ROWS} × ${COLS} tile from this grid; try: ${tries
-            .map((t) => describeOrientation(t.orientation))
-            .join(', ')}.`,
+          T('error.orientation', {
+            rows: ROWS,
+            cols: COLS,
+            list: tries.map((t) => orientationText(t.orientation)).join(', '),
+          }),
         );
       chosen = forced;
     }
@@ -312,35 +326,39 @@ export default defineTool({
       out.push({
         type: 'note',
         level: 'warn',
-        text: `Corrected, not clean: parity failed as read (${parityText(before)}); flipping the dot at row ${fix.row}, column ${fix.col} makes it pass. The reading below assumes that one dot was misread — check it on the scan.`,
+        text: T('note.corrected', { bad: parityText(before), row: fix.row, col: fix.col }),
       });
     } else if (ambiguous) {
       out.push({
         type: 'note',
         level: 'warn',
-        text: `Parity OK, but ${readings.size} orientations pass parity with valid but different values: the reading is ambiguous. Shown: ${describeOrientation(chosen.orientation)}${
-          chosen.separatorFull ? ', whose column 10 is all dots as the EFF describes' : ''
-        }. Compare them in the orientation table, or set the orientation if you know it.`,
+        text: T('note.ambiguous', {
+          count: readings.size,
+          orientation: orientationText(chosen.orientation),
+          separator: chosen.separatorFull ? T('note.ambiguous-separator') : '',
+        }),
       });
     } else if (d.parity.ok && d.plausible) {
       out.push({
         type: 'note',
         level: 'success',
-        text: `Parity OK — every column and every row but the top one has an ${odd ? 'odd' : 'even'} number of dots.`,
+        text: T('note.parity-ok', {
+          parity: T(odd ? 'value.dots-count.odd' : 'value.dots-count.even'),
+        }),
       });
     } else if (d.parity.ok) {
       out.push({
         type: 'note',
         level: 'warn',
-        text: `Parity OK, but the values are not a valid date or serial (${d.issues.join('; ')}): low confidence. Check the orientation and the column mapping.`,
+        text: T('note.parity-ok-implausible', { issues: d.issues.join('; ') }),
       });
     } else {
       out.push({
         type: 'note',
         level: 'error',
-        text: `Parity FAILED (${parityText(d.parity)}) — the reading below is uncertain.${
+        text: `${T('note.parity-failed', { bad: parityText(d.parity) })}${
           o.orientation === 'auto' && !anyOk
-            ? ` None of the ${tries.length} orientations that give an ${ROWS} × ${COLS} tile passes parity.`
+            ? T('note.none-passes', { count: tries.length, rows: ROWS, cols: COLS })
             : ''
         }`,
       });
@@ -350,55 +368,66 @@ export default defineTool({
         out.push({
           type: 'note',
           level: 'warn',
-          text: `A single misread dot would explain it: flipping row ${guess.row}, column ${guess.col} makes parity pass and reads ${printed(alt.fields)}, serial ${alt.fields.serial}. That is a guess, not a reading ("Correct one misread dot" decodes it).`,
+          text: T('note.single-dot', {
+            row: guess.row,
+            col: guess.col,
+            printed: printed(alt.fields),
+            serial: alt.fields.serial,
+          }),
         });
     }
     if (!d.plausible && !(d.parity.ok && !fix))
       out.push({
         type: 'note',
         level: 'warn',
-        text: `These values are not a valid date or serial (${d.issues.join('; ')}): check the orientation and the column mapping.`,
+        text: T('note.invalid-values', { issues: d.issues.join('; ') }),
       });
     const maker = makerNote(d);
     if (maker) out.push(maker);
     const custom = mappingNote(mapping);
     if (custom) out.push(custom);
     const suffix = fix
-      ? ' (1 dot corrected)'
+      ? T('value.suffix-corrected')
       : ambiguous
-        ? ' (ambiguous)'
+        ? T('value.suffix-ambiguous')
         : d.parity.ok && d.plausible
           ? ''
-          : ' (uncertain)';
+          : T('value.suffix-uncertain');
 
     out.push(
       {
         type: 'kv',
         entries: [
-          ['Printed', `${dateText(d)}${suffix}`],
-          ['Serial', `${serialText(d)}${suffix}`],
-          ['Orientation used', describeOrientation(chosen.orientation)],
+          [T('kv.printed'), `${dateText(d)}${suffix}`],
+          [T('kv.serial'), `${serialText(d)}${suffix}`],
+          [T('kv.orientation-used'), orientationText(chosen.orientation)],
           [
-            'Parity',
+            T('kv.parity'),
             fix
-              ? `OK after flipping row ${fix.row}, column ${fix.col} (FAILED as read)`
+              ? T('value.parity-fixed', { row: fix.row, col: fix.col })
               : d.parity.ok
-                ? 'OK'
-                : `FAILED (${parityText(d.parity)})`,
+                ? T('value.parity-ok')
+                : T('value.parity-failed', { bad: parityText(d.parity) }),
           ],
         ],
       },
       columnTable(d, mapping),
       {
         type: 'table',
-        label: 'Orientations tried (applied to the grid as given)',
-        columns: ['Orientation', 'Parity', 'Valid', 'Printed', 'Serial'],
+        label: T('label.orientations'),
+        columns: [
+          T('col.orientation'),
+          T('col.parity'),
+          T('col.valid'),
+          T('col.printed'),
+          T('col.serial'),
+        ],
         rows: tries.map((t) => {
           const td = decodeDocuColor(t.matrix, mapping, odd);
           return [
             shortOrientation(t.orientation),
             parityCell(td.parity),
-            td.plausible ? 'yes' : `no: ${td.issues[0] ?? ''}`,
+            td.plausible ? T('value.yes') : T('value.no-because', { issue: td.issues[0] ?? '' }),
             dateText(td),
             serialText(td),
           ];
@@ -408,8 +437,8 @@ export default defineTool({
       {
         type: 'text',
         label: fix
-          ? `Tile with row ${fix.row}, column ${fix.col} flipped (row 1 and column 1 are parity)`
-          : 'Tile as read (row 1 and column 1 are parity)',
+          ? T('label.tile-flipped', { row: fix.row, col: fix.col })
+          : T('label.tile-as-read'),
         value: matrixToText(tile),
       },
     );

@@ -1,9 +1,12 @@
 import { bool, defineTool, number, select } from '../../core/define';
 import type { Output, RgbaImage } from '../../core/types';
+import { toolT } from '../../i18n/tool-text';
 import {
   CHANNEL_INFO,
   DEFAULT_REVEAL,
   channelInfo,
+  channelName,
+  channelOf,
   inkOnlyApplies,
   normalizeOptions,
   revealDetailed,
@@ -31,12 +34,10 @@ function greyShare(img: RgbaImage, rect: { x: number; y: number; w: number; h: n
   return seen ? grey / seen : 0;
 }
 
-const STRETCH_LABEL: Record<Stretch, string> = {
-  none: 'no stretch',
-  auto: 'auto stretch (1–99 %)',
-  full: 'full-range stretch',
-  equalize: 'equalized',
-};
+const T = toolT('channel-reveal');
+
+/** The stretch step of the picture label: tool.channel-reveal.step.stretch.<mode>. */
+const stretchLabel = (s: Stretch) => T(`step.stretch.${s}`);
 
 export default defineTool({
   id: 'channel-reveal',
@@ -175,33 +176,46 @@ export default defineTool({
       out.push({
         type: 'note',
         level: 'warn',
-        text: `The crop did not fit the ${image.width}×${image.height} image and was adjusted: showing ${rect.w}×${rect.h} px at (${rect.x}, ${rect.y}).`,
+        text: T('note.crop-adjusted', {
+          iw: image.width,
+          ih: image.height,
+          w: rect.w,
+          h: rect.h,
+          x: rect.x,
+          y: rect.y,
+        }),
       });
     }
     if (res.reduced > 1) {
       out.push({
         type: 'note',
         level: 'info',
-        text: `The ${rect.w}×${rect.h} region is shown reduced ×${res.reduced} (${res.image.width}×${res.image.height}), each block keeping its most signal-like pixel so small dots survive. Crop a region to see real pixels.`,
+        text: T('note.reduced', {
+          w: rect.w,
+          h: rect.h,
+          factor: res.reduced,
+          ow: res.image.width,
+          oh: res.image.height,
+        }),
       });
     }
     if (res.scale < opts.scale) {
       out.push({
         type: 'note',
         level: 'warn',
-        text: `Zoom lowered from ×${opts.scale} to ×${res.scale} to keep the picture under 16 million pixels. Crop a smaller region to zoom further.`,
+        text: T('note.zoom-lowered', { asked: opts.scale, used: res.scale }),
       });
     }
 
     const inkOnly = opts.inkOnly === true && inkOnlyApplies(opts.channel);
     const steps = [
-      `${info.name} channel`,
-      inkOnly ? 'colour ink only' : null,
-      opts.invert ? 'inverted' : null,
-      STRETCH_LABEL[opts.stretch],
-      opts.gain !== 1 ? `gain ×${opts.gain}` : null,
-      opts.gamma !== 1 ? `gamma ${opts.gamma}` : null,
-      opts.threshold > 0 ? `threshold ≥ ${opts.threshold}` : null,
+      channelOf(opts.channel),
+      inkOnly ? T('step.ink-only') : null,
+      opts.invert ? T('step.inverted') : null,
+      stretchLabel(opts.stretch),
+      opts.gain !== 1 ? T('step.gain', { gain: opts.gain }) : null,
+      opts.gamma !== 1 ? T('step.gamma', { gamma: opts.gamma }) : null,
+      opts.threshold > 0 ? T('step.threshold', { threshold: opts.threshold }) : null,
     ].filter((s): s is string => s !== null);
     out.push({
       type: 'image',
@@ -213,31 +227,40 @@ export default defineTool({
     const { stats } = res;
     out.push({
       type: 'kv',
-      label: 'Channel statistics',
+      label: T('label.stats'),
       entries: [
         [
-          'Channel',
-          `${info.name} (${info.formula})${
-            inkOnly
-              ? ', colour ink only'
-              : opts.inkOnly
-                ? ' (colour ink only does not apply to this channel)'
-                : ''
+          T('kv.channel'),
+          `${channelName(opts.channel)} (${info.formula})${
+            inkOnly ? T('value.ink-only') : opts.inkOnly ? T('value.ink-only-na') : ''
           }`,
         ],
         [
-          'Region',
+          T('kv.region'),
           res.crop.whole
-            ? `${rect.w}×${rect.h} px (whole image)`
-            : `${rect.w}×${rect.h} px at (${rect.x}, ${rect.y}) of ${image.width}×${image.height}`,
+            ? T('value.region-whole', { w: rect.w, h: rect.h })
+            : T('value.region-part', {
+                w: rect.w,
+                h: rect.h,
+                x: rect.x,
+                y: rect.y,
+                iw: image.width,
+                ih: image.height,
+              }),
         ],
-        ['Range', `${stats.min}–${stats.max}`],
-        ['Mean', stats.mean.toFixed(2)],
+        [T('kv.range'), `${stats.min}–${stats.max}`],
+        [T('kv.mean'), stats.mean.toFixed(2)],
         ['p1', String(stats.p1)],
         ['p99', String(stats.p99)],
         [
-          'Output',
-          `${res.image.width}×${res.image.height} px (${res.reduced > 1 ? `reduced ×${res.reduced}` : `zoom ×${res.scale}`})`,
+          T('kv.output'),
+          res.reduced > 1
+            ? T('value.output-reduced', {
+                w: res.image.width,
+                h: res.image.height,
+                factor: res.reduced,
+              })
+            : T('value.output-zoom', { w: res.image.width, h: res.image.height, zoom: res.scale }),
         ],
       ],
     });
@@ -248,9 +271,9 @@ export default defineTool({
       out.push({
         type: 'note',
         level: 'info',
-        text: 'Black or grey content (text, shading) shows in every channel. Turn on Colour ink only to keep coloured ink alone — yellow dots, coloured stamps.',
+        text: T('note.grey-content'),
       });
-    out.push({ type: 'note', level: 'info', text: 'Processed locally — nothing uploaded.' });
+    out.push({ type: 'note', level: 'info', text: T('note.local') });
     return out;
   },
 });

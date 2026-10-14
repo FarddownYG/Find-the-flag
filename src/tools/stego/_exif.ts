@@ -1,5 +1,8 @@
 import * as exifrNs from 'exifr';
+import { toolT } from '../../i18n/tool-text';
 import { isValidUtf8, latin1Decode, toHex, utf8Decode } from '../../lib/bytes';
+
+const T = toolT('image-analyzer');
 
 // exifr's package.json points `main` at a UMD file and `module` at an ES build. Vite uses the
 // ES build (named exports); Node/Vitest may hand us the CommonJS object under `default`.
@@ -83,7 +86,7 @@ export function decodeUserComment(b: Uint8Array, littleEndian?: boolean): string
     return utf16(body, le);
   }
   if (id.startsWith('JIS'))
-    return `[JIS-encoded comment, ${body.length} bytes] ${stripNul(latin1Decode(body))}`;
+    return `${T('value.jis-comment', { count: body.length })} ${stripNul(latin1Decode(body))}`;
   const whole = b.every((x, i) => i >= 8 || x === 0) ? body : b;
   return stripNul(utf8Decode(whole));
 }
@@ -92,7 +95,7 @@ export function fmtValue(key: string, v: unknown): string {
   if (v === null || v === undefined) return '';
   if (v instanceof Date) {
     // An all-zero date field (ICC profiles often have one) decodes to 30 Nov 1899.
-    return v.getUTCFullYear() < 1900 ? 'not set (all zeros)' : v.toISOString();
+    return v.getUTCFullYear() < 1900 ? T('value.date-not-set') : v.toISOString();
   }
   if (v instanceof BinaryText) return toHex(v.bytes, ' ');
   if (v instanceof Unreadable) return v.text;
@@ -104,7 +107,7 @@ export function fmtValue(key: string, v: unknown): string {
     if (key === 'GPSAltitude') return `${v} m`;
     return Number.isInteger(v) ? String(v) : String(Math.round(v * 1e6) / 1e6);
   }
-  if (typeof v === 'boolean') return v ? 'yes' : 'no';
+  if (typeof v === 'boolean') return v ? T('value.yes') : T('value.no');
   const bytes = bytesOfLike(v);
   if (bytes) {
     if (key.startsWith('XP')) return utf16(bytes, true);
@@ -238,7 +241,7 @@ export function readTiff(t: Uint8Array): TiffRead | null {
   const ifds: TiffRead['ifds'] = {};
   const visited = new Set<number>();
   if (t.length < 8) {
-    problems.push(`The EXIF block is only ${t.length} bytes long: its header is cut.`);
+    problems.push(T('problem.header-cut', { count: t.length }));
     return { le, ifds, problems };
   }
 
@@ -246,13 +249,11 @@ export function readTiff(t: Uint8Array): TiffRead | null {
     const label = IFD_LABEL[name];
     if (ifds[name]) return null;
     if (offset < 8 || offset + 2 > t.length) {
-      problems.push(
-        `${label} should start at offset ${offset}, but the EXIF block is only ${t.length} bytes long.`,
-      );
+      problems.push(T('problem.ifd-outside', { ifd: label, offset, count: t.length }));
       return null;
     }
     if (visited.has(offset)) {
-      problems.push(`${label} points back at an IFD already read (offset ${offset}): a loop.`);
+      problems.push(T('problem.ifd-loop', { ifd: label, offset }));
       return null;
     }
     visited.add(offset);
@@ -260,9 +261,7 @@ export function readTiff(t: Uint8Array): TiffRead | null {
     const fit = Math.floor((t.length - offset - 2) / 12);
     const n = Math.min(declared, fit, MAX_ENTRIES);
     if (n < declared) {
-      problems.push(
-        `${label} declares ${declared} entries but only ${n} fit in the ${t.length}-byte EXIF block: it is cut.`,
-      );
+      problems.push(T('problem.ifd-cut', { ifd: label, declared, n, size: t.length }));
     }
     const entries: TiffEntry[] = [];
     for (let i = 0; i < n; i++) {
@@ -272,7 +271,7 @@ export function readTiff(t: Uint8Array): TiffRead | null {
       const count = u32(e + 4);
       const unit = TYPE_SIZE[type] ?? 0;
       if (!unit) {
-        problems.push(`${label} tag ${hex4(tag)} has an unknown value type (${type}).`);
+        problems.push(T('problem.unknown-type', { ifd: label, tag: hex4(tag), type }));
         entries.push({ tag, type, count, raw: null, at: e + 8, size: 0 });
         continue;
       }
@@ -281,7 +280,14 @@ export function readTiff(t: Uint8Array): TiffRead | null {
       const fits = size <= t.length && at <= t.length - size;
       if (!fits) {
         problems.push(
-          `${label} tag ${hex4(tag)} (${tagName(name, tag)}): its value (${size} bytes at offset ${at}) lies outside the ${t.length}-byte EXIF block.`,
+          T('problem.value-outside', {
+            ifd: label,
+            tag: hex4(tag),
+            name: tagName(name, tag),
+            size,
+            at,
+            block: t.length,
+          }),
         );
       }
       entries.push({ tag, type, count, raw: fits ? t.subarray(at, at + size) : null, at, size });
@@ -314,8 +320,8 @@ function entryValue(e: TiffEntry, le: boolean): unknown {
   if (!e.raw) {
     return new Unreadable(
       e.size
-        ? `unreadable: its ${e.size} bytes would be at offset ${e.at}, outside the EXIF block`
-        : `unreadable: unknown value type ${e.type}`,
+        ? T('value.unreadable-outside', { size: e.size, at: e.at })
+        : T('value.unreadable-type', { type: e.type }),
     );
   }
   const r = e.raw;
@@ -409,9 +415,7 @@ export function tiffGroups(read: TiffRead, t: Uint8Array): TiffGroups {
     thumbnail =
       len > 0 && off + len <= t.length
         ? { data: t.slice(off, off + len), offset: off }
-        : {
-            error: `IFD1 says the thumbnail is ${len} bytes at offset ${off}, but the EXIF block is only ${t.length} bytes long`,
-          };
+        : { error: T('problem.thumb-outside', { len, off, size: t.length }) };
   }
   return { groups, thumbnail };
 }

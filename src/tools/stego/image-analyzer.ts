@@ -3,6 +3,7 @@ import { defineTool, file, number } from '../../core/define';
 import { ToolError } from '../../core/errors';
 import { mapLinks } from '../../core/result-text';
 import type { FileInput, Output, RgbaImage } from '../../core/types';
+import { signatureName, slug, toolT } from '../../i18n/tool-text';
 import { formatSize, utf8Encode } from '../../lib/bytes';
 import { findStrings, type FoundString } from '../forensics/strings';
 import { errorText, exifr } from './_exif';
@@ -43,9 +44,7 @@ import {
 } from './_image-analyzer-thumb';
 import { describeTail } from './image-structure';
 
-const PRIVACY = 'Everything below was computed in this tab — the file was not uploaded anywhere.';
-const THUMB_MISMATCH =
-  'The EXIF thumbnail does not match the main image — it may show the original picture.';
+const T = toolT('image-analyzer');
 const MAX_STRINGS = 3000;
 /** Strings table cells: long strings are shown in full in All metadata / text blocks. */
 const MAX_STRING_CELL = 1000;
@@ -80,10 +79,37 @@ const HEADERS: [string, number[]][] = [
 
 const hex = (n: number) => `0x${n.toString(16)}`;
 const at = (n: number) => `${n} (${hex(n)})`;
-const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
-const shortName = (name: string) => name.replace(/ \(.*$/, '');
-const cut = (s: string, max: number, rest: string) =>
-  s.length > max ? `${s.slice(0, max)}… (${s.length - max} more characters ${rest})` : s;
+/** A file-type name without its parenthesised detail ("JPEG image (JFIF)" -> "JPEG image"). */
+const shortName = (name: string) => name.replace(/\s*[(（].*$/, '');
+/** `more` gives the "… (N more characters …)" tail. */
+const cut = (s: string, max: number, more: (n: number) => string) =>
+  s.length > max ? `${s.slice(0, max)}${more(s.length - max)}` : s;
+
+/** Display names of the metadata groups and tags this tool makes up (EXIF/XMP/IPTC names stay). */
+const GROUP_KEYS: Record<string, string> = {
+  File: 'group.file',
+  'PNG text': 'group.png-text',
+  'JPEG comment': 'group.jpeg-comment',
+  'GIF comment': 'group.gif-comment',
+};
+const groupText = (group: string) => {
+  const key = GROUP_KEYS[group];
+  return key ? T(key) : group;
+};
+function tagText(group: string, tag: string): string {
+  if (group === 'File' && (tag === 'Type' || tag === 'Size' || tag === 'Dimensions')) {
+    return T(`tag.${tag.toLowerCase()}`);
+  }
+  if (group === 'PNG tIME' && tag === 'Modified') return T('tag.modified');
+  if (group === 'JPEG comment' || group === 'GIF comment') {
+    if (tag === 'Comment') return T('tag.comment');
+    const n = /^Comment (\d+)$/.exec(tag);
+    if (n) return T('tag.comment-n', { n: n[1]! });
+  }
+  return tag;
+}
+/** "top-left corner"... (from the thumbnail check) as the user reads it. */
+const regionText = (region: string) => T(`value.region.${slug(region)}`);
 
 function stemOf(name: string | undefined): string {
   const base = (name ?? '').split(/[\\/]/).pop() ?? '';
@@ -117,49 +143,49 @@ interface Comparison {
 
 function comparison(a: Uint8Array, ha: Digests, other: FileInput, hb: Digests): Comparison {
   const b = other.bytes;
-  const name = other.name ?? 'the second file';
+  const name = other.name ?? T('value.the-second-file');
   const diff = firstDifference(a, b);
   const identical = diff < 0;
   const entries: [string, string][] = [
-    ['Compared with', `${other.name ?? 'second file'} (${plural(b.length, 'byte')})`],
-    ['MD5 (other file)', hb.md5],
-    ['SHA-1 (other file)', hb.sha1],
-    ['SHA-256 (other file)', hb.sha256],
-    ['Verdict', identical ? 'Identical files (same MD5/SHA-1/SHA-256)' : 'Different files'],
+    [
+      T('kv.compared-with'),
+      T('value.compared-with', { name: other.name ?? T('value.second-file'), count: b.length }),
+    ],
+    [T('kv.md5-other'), hb.md5],
+    [T('kv.sha1-other'), hb.sha1],
+    [T('kv.sha256-other'), hb.sha256],
+    [T('kv.verdict'), identical ? T('value.identical-files') : T('value.different-files')],
   ];
   if (identical) {
-    return { entries, summary: `identical to ${name} (same MD5, SHA-1 and SHA-256)` };
+    return { entries, summary: T('finding.identical-to', { name }) };
   }
   const shorter = Math.min(a.length, b.length);
   const where =
     diff < shorter
-      ? `: ${hex(a[diff]!)} in this file, ${hex(b[diff]!)} in the other`
-      : ': one file ends there';
-  entries.push(['First difference', `offset ${at(diff)}${where}`]);
+      ? T('value.diff-bytes', { a: hex(a[diff]!), b: hex(b[diff]!) })
+      : T('value.diff-ends');
+  entries.push([T('kv.first-difference'), T('value.first-difference', { at: at(diff), where })]);
   const delta = b.length - a.length;
   entries.push([
-    'Size difference',
+    T('kv.size-difference'),
     delta === 0
-      ? 'none (same size)'
-      : `${delta > 0 ? '+' : '−'}${plural(Math.abs(delta), 'byte')} (the other file is ${delta > 0 ? 'longer' : 'shorter'})`,
+      ? T('value.same-size')
+      : T(delta > 0 ? 'value.size-longer' : 'value.size-shorter', { count: Math.abs(delta) }),
   ]);
   if (diff === shorter) {
-    entries.push([
-      'Note',
-      'The shorter file is the exact start of the longer one: data was appended (or cut off).',
-    ]);
+    entries.push([T('kv.note'), T('value.appended')]);
   }
   const collided = (['md5', 'sha1', 'sha256'] as const).filter((k) => ha[k] === hb[k]);
   if (collided.length) {
     entries.push([
-      'Collision',
-      `Same ${collided.map((k) => k.toUpperCase()).join('/')} for different bytes: a hash collision.`,
+      T('kv.collision'),
+      T('value.collision', { hashes: collided.map((k) => k.toUpperCase()).join('/') }),
     ]);
   }
-  const prefix = diff === shorter ? ', the shorter one is the start of the longer one' : '';
+  const prefix = diff === shorter ? T('finding.shorter-is-start') : '';
   return {
     entries,
-    summary: `different from ${name}: first difference at offset ${at(diff)}${delta ? `, sizes differ by ${plural(Math.abs(delta), 'byte')}` : ''}${prefix}`,
+    summary: `${T('finding.different-from', { name, at: at(diff) })}${delta ? T('finding.sizes-differ', { count: Math.abs(delta) }) : ''}${prefix}`,
   };
 }
 
@@ -198,18 +224,14 @@ async function readThumbnail(
       raw = await exifr.thumbnail(exifSource);
     } catch (e) {
       if (!declared) return null;
-      thumb.warnings.push(
-        `IFD1 declares a thumbnail but it could not be read (${errorText(e)}): the EXIF block is truncated or damaged.`,
-      );
+      thumb.warnings.push(T('warn.thumb-unreadable', { error: errorText(e) }));
       return thumb;
     }
     if (!raw || raw.length < 4) return null;
     thumb.data = Uint8Array.from(raw);
     thumb.offset = locate(bytes, thumb.data);
   } else if ('error' in meta.thumbnail) {
-    thumb.warnings.push(
-      `${meta.thumbnail.error}: the thumbnail is cut off, the EXIF block is truncated or damaged.`,
-    );
+    thumb.warnings.push(T('warn.thumb-cut', { error: meta.thumbnail.error }));
     return thumb;
   } else {
     thumb.data = meta.thumbnail.data;
@@ -217,32 +239,24 @@ async function readThumbnail(
   }
   const data = thumb.data;
   if (data[0] !== 0xff || data[1] !== 0xd8) {
-    thumb.warnings.push(
-      'The IFD1 thumbnail is not a JPEG (it does not start with FF D8): look at it in a hex view (it is in Extracted files).',
-    );
+    thumb.warnings.push(T('warn.thumb-not-jpeg'));
     return thumb;
   }
   try {
     thumb.image = decodeJpeg(data);
   } catch (e) {
-    thumb.warnings.push(`The EXIF thumbnail could not be decoded (${errorText(e)}).`);
+    thumb.warnings.push(T('warn.thumb-undecodable', { error: errorText(e) }));
     return thumb;
   }
   let main: ReturnType<typeof decodeMain>;
   try {
     main = decodeMain(bytes);
   } catch (e) {
-    thumb.warnings.push(
-      `The main image could not be decoded (${errorText(e)}), so the thumbnail was not compared with it: look at the thumbnail, it may be the only intact view of the picture.`,
-    );
+    thumb.warnings.push(T('warn.main-undecodable', { error: errorText(e) }));
     return thumb;
   }
   if (!main) {
-    thumb.info.push(
-      drawable
-        ? 'The thumbnail is checked against the main image for JPEG and PNG only: compare the two pictures by eye.'
-        : 'This format cannot be decoded here, so only the thumbnail is shown and it was not compared with the main image: open the file in an image viewer to compare.',
-    );
+    thumb.info.push(drawable ? T('note.thumb-jpeg-png-only') : T('note.thumb-not-compared'));
     return thumb;
   }
   thumb.check = compareThumbnail(main, thumb.image);
@@ -258,38 +272,40 @@ function thumbnailOutputs(t: Thumbnail, mainSize: string | null): Output[] {
     out.push({
       type: 'note',
       level: 'info',
-      text: `The EXIF thumbnail only loosely resembles the main image (${pct} similar): compare the two pictures above.`,
+      text: T('note.thumb-loose', { pct }),
     });
   }
   if (c.verdict === 'match' && c.rotation) {
     out.push({
       type: 'note',
       level: 'info',
-      text: `The thumbnail matches once rotated by ${c.rotation}° clockwise: the main image was rotated after the thumbnail was made.`,
+      text: T('note.thumb-rotated', { deg: c.rotation }),
     });
   }
   const entries: [string, string][] = [
-    ['Thumbnail', `${t.image!.width}x${t.image!.height} JPEG, ${t.data.length} bytes`],
-  ];
-  if (mainSize) entries.push(['Main image', mainSize]);
-  entries.push(
-    ['Similarity', pct],
     [
-      'Verdict',
+      T('kv.thumbnail'),
+      T('value.thumb-size', { w: t.image!.width, h: t.image!.height, count: t.data.length }),
+    ],
+  ];
+  if (mainSize) entries.push([T('kv.main-image'), mainSize]);
+  entries.push(
+    [T('kv.similarity'), pct],
+    [
+      T('kv.verdict'),
       c.verdict === 'match'
         ? c.editedRegion
-          ? `same picture, except the ${c.editedRegion}`
-          : 'same picture'
+          ? T('value.same-except', { region: regionText(c.editedRegion) })
+          : T('value.same-picture')
         : c.verdict === 'loose'
-          ? 'loosely similar'
-          : 'a different picture',
+          ? T('value.loosely-similar')
+          : T('value.different-picture'),
     ],
-    ['Method', `luminance correlation on a ${c.grid.width}x${c.grid.height} grid`],
+    [T('kv.method'), T('value.method', { w: c.grid.width, h: c.grid.height })],
   );
-  if (c.bars)
-    entries.push(['Letterbox bars', 'ignored (the thumbnail has a different aspect ratio)']);
-  if (c.rotation) entries.push(['Best orientation', `rotated ${c.rotation}° clockwise`]);
-  out.push({ type: 'kv', label: 'Thumbnail check', entries });
+  if (c.bars) entries.push([T('kv.letterbox'), T('value.letterbox')]);
+  if (c.rotation) entries.push([T('kv.best-orientation'), T('value.rotated', { deg: c.rotation })]);
+  out.push({ type: 'kv', label: T('label.thumb-check'), entries });
   return out;
 }
 
@@ -322,17 +338,17 @@ function stringOutputs(
   const shown = ordered.slice(0, MAX_STRINGS);
   const out: Output[] = [];
   if (!shown.length) {
-    out.push({ type: 'note', level: 'info', text: `No string of at least ${min} characters.` });
+    out.push({ type: 'note', level: 'info', text: T('note.no-strings', { min }) });
   } else {
     out.push({
       type: 'table',
-      label: 'Strings',
-      columns: ['Offset', 'Where', 'Encoding', 'String'],
+      label: T('label.strings'),
+      columns: [T('col.offset'), T('col.where'), T('col.encoding'), T('col.string')],
       rows: shown.map((s) => [
         hex(s.offset),
-        regionAt(regions, s.offset)?.label ?? '',
+        regionAt(regions, s.offset)?.text ?? '',
         s.encoding,
-        cut(s.text, MAX_STRING_CELL, 'in this string'),
+        cut(s.text, MAX_STRING_CELL, (n) => T('value.cut-string', { n })),
       ]),
       highlight: flagged.slice(0, MAX_STRINGS).map((_, i) => i),
     });
@@ -341,14 +357,14 @@ function stringOutputs(
     out.push({
       type: 'note',
       level: 'warn',
-      text: `Showing ${MAX_STRINGS} of ${ordered.length} strings (flag-like ones first). Raise "Minimum string length", or use the Strings tool to filter.`,
+      text: T('note.strings-capped', { shown: MAX_STRINGS, total: ordered.length }),
     });
   }
   if (dropped) {
     out.push({
       type: 'note',
       level: 'info',
-      text: `${plural(dropped, 'short string')} inside the compressed image data ${dropped === 1 ? 'is' : 'are'} not listed: random bytes that happen to be printable. The Strings tool shows every string.`,
+      text: T('note.short-strings', { count: dropped }),
     });
   }
   return { out, flags };
@@ -360,21 +376,21 @@ const fixText = (g: GpsFix) => `${g.lat.toFixed(6)}, ${g.lon.toFixed(6)}`;
 
 function gpsInvalidText(g: GpsFix): string {
   return g.problem === 'zero'
-    ? `The GPS tags hold 0, 0 (${g.source}), which is what an empty fix (or a wiped position) looks like, not a real place: no map.`
-    : `The GPS tags hold ${g.lat}, ${g.lon} (${g.source}), which is not a position on Earth (latitude must be within ±90°, longitude within ±180°): invalid, no map.`;
+    ? T('warn.gps-zero', { source: g.source })
+    : T('warn.gps-range', { lat: g.lat, lon: g.lon, source: g.source });
 }
 
 function gpsFindings(gps: GpsInfo, f: Findings, warnings: string[]): void {
   const hemisphere = gps.missingRefs.length
-    ? `; hemisphere unknown (${gps.missingRefs.join(', ')} missing)`
+    ? T('finding.hemisphere-unknown', { refs: gps.missingRefs.join(', ') })
     : '';
-  if (gps.valid) f.add('GPS position', `${fixText(gps)} (${gps.source}${hemisphere})`);
+  if (gps.valid) f.add(T('finding.gps-position'), `${fixText(gps)} (${gps.source}${hemisphere})`);
   else {
     f.add(
       'GPS',
       gps.problem === 'zero'
-        ? 'tags hold 0, 0: no real fix, ignored'
-        : `tags hold ${gps.lat}, ${gps.lon}: off the globe, invalid, ignored`,
+        ? T('finding.gps-zero')
+        : T('finding.gps-range', { lat: gps.lat, lon: gps.lon }),
     );
     warnings.push(gpsInvalidText(gps));
   }
@@ -382,19 +398,27 @@ function gpsFindings(gps: GpsInfo, f: Findings, warnings: string[]): void {
     const isLat = ref === 'GPSLatitudeRef';
     const v = isLat ? gps.lat : gps.lon;
     warnings.push(
-      `${ref} is missing: the hemisphere is unknown, so the ${isLat ? 'latitude' : 'longitude'} could be ${(-Math.abs(v)).toFixed(6)} instead of ${Math.abs(v).toFixed(6)} (the map assumes ${isLat ? 'N' : 'E'}).`,
+      T(isLat ? 'warn.missing-lat-ref' : 'warn.missing-lon-ref', {
+        ref,
+        neg: (-Math.abs(v)).toFixed(6),
+        pos: Math.abs(v).toFixed(6),
+      }),
     );
   }
   for (const o of gps.others) {
     f.add(
-      'Other GPS position',
-      `${fixText(o)} (${o.source})${o.problem ? ', invalid' : ''}: not the same place`,
+      T('finding.other-gps'),
+      T(o.problem ? 'finding.other-gps-invalid' : 'finding.other-gps-value', {
+        fix: fixText(o),
+        source: o.source,
+      }),
     );
   }
   if (gps.others.length) {
-    warnings.push(
-      `The file holds more than one position: ${[gps, ...gps.others].map((g) => `${fixText(g)} in ${g.source}`).join(', ')}. One of them may be a decoy; each valid one has its own map below.`,
-    );
+    const list = [gps, ...gps.others]
+      .map((g) => T('warn.position-in', { fix: fixText(g), source: g.source }))
+      .join(', ');
+    warnings.push(T('warn.several-positions', { list }));
   }
 }
 
@@ -501,7 +525,7 @@ function blockSummary(rows: MetaRow[], n: number): string {
       ),
     )
     .map((r) => `${r.tag} "${oneLine(r.value, 80)}"`);
-  return text.length ? text.join(', ') : `${plural(own.length, 'field')}`;
+  return text.length ? text.join(', ') : T('finding.fields', { count: own.length });
 }
 
 // ---------------------------------------------------------------- tool
@@ -564,11 +588,11 @@ export default defineTool({
   ],
   async run({ bytes, name }, { compare, minLength }) {
     if (!bytes.length) {
-      throw new ToolError('Drop an image (JPEG, PNG, TIFF, WebP, HEIC, GIF), or any file to hash.');
+      throw new ToolError(T('error.empty'));
     }
     const min = Math.max(3, Math.min(200, Math.round(minLength) || 6));
     const layout = analyseLayout(bytes);
-    const type = layout.sig ? shortName(layout.sig.name) : null;
+    const type = layout.sig ? shortName(signatureName(layout.sig)) : null;
     const [hashes, otherHashes] = await Promise.all([
       digests(bytes),
       compare ? digests(compare.bytes) : Promise.resolve(null),
@@ -581,8 +605,8 @@ export default defineTool({
       ? await readMetadata(bytes, structure, { type, size: bytes.length }, exifSource)
       : {
           rows: [
-            { group: 'File', tag: 'Type', value: type ?? 'unknown' },
-            { group: 'File', tag: 'Size', value: `${bytes.length} bytes` },
+            { group: 'File', tag: 'Type', value: type ?? T('value.unknown') },
+            { group: 'File', tag: 'Size', value: T('value.bytes', { count: bytes.length }) },
           ],
           exif: {},
           xmp: {},
@@ -603,6 +627,7 @@ export default defineTool({
         start: thumb.offset,
         end: thumb.offset + thumb.data.length,
         label: 'EXIF thumbnail',
+        text: T('region.exif-thumbnail'),
         imageData: true,
       });
     }
@@ -625,18 +650,12 @@ export default defineTool({
     const warnings: string[] = [];
     const compared =
       compare && otherHashes ? comparison(bytes, hashes, compare, otherHashes) : null;
-    if (compared) f.add('Comparison', compared.summary);
+    if (compared) f.add(T('finding.comparison'), compared.summary);
     const cutAt = layout.isImage ? null : cutHeader(bytes);
     if (cutAt) {
-      f.add(
-        'File type',
-        `${cutAt}, cut inside its header: only ${plural(bytes.length, 'byte')}, nothing else to read`,
-      );
+      f.add(T('finding.file-type'), T('finding.cut-header', { type: cutAt, count: bytes.length }));
     } else if (!layout.isImage) {
-      f.add(
-        'File type',
-        `${type ?? 'unknown'}: not an image, so only hashes, strings and embedded files apply`,
-      );
+      f.add(T('finding.file-type'), T('finding.not-image', { type: type ?? T('value.unknown') }));
     }
     if (gps) gpsFindings(gps, f, warnings);
     cameraAndDate(meta, f);
@@ -649,75 +668,98 @@ export default defineTool({
       if (!d) continue;
       decoded.push(d.text);
       f.add(
-        'Encoded text',
-        `${label} (${row.group} ${row.tag}) is ${d.how} for "${oneLine(d.text, 120)}"`,
+        T('finding.encoded-text'),
+        T('finding.encoded-value', {
+          label,
+          where: `${groupText(row.group)} ${tagText(row.group, row.tag)}`,
+          how: d.how,
+          text: oneLine(d.text, 120),
+        }),
       );
     }
-    if (decoded.length) {
-      warnings.push(
-        'A metadata field is encoded text (see "Encoded text" above). Auto-decode can peel further layers.',
-      );
-    }
+    if (decoded.length) warnings.push(T('warn.encoded'));
 
     // Further EXIF blocks: most readers stop at the first.
     meta.blocks.slice(1).forEach((b, i) => {
       f.add(
-        'Another EXIF block',
-        `${b.where}, ignored by most readers: ${blockSummary(meta.rows, i + 2)}`,
+        T('finding.another-exif'),
+        T('finding.another-exif-value', {
+          where: b.where,
+          summary: blockSummary(meta.rows, i + 2),
+        }),
       );
     });
     if (meta.blocks.length > 1) {
       warnings.push(
-        `The file holds ${meta.blocks.length} EXIF blocks (${meta.blocks.map((b) => b.where).join(', ')}). Most software reads only the first one: the others are listed as "EXIF #2"... in All metadata.`,
+        T('warn.several-exif', {
+          count: meta.blocks.length,
+          list: meta.blocks.map((b) => b.where).join(', '),
+        }),
       );
     }
     const damaged = meta.blocks.filter((b) => b.problems.length);
     for (const b of damaged) {
-      f.add('EXIF', `present but damaged (${b.where}): ${oneLine(b.problems[0]!, 200)}`);
+      f.add(
+        'EXIF',
+        T('finding.exif-damaged', { where: b.where, problem: oneLine(b.problems[0]!, 200) }),
+      );
       warnings.push(
-        `The EXIF block (${b.where}) is damaged: ${b.problems.slice(0, 4).join(' ')}${b.problems.length > 4 ? ` (+${b.problems.length - 4} more)` : ''} Everything that could still be read is listed below.`,
+        T('warn.exif-damaged', {
+          where: b.where,
+          problems: b.problems.slice(0, 4).join(' '),
+          more: b.problems.length > 4 ? T('warn.more', { n: b.problems.length - 4 }) : '',
+        }),
       );
     }
     if (meta.errors.length) {
-      f.add('Metadata', `partly unreadable: ${oneLine(meta.errors[0]!, 200)}`);
-      warnings.push(
-        `Some metadata could not be read (${meta.errors.slice(0, 3).join('; ')}): the file may be truncated or its metadata damaged. What could be read is below.`,
+      f.add(
+        T('finding.metadata'),
+        T('finding.partly-unreadable', { error: oneLine(meta.errors[0]!, 200) }),
       );
+      warnings.push(T('warn.metadata-errors', { errors: meta.errors.slice(0, 3).join('; ') }));
     }
 
     const c = thumb?.check;
     if (c && c.verdict === 'different') {
       f.add(
-        'Thumbnail',
-        `differs from the main image (${Math.round(c.similarity * 100)}% similar): it may show the original picture`,
+        T('finding.thumbnail'),
+        T('finding.thumb-differs', { pct: Math.round(c.similarity * 100) }),
       );
-      warnings.push(THUMB_MISMATCH);
+      warnings.push(T('warn.thumb-mismatch'));
     } else if (c && c.verdict === 'loose') {
       f.add(
-        'Thumbnail',
-        `only loosely matches the main image (${Math.round(c.similarity * 100)}% similar)`,
+        T('finding.thumbnail'),
+        T('finding.thumb-loose', { pct: Math.round(c.similarity * 100) }),
       );
     } else if (c && c.rotation) {
-      f.add(
-        'Thumbnail',
-        `matches the main image only once rotated ${c.rotation}° clockwise: the picture was rotated (or flipped) after the thumbnail was made`,
-      );
+      f.add(T('finding.thumbnail'), T('finding.thumb-rotated', { deg: c.rotation }));
     } else if (c?.editedRegion) {
-      f.add('Thumbnail', `matches the main image except the ${c.editedRegion}: edited there?`);
-      warnings.push(
-        `The EXIF thumbnail matches the main image except around the ${c.editedRegion}: that area may have been edited after the thumbnail was made.`,
-      );
+      const region = regionText(c.editedRegion);
+      f.add(T('finding.thumbnail'), T('finding.thumb-edited', { region }));
+      warnings.push(T('warn.thumb-edited', { region }));
     }
     if (thumb) warnings.push(...thumb.warnings);
     if (tail) {
-      f.add('Data after the end', `${tail.size} bytes at offset ${at(tail.offset)}: ${tail.type}`);
+      f.add(
+        T('finding.data-after-end'),
+        T('finding.data-after-end-value', {
+          count: tail.size,
+          at: at(tail.offset),
+          type: tail.type,
+        }),
+      );
     }
     if (embedded.length) {
       const list = embedded
         .slice(0, 4)
-        .map((e) => `${shortName(e.sig.name)} at ${hex(e.start)}`)
+        .map((e) =>
+          T('finding.embedded-at', { type: shortName(signatureName(e.sig)), offset: hex(e.start) }),
+        )
         .join(', ');
-      f.add('Embedded files', `${embedded.length}: ${list}${embedded.length > 4 ? ', …' : ''}`);
+      f.add(
+        T('finding.embedded'),
+        `${embedded.length}: ${list}${embedded.length > 4 ? ', …' : ''}`,
+      );
     }
     const flags = [...strings.flags];
     for (const t of [...meta.rows.map((r) => r.value), ...decoded]) {
@@ -725,33 +767,19 @@ export default defineTool({
     }
     if (flags.length) {
       f.add(
-        'Flag-like strings',
+        T('finding.flags'),
         oneLine(
-          flags.slice(0, 5).join(', ') + (flags.length > 5 ? `, +${flags.length - 5} more` : ''),
+          flags.slice(0, 5).join(', ') +
+            (flags.length > 5 ? T('finding.more', { n: flags.length - 5 }) : ''),
           240,
         ),
       );
     }
-    if (layout.truncated) {
-      f.add(
-        'Structure',
-        'the image never reaches its end marker: truncated or damaged (see Image structure)',
-      );
-    }
+    if (layout.truncated) f.add(T('finding.structure'), T('finding.truncated'));
     const ihdr = layout.png?.chunks.find((k) => k.type === 'IHDR');
-    if (ihdr && !ihdr.crcOk) {
-      f.add(
-        'PNG header',
-        'IHDR CRC is wrong: the width or height was probably edited (see Image structure)',
-      );
-    }
+    if (ihdr && !ihdr.crcOk) f.add(T('finding.png-header'), T('finding.ihdr-crc'));
     const findings = f.entries;
-    if (!findings.length) {
-      findings.push([
-        'Nothing unusual found',
-        'no GPS, no free-text metadata, no appended data, no flag-like strings',
-      ]);
-    }
+    if (!findings.length) findings.push([T('finding.nothing'), T('finding.nothing-value')]);
 
     // ---- files to download
     const files: { name: string; data: Uint8Array; note?: string }[] = [];
@@ -761,7 +789,7 @@ export default defineTool({
         files.push({
           name: `${stem}-after-end.${tailKind.ext}`,
           data: tailBytes.slice(),
-          note: `${tail.type}, from offset ${tail.offset}`,
+          note: T('file.after-end', { type: tail.type, offset: tail.offset }),
         });
       }
     }
@@ -769,14 +797,14 @@ export default defineTool({
       files.push({
         name: `${e.start.toString(16).padStart(8, '0')}.${e.sig.ext}`,
         data: bytes.slice(e.start, e.end),
-        note: `${shortName(e.sig.name)}${e.where ? `, ${e.where}` : ''}`,
+        note: `${shortName(signatureName(e.sig))}${e.where ? `, ${e.where}` : ''}`,
       });
     }
     if (thumb && thumb.data.length) {
       files.push({
         name: `${stem}-exif-thumbnail.jpg`,
         data: thumb.data,
-        note: 'EXIF (IFD1) thumbnail',
+        note: T('file.thumbnail'),
       });
     }
     const makerNote = meta.exif.exif?.MakerNote;
@@ -784,7 +812,7 @@ export default defineTool({
       files.push({
         name: `${stem}-makernote.bin`,
         data: makerNote,
-        note: `MakerNote (vendor data), ${makerNote.length} bytes`,
+        note: T('file.makernote', { count: makerNote.length }),
       });
     }
     const report: Report = {
@@ -805,52 +833,58 @@ export default defineTool({
     files.push({
       name: 'metadata.json',
       data: utf8Encode(metadataJson(report)),
-      note: 'everything above, as JSON',
+      note: T('file.json'),
     });
-    const filesBlock: Output = { type: 'files', label: 'Extracted files', files };
+    const filesBlock: Output = { type: 'files', label: T('label.files'), files };
     // A payload is the answer: its download goes right under the warnings, not at the bottom.
     const payload = tail !== null || embedded.length > 0;
 
     // ---- output, in reading order
     const out: Output[] = [
-      { type: 'note', level: 'info', text: PRIVACY },
-      { type: 'kv', label: 'Findings', entries: findings },
+      { type: 'note', level: 'info', text: T('note.privacy') },
+      { type: 'kv', label: T('label.findings'), entries: findings },
       ...warnings.map((text): Output => ({ type: 'note', level: 'warn', text })),
     ];
     if (payload) out.push(filesBlock);
     if (gps) {
       if (gps.valid) {
-        out.push({ type: 'map', label: 'GPS position', lat: gps.lat, lon: gps.lon, zoom: 16 });
+        out.push({
+          type: 'map',
+          label: T('label.gps-position'),
+          lat: gps.lat,
+          lon: gps.lon,
+          zoom: 16,
+        });
       }
       for (const o of gps.others) {
         if (!o.problem) {
           out.push({
             type: 'map',
-            label: `GPS position (${o.source})`,
+            label: T('label.gps-position-of', { source: o.source }),
             lat: o.lat,
             lon: o.lon,
             zoom: 16,
           });
         }
       }
-      out.push({ type: 'kv', label: 'GPS details', entries: gps.details });
+      out.push({ type: 'kv', label: T('label.gps-details'), entries: gps.details });
     }
     out.push({
       type: 'kv',
-      label: 'Hashes',
+      label: T('label.hashes'),
       entries: [
         ['MD5', hashes.md5],
         ['SHA-1', hashes.sha1],
         ['SHA-256', hashes.sha256],
-        ['Size', `${plural(bytes.length, 'byte')} (${formatSize(bytes.length)})`],
+        [T('kv.size'), T('value.size', { count: bytes.length, size: formatSize(bytes.length) })],
       ],
     });
-    if (compared) out.push({ type: 'kv', label: 'Comparison', entries: compared.entries });
+    if (compared) out.push({ type: 'kv', label: T('label.comparison'), entries: compared.entries });
 
     if (mime) {
       out.push({
         type: 'picture',
-        label: 'Main image',
+        label: T('label.main-image'),
         data: bytes,
         mime,
         filename: name ?? `image.${layout.sig!.ext}`,
@@ -859,13 +893,13 @@ export default defineTool({
       out.push({
         type: 'note',
         level: 'info',
-        text: `Browsers cannot draw ${type ?? 'this format'} files, so the main image is not shown; everything else below still applies.`,
+        text: type ? T('note.cannot-draw', { type }) : T('note.cannot-draw-unknown'),
       });
     }
     if (thumb && thumb.data.length) {
       out.push({
         type: 'picture',
-        label: 'EXIF thumbnail',
+        label: T('label.exif-thumbnail'),
         data: thumb.data,
         mime: 'image/jpeg',
         filename: `${stem}-exif-thumbnail.jpg`,
@@ -879,9 +913,13 @@ export default defineTool({
 
     out.push({
       type: 'table',
-      label: 'All metadata',
-      columns: ['Group', 'Tag', 'Value'],
-      rows: meta.rows.map((r) => [r.group, r.tag, cut(r.value, MAX_META_CELL, 'in metadata.json')]),
+      label: T('label.all-metadata'),
+      columns: [T('col.group'), T('col.tag'), T('col.value')],
+      rows: meta.rows.map((r) => [
+        groupText(r.group),
+        tagText(r.group, r.tag),
+        cut(r.value, MAX_META_CELL, (n) => T('value.cut-meta', { n })),
+      ]),
     });
     const onlyFile = meta.rows.every((r) => r.group === 'File' || r.group === 'PNG IHDR');
     if (layout.isImage && onlyFile) {
@@ -890,8 +928,8 @@ export default defineTool({
         level: 'info',
         text:
           meta.errors.length || meta.blocks.length
-            ? 'Metadata segments are present but nothing could be read from them (see the warnings above).'
-            : 'No EXIF, XMP, IPTC, ICC or text metadata: the file was stripped, or never had any.',
+            ? T('note.meta-unreadable')
+            : T('note.no-metadata'),
       });
     }
     // Long free-text values in full, copyable and pipeable (the table shows them too).
@@ -899,27 +937,37 @@ export default defineTool({
       (r) => r.value.length > LONG_VALUE && !/^<\d+ bytes>/.test(r.value),
     );
     for (const r of long.slice(0, MAX_LONG_BLOCKS)) {
-      out.push({ type: 'text', label: `Full value: ${r.group} ${r.tag}`, value: r.value });
+      out.push({
+        type: 'text',
+        label: T('label.full-value', { group: groupText(r.group), tag: tagText(r.group, r.tag) }),
+        value: r.value,
+      });
     }
 
     if (tail) {
       out.push({
         type: 'table',
-        label: 'Data after the end of the image',
-        columns: ['Offset', 'Type', 'Size'],
-        rows: [[at(tail.offset), tail.type, `${tail.size} bytes`]],
+        label: T('label.after-end'),
+        columns: [T('col.offset'), T('col.type'), T('col.size')],
+        rows: [[at(tail.offset), tail.type, T('value.bytes', { count: tail.size })]],
         highlight: [0],
       });
     }
     if (embedded.length) {
       out.push({
         type: 'table',
-        label: 'Embedded files',
-        columns: ['Offset', 'Type', 'Size', 'Where', 'End found by'],
+        label: T('label.embedded'),
+        columns: [
+          T('col.offset'),
+          T('col.type'),
+          T('col.size'),
+          T('col.where'),
+          T('col.end-found-by'),
+        ],
         rows: embedded.map((e) => [
           at(e.start),
-          shortName(e.sig.name),
-          `${e.end - e.start} bytes`,
+          shortName(signatureName(e.sig)),
+          T('value.bytes', { count: e.end - e.start }),
           e.where,
           e.how,
         ]),
@@ -928,7 +976,7 @@ export default defineTool({
         out.push({
           type: 'note',
           level: 'warn',
-          text: `Stopped at ${embedded.length} embedded files.`,
+          text: T('note.capped', { count: embedded.length }),
         });
       }
     }
@@ -940,8 +988,11 @@ export default defineTool({
     const sig = imageSignature(bytes);
     if (!sig) return null;
     if (sig.id === 'gif' || sig.id === 'bmp' || sig.id === 'ico' || sig.id === 'qoi') {
-      return { score: 0.5, reason: `${shortName(sig.name)}: comments, hashes, appended data` };
+      return {
+        score: 0.5,
+        reason: T('detect.simple', { type: shortName(signatureName(sig)) }),
+      };
     }
-    return { score: 0.7, reason: 'Image: metadata, GPS, thumbnail, hashes' };
+    return { score: 0.7, reason: T('detect.image') };
   },
 });
