@@ -58,5 +58,15 @@
     "Strings",
     "hashcat",
     "John the Ripper"
-  ]
+  ],
+  "exempt": {
+    "tool.file-type.description": ["flag"],
+    "tool.zero-width.options.spaces.label": ["flag"],
+    "tool.whitespace.label.found": ["Whitespace"],
+    "tool.whitespace.label.visibleMap": ["Whitespace"],
+    "tool.text-transform.kv.whitespace": ["Whitespace"],
+    "tool.image-analyzer.label.strings": ["Strings"],
+    "tool.strings.label.table": ["Strings"],
+    "tool.strings.label.tableFlagged": ["Strings"]
+  }
 }
