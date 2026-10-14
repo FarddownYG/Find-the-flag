@@ -105,9 +105,14 @@ see goes through a key**, or the translation coverage degrades with each new too
   the English in `en.json` under `tool.my-tool.note.binary`. Don't use the reserved sub-keys
   `name`, `description`, `placeholder`, `options`, `examples`. Placeholders are `{name}`; for
   counts pass `{ count }` and add `_one` / `_other` forms (`_few` / `_many` too in Russian).
-- Add the same keys to `fr.json`, `ru.json`, `zh.json` and `hi.json`. Keep technical terms and
-  tool names untouched in every language (base64, XOR, EXIF, Whitespace, hash, flag, GPS… —
-  the list is `src/i18n/glossary.json`).
+- Add the same keys to `fr.json`, `ru.json`, `zh.json` and `hi.json` (merge a fragment with
+  `node scripts/i18n.mjs add frag.json`). Keep technical terms and proper names untouched in
+  every language (base64, XOR, EXIF, Whitespace, hash, flag, GPS… — the list is
+  `src/i18n/glossary.json`); descriptive tool names ("File type") are translated. When the
+  English uses a glossary term as a plain word ("flag unusual spaces"), list the key under
+  `exempt` in the glossary instead of forcing the term into the translation.
+- In a sentence with two numbers, the plural form follows `{count}`: in Russian, phrase it as
+  "noun: {x} из {count}" when a verb would have to agree with the other number.
 - `npm run i18n:check` fails on a key missing in one locale, a stale key, a missing plural
   form, a placeholder mismatch or a translated technical term. While working on one tool:
   `node scripts/i18n.mjs check --prefix=tool.my-tool.`
