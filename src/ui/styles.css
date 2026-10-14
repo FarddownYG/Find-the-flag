@@ -1171,3 +1171,52 @@ tr.is-hl td:first-child {
   ) {
   font-family: var(--font);
 }
+
+/* ---------- actions & reorder ---------- */
+.action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 12px;
+}
+.reorder {
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  display: grid;
+  gap: 4px;
+  counter-reset: pos;
+}
+.reorder-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  cursor: grab;
+  counter-increment: pos;
+}
+.reorder-item::before {
+  content: counter(pos);
+  color: var(--faint);
+  min-width: 2ch;
+  text-align: right;
+  font-size: var(--fs-0);
+}
+.reorder-grip {
+  color: var(--faint);
+}
+.reorder-label {
+  font-weight: 600;
+}
+.reorder-detail {
+  color: var(--mute);
+  font-size: var(--fs-0);
+}
+.reorder-btns {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 4px;
+}

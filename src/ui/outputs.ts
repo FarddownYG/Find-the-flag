@@ -15,6 +15,8 @@ export interface OutputContext {
   pipe: (toolId: string, raw: RawInput) => void;
   /** Flag candidates worth highlighting in this result (see selectFlags). */
   highlight: Set<string>;
+  /** Merge option values and re-run the tool (actions and reorder blocks). */
+  setOptions?: (values: Record<string, unknown>) => void;
 }
 
 const TEXT_LIMIT = 200_000;
@@ -414,6 +416,94 @@ function pictureBlock(o: Extract<Output, { type: 'picture' }>, ctx: OutputContex
   );
 }
 
+function actionsBlock(o: Extract<Output, { type: 'actions' }>, ctx: OutputContext): HTMLElement {
+  return h(
+    'section',
+    { class: 'out out-actions-block' },
+    o.label ? h('div', { class: 'out-head' }, h('span', { class: 'out-label' }, o.label)) : null,
+    h(
+      'div',
+      { class: 'action-row' },
+      ...o.actions.map((a) =>
+        button(a.label, () => ctx.setOptions?.(a.options), a.primary ? 'btn-run' : 'btn-ghost'),
+      ),
+    ),
+  );
+}
+
+function reorderBlock(o: Extract<Output, { type: 'reorder' }>, ctx: OutputContext): HTMLElement {
+  const items = [...o.items];
+  const list = h('ol', { class: 'reorder' });
+  const commit = () => ctx.setOptions?.({ [o.option]: items.map((i) => i.id).join(' ') });
+  const move = (from: number, to: number) => {
+    if (to < 0 || to >= items.length || from === to) return;
+    const [it] = items.splice(from, 1);
+    items.splice(to, 0, it!);
+    draw();
+    commit();
+  };
+  let dragFrom = -1;
+  const draw = () => {
+    clear(list);
+    items.forEach((it, i) => {
+      list.append(
+        h(
+          'li',
+          {
+            class: 'reorder-item',
+            draggable: 'true',
+            ondragstart: (ev: DragEvent) => {
+              dragFrom = i;
+              ev.dataTransfer?.setData('text/plain', it.id);
+            },
+            ondragover: (ev: DragEvent) => ev.preventDefault(),
+            ondrop: (ev: DragEvent) => {
+              ev.preventDefault();
+              move(dragFrom, i);
+            },
+          },
+          h('span', { class: 'reorder-grip', 'aria-hidden': 'true' }, '⋮⋮'),
+          h('span', { class: 'reorder-label' }, it.label),
+          it.detail ? h('span', { class: 'reorder-detail' }, it.detail) : null,
+          h(
+            'span',
+            { class: 'reorder-btns' },
+            h(
+              'button',
+              {
+                type: 'button',
+                class: 'btn btn-ghost',
+                'aria-label': t('ui.reorder.up', { item: it.label }),
+                disabled: i === 0,
+                onclick: () => move(i, i - 1),
+              },
+              '↑',
+            ),
+            h(
+              'button',
+              {
+                type: 'button',
+                class: 'btn btn-ghost',
+                'aria-label': t('ui.reorder.down', { item: it.label }),
+                disabled: i === items.length - 1,
+                onclick: () => move(i, i + 1),
+              },
+              '↓',
+            ),
+          ),
+        ),
+      );
+    });
+  };
+  draw();
+  return h(
+    'section',
+    { class: 'out out-reorder' },
+    header(o.label, t('ui.reorder.hint'), []),
+    list,
+  );
+}
+
 function noteBlock(o: Extract<Output, { type: 'note' }>, ctx: OutputContext): HTMLElement {
   return h(
     'p',
@@ -443,6 +533,10 @@ export function renderResult(result: ToolResult, ctx: OutputContext): HTMLElemen
         return pictureBlock(o, ctx);
       case 'map':
         return mapBlock(o);
+      case 'actions':
+        return actionsBlock(o, ctx);
+      case 'reorder':
+        return reorderBlock(o, ctx);
     }
   });
 }

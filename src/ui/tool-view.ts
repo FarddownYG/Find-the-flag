@@ -604,6 +604,11 @@ export function renderTool(
         ...renderResult(result, {
           highlight: flags,
           pipe: (id, r) => (setPending(id, r), open(id)),
+          setOptions: (values) => {
+            Object.assign(state.values, values);
+            renderOptions();
+            run();
+          },
         }),
       );
       if (!result.length) outBody.append(h('p', { class: 'empty' }, t('ui.tool.noOutput')));

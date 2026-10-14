@@ -44,6 +44,12 @@ export function resultToText(result: ToolResult): string {
       case 'map':
         parts.push(`${o.lat.toFixed(6)}, ${o.lon.toFixed(6)}`, mapLinks(o.lat, o.lon).google);
         break;
+      case 'actions':
+        parts.push(...o.actions.map((a) => a.label));
+        break;
+      case 'reorder':
+        parts.push(...o.items.map((i) => `${i.label}${i.detail ? ` ${i.detail}` : ''}`));
+        break;
     }
   }
   return parts.join('\n');

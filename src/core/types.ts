@@ -152,6 +152,25 @@ export type Output =
    * only loads OpenStreetMap tiles after the user clicks "Show map".
    */
   | { type: 'map'; label?: string; lat: number; lon: number; zoom?: number }
+  /**
+   * Buttons that set option values and re-run the tool ("Apply this order", "Use height 480").
+   * This is how a tool proposes a fix the user can accept in one click.
+   */
+  | {
+      type: 'actions';
+      label?: string;
+      actions: { label: string; options: Record<string, unknown>; primary?: boolean }[];
+    }
+  /**
+   * A list the user reorders (drag, or the ↑/↓ buttons). Every change writes the item ids,
+   * space-separated, into the text option `option` and re-runs the tool.
+   */
+  | {
+      type: 'reorder';
+      label?: string;
+      option: string;
+      items: { id: string; label: string; detail?: string }[];
+    }
   | { type: 'note'; level: 'info' | 'warn' | 'error' | 'success'; text: string };
 
 export type ToolResult = Output[];
