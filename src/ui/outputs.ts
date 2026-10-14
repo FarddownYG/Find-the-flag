@@ -480,6 +480,15 @@ function endDrag(): void {
   d?.finish();
 }
 
+/** Between the button press and the first move (when dragstart fires) the list must stay too. */
+let nativeDrag = false;
+function pressItem(ev: PointerEvent): void {
+  if (ev.button !== 0) return;
+  startDrag();
+  // A native drag swallows the pointerup: dragend ends the hold instead.
+  window.addEventListener('pointerup', () => nativeDrag || endDrag(), { once: true });
+}
+
 function reorderBlock(o: Extract<Output, { type: 'reorder' }>, ctx: OutputContext): HTMLElement {
   const items = [...o.items];
   const list = h('ol', { class: 'reorder' });
@@ -537,12 +546,17 @@ function reorderBlock(o: Extract<Output, { type: 'reorder' }>, ctx: OutputContex
           {
             class: 'reorder-item',
             draggable: 'true',
+            onpointerdown: pressItem,
             ondragstart: (ev: DragEvent) => {
               dragFrom = i;
-              startDrag();
+              nativeDrag = true;
+              if (!dragEnd) startDrag();
               ev.dataTransfer?.setData('text/plain', it.id);
             },
-            ondragend: endDrag,
+            ondragend: () => {
+              nativeDrag = false;
+              endDrag();
+            },
             ondragover: (ev: DragEvent) => ev.preventDefault(),
             ondrop: (ev: DragEvent) => {
               ev.preventDefault();

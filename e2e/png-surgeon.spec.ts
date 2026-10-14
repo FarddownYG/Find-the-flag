@@ -61,6 +61,17 @@ const labels = async (page: Page) =>
   );
 const orderField = (page: Page) => page.locator('#opt-png-surgeon-order');
 
+/**
+ * Drag one list item onto another once the tool has finished re-running. A move re-runs the
+ * tool; dragging while the page is still drawing that result can delay dragstart past the
+ * moment Playwright looks for it, and the drop is then lost (a test-only race).
+ */
+async function dragItem(page: Page, from: number, to: number) {
+  await expect(page.locator('.is-busy')).toHaveCount(0, { timeout: 15_000 });
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => resolve(null))));
+  await items(page).nth(from).dragTo(items(page).nth(to));
+}
+
 async function open(page: Page, baseURL: string | undefined) {
   const appOrigin = new URL(baseURL ?? 'http://localhost:4173/').origin;
   const w = watch(page, appOrigin);
@@ -197,13 +208,13 @@ test('png surgeon: dragging writes the order shown, and the list shows what was 
   await drop(page, 'png-shuffled-idat.png');
   await expect(summary(page)).toHaveText(SUCCESS, { timeout: 15_000 });
   const before = await labels(page);
-  await items(page).nth(0).dragTo(items(page).nth(3));
+  await dragItem(page, 0, 3);
   const dragged = [...before.slice(1, 4), before[0]!, ...before.slice(4)];
   await expect(orderField(page)).toHaveValue(dragged.join(' '), { timeout: 15_000 });
   await expect(summary(page)).toHaveClass(/note-error/, { timeout: 15_000 });
   expect(await labels(page)).toEqual(dragged);
   // Dragging it back gives the working order back, not a third one.
-  await items(page).nth(3).dragTo(items(page).nth(0));
+  await dragItem(page, 3, 0);
   await expect(orderField(page)).toHaveValue(before.join(' '), { timeout: 15_000 });
   await expect(summary(page)).toHaveText(
     'Restored: 11 IDAT chunks reordered (order set in the list); zlib stream OK; image below.',
@@ -227,7 +238,7 @@ for (const reading of ['auto', 'position', 'chunk'] as const) {
       const now = await labels(page);
       const from = now.indexOf(NO_HINT_TARGET[i]!);
       if (from === i) continue;
-      await items(page).nth(from).dragTo(items(page).nth(i));
+      await dragItem(page, from, i);
       const next = now.slice();
       const [moved] = next.splice(from, 1);
       next.splice(i, 0, moved!);
