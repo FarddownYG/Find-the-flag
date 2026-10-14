@@ -1,302 +1,23 @@
-import { defineTool, number, text, toggle } from '../../core/define';
+import { defineTool, number, select, text, toggle } from '../../core/define';
 import { ToolError } from '../../core/errors';
-import type { Output } from '../../core/types';
 import { concatBytes, utf8Encode } from '../../lib/bytes';
+import {
+  compile,
+  execute,
+  fromBrainfuck,
+  textToBrainfuck,
+  toBrainfuck,
+} from './_esolang-brainfuck';
+import { grouped, LANGUAGE_NAME, type Language } from './_esolang-common';
+import { valuesToDeadfish } from './_esolang-deadfish';
+import { detectLanguage, guessLanguage } from './_esolang-detect';
+import { describeRun, isBrainfuckFamily, runProgram } from './_esolang-run';
 
-export type Language = 'brainfuck' | 'ook' | 'short-ook';
-
-const LANGUAGE_NAME: Record<Language, string> = {
-  brainfuck: 'Brainfuck',
-  ook: 'Ook!',
-  'short-ook': 'Short Ook',
-};
-
-/** Ook! words come in pairs; each pair is one Brainfuck instruction. */
-const OOK_PAIRS: Record<string, string> = {
-  '.?': '>',
-  '?.': '<',
-  '..': '+',
-  '!!': '-',
-  '!.': '.',
-  '.!': ',',
-  '!?': '[',
-  '?!': ']',
-};
-const BF_TO_OOK: Record<string, string> = {
-  '>': 'Ook. Ook?',
-  '<': 'Ook? Ook.',
-  '+': 'Ook. Ook.',
-  '-': 'Ook! Ook!',
-  '.': 'Ook! Ook.',
-  ',': 'Ook. Ook!',
-  '[': 'Ook! Ook?',
-  ']': 'Ook? Ook!',
-};
-const BF_TO_SHORT: Record<string, string> = Object.fromEntries(
-  Object.entries(OOK_PAIRS).map(([pair, bf]) => [bf, pair]),
-);
-
-const BF_CHARS = /[-+<>[\].,]/;
+export type { Language } from './_esolang-common';
+export type { RunResult } from './_esolang-common';
+export { compile, detectLanguage, execute, fromBrainfuck, textToBrainfuck, toBrainfuck };
 
 const STEP_LIMIT_MAX = 500_000_000;
-const TAPE_START = 30_000;
-const TAPE_MAX = 1 << 24;
-const OUTPUT_MAX = 8 << 20;
-
-/** 1234567 -> "1 234 567" (locale independent, so the output is deterministic). */
-const grouped = (n: number) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
-
-function lineCol(src: string, offset: number): string {
-  const before = src.slice(0, offset);
-  const line = before.split('\n').length;
-  const col = offset - before.lastIndexOf('\n');
-  return `line ${line}, column ${col}`;
-}
-
-export function detectLanguage(src: string): Language {
-  if ((src.match(/\bOok[.?!]/gi) ?? []).length >= 2) return 'ook';
-  const compact = src.replace(/\s+/g, '');
-  if (
-    compact.length >= 2 &&
-    compact.length % 2 === 0 &&
-    /^[.?!]+$/.test(compact) &&
-    /[?!]/.test(compact)
-  ) {
-    return 'short-ook';
-  }
-  return 'brainfuck';
-}
-
-interface Instructions {
-  /** Brainfuck instruction characters only. */
-  code: string;
-  /** Offset in the source text of each instruction (for error messages). */
-  at: number[];
-}
-
-/** Reduce a program in any supported dialect to plain Brainfuck instructions. */
-export function toBrainfuck(src: string, language: Language): Instructions {
-  const code: string[] = [];
-  const at: number[] = [];
-  if (language === 'brainfuck') {
-    for (let i = 0; i < src.length; i++) {
-      if (BF_CHARS.test(src[i]!)) {
-        code.push(src[i]!);
-        at.push(i);
-      }
-    }
-    return { code: code.join(''), at };
-  }
-  const symbols: { ch: string; at: number }[] = [];
-  if (language === 'ook') {
-    for (const m of src.matchAll(/\bOok([.?!])/gi)) symbols.push({ ch: m[1]!, at: m.index });
-  } else {
-    for (let i = 0; i < src.length; i++) {
-      if (src[i] === '.' || src[i] === '?' || src[i] === '!') symbols.push({ ch: src[i]!, at: i });
-    }
-  }
-  if (symbols.length % 2 !== 0) {
-    const last = symbols[symbols.length - 1]!;
-    throw new ToolError(
-      `${LANGUAGE_NAME[language]} instructions are pairs of symbols, but the last one (${lineCol(src, last.at)}) has no partner. Check for a missing or extra word.`,
-    );
-  }
-  for (let i = 0; i < symbols.length; i += 2) {
-    const instruction = OOK_PAIRS[symbols[i]!.ch + symbols[i + 1]!.ch];
-    if (instruction === undefined) continue; // "Ook? Ook?" is not an instruction
-    code.push(instruction);
-    at.push(symbols[i]!.at);
-  }
-  return { code: code.join(''), at };
-}
-
-const ADD = 0;
-const MOVE = 1;
-const OUT = 2;
-const IN = 3;
-const JZ = 4;
-const JNZ = 5;
-
-interface Program {
-  op: Uint8Array;
-  arg: Int32Array;
-  /** How many source instructions each op stands for (runs are folded into one op). */
-  weight: Int32Array;
-}
-
-/** Fold runs of + - and < >, and resolve loop jumps. Throws on unbalanced brackets. */
-export function compile(src: string, { code, at }: Instructions): Program {
-  const op: number[] = [];
-  const arg: number[] = [];
-  const weight: number[] = [];
-  const open: { op: number; at: number }[] = [];
-  const push = (o: number, a: number, w: number) => {
-    op.push(o);
-    arg.push(a);
-    weight.push(w);
-  };
-  let i = 0;
-  while (i < code.length) {
-    const ch = code[i]!;
-    if (ch === '+' || ch === '-') {
-      let net = 0;
-      const from = i;
-      for (; i < code.length && (code[i] === '+' || code[i] === '-'); i++) {
-        net += code[i] === '+' ? 1 : -1;
-      }
-      push(ADD, net, i - from);
-    } else if (ch === '>' || ch === '<') {
-      let net = 0;
-      const from = i;
-      for (; i < code.length && (code[i] === '>' || code[i] === '<'); i++) {
-        net += code[i] === '>' ? 1 : -1;
-      }
-      push(MOVE, net, i - from);
-    } else if (ch === '.') {
-      push(OUT, 0, 1);
-      i++;
-    } else if (ch === ',') {
-      push(IN, 0, 1);
-      i++;
-    } else if (ch === '[') {
-      open.push({ op: op.length, at: at[i]! });
-      push(JZ, 0, 1);
-      i++;
-    } else {
-      const start = open.pop();
-      if (!start) {
-        throw new ToolError(
-          `Unmatched "]" at ${lineCol(src, at[i]!)}: there is no "[" to close. Remove it or add the missing "[".`,
-        );
-      }
-      arg[start.op] = op.length + 1;
-      push(JNZ, start.op + 1, 1);
-      i++;
-    }
-  }
-  const dangling = open.pop();
-  if (dangling) {
-    throw new ToolError(
-      `Unmatched "[" at ${lineCol(src, dangling.at)}: the loop is never closed. Add the missing "]".`,
-    );
-  }
-  return {
-    op: Uint8Array.from(op),
-    arg: Int32Array.from(arg),
-    weight: Int32Array.from(weight),
-  };
-}
-
-export interface RunResult {
-  output: Uint8Array;
-  steps: number;
-  stopped: 'finished' | 'step-limit' | 'output-limit';
-}
-
-/** Interpret a compiled program: 8-bit wrapping cells, tape growing to the right, EOF reads 0. */
-export function execute(prog: Program, input: Uint8Array, stepLimit: number): RunResult {
-  const { op, arg, weight } = prog;
-  let tape = new Uint8Array(TAPE_START);
-  let ptr = 0;
-  let pc = 0;
-  let steps = 0;
-  let inPos = 0;
-  let out = new Uint8Array(256);
-  let outLen = 0;
-  let stopped: RunResult['stopped'] = 'finished';
-  while (pc < op.length) {
-    if (steps >= stepLimit) {
-      stopped = 'step-limit';
-      break;
-    }
-    steps += weight[pc]!;
-    switch (op[pc]) {
-      case ADD:
-        tape[ptr] = tape[ptr]! + arg[pc]!;
-        break;
-      case MOVE:
-        ptr += arg[pc]!;
-        if (ptr < 0) {
-          throw new ToolError(
-            `The pointer moved left of the first cell after ${grouped(steps)} steps. The program expects a tape that wraps or extends to the left; it is probably not plain Brainfuck.`,
-          );
-        }
-        if (ptr >= tape.length) {
-          if (ptr >= TAPE_MAX) {
-            throw new ToolError(
-              `The pointer ran past ${grouped(TAPE_MAX)} cells after ${grouped(steps)} steps: the program is probably looping forever to the right.`,
-            );
-          }
-          const grown = new Uint8Array(Math.min(TAPE_MAX, Math.max(tape.length * 2, ptr + 1)));
-          grown.set(tape);
-          tape = grown;
-        }
-        break;
-      case OUT:
-        if (outLen >= OUTPUT_MAX) {
-          stopped = 'output-limit';
-          pc = op.length;
-          break;
-        }
-        if (outLen === out.length) {
-          const grown = new Uint8Array(out.length * 2);
-          grown.set(out);
-          out = grown;
-        }
-        out[outLen++] = tape[ptr]!;
-        break;
-      case IN:
-        tape[ptr] = inPos < input.length ? input[inPos++]! : 0;
-        break;
-      case JZ:
-        if (tape[ptr] === 0) pc = arg[pc]! - 1;
-        break;
-      default:
-        if (tape[ptr] !== 0) pc = arg[pc]! - 1;
-    }
-    pc++;
-  }
-  return { output: out.slice(0, outLen), steps, stopped };
-}
-
-/** Bytes needed to move a cell by `delta` (cell 0 is the printed cell, cell 1 a loop counter). */
-function adjust(delta: number): string {
-  const sign = delta >= 0 ? '+' : '-';
-  const k = Math.abs(delta);
-  let best = sign.repeat(k);
-  for (let a = 2; a <= k; a++) {
-    const b = Math.floor(k / a);
-    const rest = k - a * b;
-    const loop = `>${'+'.repeat(a)}[<${sign.repeat(b)}>-]<${sign.repeat(rest)}`;
-    if (loop.length < best.length) best = loop;
-  }
-  return best;
-}
-
-/** A simple valid Brainfuck program that prints exactly these bytes. */
-export function textToBrainfuck(bytes: Uint8Array): string {
-  let program = '';
-  let cell = 0;
-  for (const b of bytes) {
-    const delta = ((b - cell + 128) & 255) - 128; // shortest way round the 8-bit wheel
-    program += `${adjust(delta)}.`;
-    cell = b;
-  }
-  return program;
-}
-
-/** Re-spell Brainfuck instructions in another dialect, a few instructions per line. */
-export function fromBrainfuck(code: string, language: Language): string {
-  if (language === 'brainfuck') return code;
-  const table = language === 'ook' ? BF_TO_OOK : BF_TO_SHORT;
-  const words = [...code].map((c) => table[c]!);
-  const lines: string[] = [];
-  const perLine = language === 'ook' ? 6 : 24;
-  for (let i = 0; i < words.length; i += perLine) {
-    lines.push(words.slice(i, i + perLine).join(language === 'ook' ? ' ' : ''));
-  }
-  return lines.join('\n');
-}
 
 const ESCAPES: Record<string, number> = { n: 10, r: 13, t: 9, '0': 0, '\\': 92 };
 
@@ -317,18 +38,34 @@ export function inputBytes(s: string): Uint8Array {
   return concatBytes(...parts);
 }
 
+/** Languages that "Text → program" can write. */
+const GENERATED =
+  'Brainfuck, Ook!, Short Ook, Blub, Pikalang, Alphuck, ReverseFuck, COW and Deadfish';
+
 export default defineTool({
   id: 'esolang',
-  name: 'Brainfuck / Ook! interpreter',
+  name: 'Esoteric languages (Brainfuck, Ook!, Befunge, Malbolge…)',
   category: 'misc',
   description:
-    'Run Brainfuck, Ook! and Short Ook programs (language is detected), or turn text into a Brainfuck program.',
+    'Run Brainfuck and its dialects (Ook!, COW, Blub, Pikalang…), Deadfish, Befunge-93 and Malbolge programs (language is detected), or turn text into a program. Whitespace and Piet programs have their own tools.',
   tags: [
     'brainfuck',
     'bf',
     'ook',
     'ook!',
     'short ook',
+    'cow',
+    'moo',
+    'blub',
+    'pikalang',
+    'pikachu',
+    'alphuck',
+    'reversefuck',
+    'deadfish',
+    'xkcd deadfish',
+    'befunge',
+    'befunge-93',
+    'malbolge',
     'esolang',
     'esoteric',
     'interpreter',
@@ -341,18 +78,33 @@ export default defineTool({
   options: {
     mode: toggle('Mode', [
       { value: 'run', label: 'Run program' },
-      { value: 'generate', label: 'Text → Brainfuck' },
+      { value: 'generate', label: 'Text → program' },
     ]),
-    language: toggle('Language', [
-      { value: 'auto', label: 'Auto' },
-      { value: 'brainfuck', label: 'Brainfuck' },
-      { value: 'ook', label: 'Ook!' },
-      { value: 'short-ook', label: 'Short Ook' },
-    ]),
+    language: select(
+      'Language',
+      [
+        { value: 'auto', label: 'Auto-detect' },
+        { value: 'brainfuck', label: 'Brainfuck' },
+        { value: 'ook', label: 'Ook!' },
+        { value: 'short-ook', label: 'Short Ook (. ? ! pairs)' },
+        { value: 'cow', label: 'COW (moo, mOo, MOO…)' },
+        { value: 'blub', label: 'Blub' },
+        { value: 'pikalang', label: 'Pikalang' },
+        { value: 'alphuck', label: 'Alphuck (a c e i j o p s)' },
+        { value: 'reversefuck', label: 'ReverseFuck' },
+        { value: 'deadfish', label: 'Deadfish (i d s o)' },
+        { value: 'xkcd-deadfish', label: 'XKCD Deadfish (x d k c)' },
+        { value: 'befunge', label: 'Befunge-93' },
+        { value: 'malbolge', label: 'Malbolge' },
+        { value: 'malbolge-normalized', label: 'Malbolge (normalised: i < / * j p o v)' },
+      ],
+      'auto',
+    ),
     input: text('Program input', '', {
-      placeholder: 'read by ","  (\\n and \\xNN allowed)',
-      hint: 'Bytes the program reads with ",". Reading past the end gives 0.',
-      showIf: (v) => v.mode === 'run',
+      placeholder: 'read by the program  (\\n and \\xNN allowed)',
+      hint: 'Bytes the program reads (Brainfuck ",", Befunge "~" and "&", Malbolge "/", COW "Moo" and "oom"). Reading past the end gives 0 (Brainfuck family, COW), -1 (Befunge) or 59048 (Malbolge).',
+      showIf: (v) =>
+        v.mode === 'run' && v.language !== 'deadfish' && v.language !== 'xkcd-deadfish',
     }),
     steps: number('Step limit', 10_000_000, {
       min: 1000,
@@ -361,6 +113,25 @@ export default defineTool({
       hint: 'Stops infinite loops. Output printed so far is still shown.',
       showIf: (v) => v.mode === 'run',
     }),
+    seed: number('Random seed', 1, {
+      min: 0,
+      max: 4_294_967_295,
+      hint: 'Seeds the "?" command of Befunge, so the same program and seed always take the same path.',
+      showIf: (v) => v.mode === 'run' && v.language === 'befunge',
+    }),
+    deadfish: toggle(
+      'Deadfish output',
+      [
+        { value: 'numbers', label: 'Numbers' },
+        { value: 'chars', label: 'ASCII characters' },
+      ],
+      'numbers',
+      {
+        hint: 'What "o" (or "c") prints: the value as a number, as the language says, or as one character (the Deadfish~ habit, handy for hidden messages).',
+        showIf: (v) =>
+          v.mode === 'run' && (v.language === 'deadfish' || v.language === 'xkcd-deadfish'),
+      },
+    ),
   },
   examples: [
     {
@@ -408,6 +179,76 @@ Ook! Ook.`,
       expect: 'flag{ook}',
     },
     {
+      label: 'COW',
+      input: `moO MoO MoO MoO MoO MoO MoO MoO
+MOO mOo MoO MoO MoO MoO MoO MoO
+MoO MoO MoO MoO moO MOo moo mOo
+Moo MoO MoO MoO MoO MoO MoO MoO
+MoO MoO MoO MoO MoO MoO MoO Moo
+MOo MOo MOo MOo MOo MOo MOo MOo
+MOo MOo MOo MOo MOo MOo Moo`,
+      expect: 'FTF',
+    },
+    {
+      label: 'Blub',
+      input: `Blub. Blub? Blub. Blub. Blub. Blub. Blub. Blub. Blub. Blub. Blub. Blub.
+Blub. Blub. Blub. Blub. Blub! Blub? Blub? Blub. Blub. Blub. Blub. Blub.
+Blub. Blub. Blub. Blub. Blub. Blub. Blub. Blub. Blub. Blub. Blub. Blub.
+Blub. Blub. Blub. Blub. Blub. Blub? Blub! Blub! Blub? Blub! Blub? Blub.
+Blub! Blub. Blub. Blub. Blub. Blub. Blub. Blub. Blub. Blub. Blub. Blub.
+Blub. Blub. Blub. Blub. Blub. Blub. Blub. Blub. Blub. Blub. Blub. Blub.
+Blub. Blub. Blub. Blub. Blub. Blub. Blub! Blub. Blub! Blub! Blub! Blub!
+Blub! Blub! Blub! Blub! Blub! Blub! Blub! Blub! Blub! Blub! Blub! Blub!
+Blub! Blub! Blub! Blub! Blub! Blub! Blub! Blub! Blub! Blub! Blub! Blub!
+Blub! Blub.`,
+      expect: 'FTF',
+    },
+    {
+      label: 'Pikalang',
+      input: `pi pi pi pi pi pi pi pi pi pi
+pika pipi pi pi pi pi pi pi pi pipi
+pi pi pi pi pi pi pi pi pichu pichu
+ka chu pipi pikachu pipi pi pi pi pi pikachu
+pichu pikachu`,
+      expect: 'FTF',
+    },
+    {
+      label: 'Alphuck',
+      input: 'eeeeeeeeeepaeeeeeeeaeeeeeeeeccisajaeeeejcj',
+      expect: 'FTF',
+    },
+    {
+      label: 'ReverseFuck',
+      input: '----------]<-------<-------->>+[<,<----,>,',
+      expect: 'FTF',
+    },
+    {
+      label: 'Deadfish',
+      input: 'iiisdsiiiiiioiiiiiiiiiiiiiioddddddddddddddo',
+      expect: 'FTF',
+    },
+    {
+      label: 'XKCD Deadfish',
+      input: 'xxxkdkxxxxxxcxxxxxxxxxxxxxxcddddddddddddddc',
+      expect: 'FTF',
+    },
+    {
+      label: 'Befunge-93',
+      input: '>"!egnufeB ,olleH">:#,_@',
+      expect: 'Hello, Befunge!',
+    },
+    {
+      label: 'Befunge reads numbers',
+      input: '&&+.@',
+      options: { input: '20 22' },
+      expect: '42',
+    },
+    {
+      label: 'Malbolge',
+      input: '(CBA#9]~654X210TA3210/.-,+*)(\'&%$#"!~}|{zyxwZ5t3V1jo.zPkj',
+      expect: 'FTF',
+    },
+    {
       label: 'Reads input (cat)',
       input: ',[.,]',
       options: { input: 'flag{echo}' },
@@ -428,53 +269,44 @@ Ook! Ook.`,
   ],
   detect({ text: sample }) {
     if (!sample || sample.length > 2_000_000) return null;
-    const t = sample.trim();
-    if ((t.match(/\bOok[.?!]/gi) ?? []).length >= 4) {
-      return { score: 0.95, options: { language: 'ook' }, reason: 'Ook! words' };
-    }
-    const compact = t.replace(/\s+/g, '');
-    if (compact.length < 16) return null;
-    if (
-      compact.length % 2 === 0 &&
-      /^[.?!]+$/.test(compact) &&
-      compact.includes('?') &&
-      compact.includes('!')
-    ) {
-      return { score: 0.7, options: { language: 'short-ook' }, reason: 'Only . ? ! (Short Ook)' };
-    }
-    const bf = (compact.match(/[-+<>[\].,]/g) ?? []).length;
-    let depth = 0;
-    let balanced = true;
-    for (const ch of compact) {
-      if (ch === '[') depth++;
-      else if (ch === ']' && --depth < 0) balanced = false;
-    }
-    const looksLikeCode = compact.includes('[') || (/\+/.test(compact) && /[<>]/.test(compact));
-    if (!balanced || depth !== 0 || !looksLikeCode) return null;
-    const ratio = bf / compact.length;
-    if (ratio >= 0.9) {
-      return { score: 0.9, options: { language: 'brainfuck' }, reason: 'Only Brainfuck symbols' };
-    }
-    return ratio >= 0.75
-      ? { score: 0.55, options: { language: 'brainfuck' }, reason: 'Mostly Brainfuck symbols' }
+    const guess = guessLanguage(sample);
+    return guess
+      ? { score: guess.score, options: { language: guess.language }, reason: guess.reason }
       : null;
   },
-  run(src, { mode, language, input, steps }) {
+  run(src, { mode, language, input, steps, seed, deadfish }) {
     if (mode === 'generate') {
       const bytes = utf8Encode(src);
       if (bytes.length === 0) throw new ToolError('Type the text to turn into a program.');
       const target: Language = language === 'auto' ? 'brainfuck' : language;
-      const bf = textToBrainfuck(bytes);
+      let program: string;
+      let count: number;
+      let reading = '';
+      if (target === 'deadfish' || target === 'xkcd-deadfish') {
+        program = valuesToDeadfish(Array.from(bytes), target);
+        count = program.length;
+        reading =
+          ' It prints each byte as a number: run it with "ASCII characters" selected to read the text.';
+      } else if (isBrainfuckFamily(target) || target === 'cow') {
+        if (target === 'cow' && bytes.includes(0)) {
+          throw new ToolError(
+            'COW cannot print a zero byte (Moo reads a character when the cell is 0). Remove the NUL characters from the text.',
+          );
+        }
+        const bf = textToBrainfuck(bytes);
+        program = fromBrainfuck(bf, target);
+        count = bf.length;
+      } else {
+        throw new ToolError(
+          `Text → program writes ${GENERATED} programs. ${LANGUAGE_NAME[target]} can only be run here.`,
+        );
+      }
       return [
-        {
-          type: 'text',
-          label: `${LANGUAGE_NAME[target]} program`,
-          value: fromBrainfuck(bf, target),
-        },
+        { type: 'text', label: `${LANGUAGE_NAME[target]} program`, value: program },
         {
           type: 'note',
           level: 'info',
-          text: `${bytes.length} byte(s) became ${grouped(bf.length)} instructions. Run it with this tool to check.`,
+          text: `${bytes.length} byte(s) became ${grouped(count)} instructions. Run it with this tool to check.${reading}`,
         },
       ];
     }
@@ -482,48 +314,12 @@ Ook! Ook.`,
       throw new ToolError('The step limit must be a positive number.');
     }
     const detected = language === 'auto' ? detectLanguage(src) : language;
-    const instructions = toBrainfuck(src, detected);
-    if (instructions.code.length === 0) {
-      throw new ToolError(
-        `No ${LANGUAGE_NAME[detected]} instructions found. Paste a program made of + - < > [ ] . , (Brainfuck) or Ook. Ook? Ook! words.`,
-      );
-    }
-    const result = execute(compile(src, instructions), inputBytes(input), steps);
-    const out: Output[] = [];
-    if (result.output.length > 0) {
-      out.push({
-        type: 'bytes',
-        label: 'Program output',
-        value: result.output,
-        filename: 'output.bin',
-      });
-    }
-    const how =
-      language === 'auto' ? `${LANGUAGE_NAME[detected]} (auto-detected)` : LANGUAGE_NAME[detected];
-    out.push({
-      type: 'note',
-      level: 'info',
-      text: `${how}: ${grouped(result.steps)} steps executed, ${grouped(result.output.length)} byte(s) printed.`,
+    const run = runProgram(src, detected, {
+      input: inputBytes(input),
+      steps,
+      seed: Number.isFinite(seed) ? Math.trunc(seed) : 1,
+      deadfishOutput: deadfish,
     });
-    if (result.stopped === 'step-limit') {
-      out.push({
-        type: 'note',
-        level: 'warn',
-        text: `Stopped at the step limit (${grouped(steps)} steps): the program probably loops forever, or needs a higher limit. Output so far is shown.`,
-      });
-    } else if (result.stopped === 'output-limit') {
-      out.push({
-        type: 'note',
-        level: 'warn',
-        text: `Stopped after ${grouped(OUTPUT_MAX)} bytes of output. The program probably prints forever.`,
-      });
-    } else if (result.output.length === 0) {
-      out.push({
-        type: 'note',
-        level: 'warn',
-        text: 'The program finished without printing anything.',
-      });
-    }
-    return out;
+    return describeRun(run, detected, language === 'auto', steps);
   },
 });
