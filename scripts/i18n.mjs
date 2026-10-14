@@ -2,7 +2,9 @@
 //   node scripts/i18n.mjs extract   copy tool/category English text from the code into en.json
 //   node scripts/i18n.mjs check     fail on any gap between locales (CI runs this)
 //   node scripts/i18n.mjs check --prefix=tool.base64.   only report keys under a prefix
-import { readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+//   node scripts/i18n.mjs add frag.json   merge { en: {...}, fr: {...}, ... } into the locales
+//   node scripts/i18n.mjs missing fr tool.base64.   English text of keys fr still lacks
+import { mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { createServer } from 'vite';
 
@@ -12,9 +14,29 @@ const LOCALES = ['en', 'fr', 'ru', 'zh', 'hi'];
 // French "many" only applies to exact millions; falling back to "other" reads correctly.
 const OPTIONAL_FORMS = { fr: ['many'] };
 const PLURAL = /_(zero|one|two|few|many|other)$/;
-const AUTO = /^tool\.[a-z0-9-]+\.(name|description|placeholder|options\..+|examples\..+)$|^cat\./;
+const AUTO =
+  /^tool\.[a-z0-9-]+\.(name|description|placeholder|options\..+|examples\..+)$|^cat\.|^sig\./;
 
 const read = (l) => JSON.parse(readFileSync(join(DIR, `${l}.json`), 'utf8'));
+
+/** Serialise writers (several agents or scripts may update the locales at once). */
+async function withLock(fn) {
+  const lock = join(DIR, '.lock');
+  for (let i = 0; ; i++) {
+    try {
+      mkdirSync(lock);
+      break;
+    } catch {
+      if (i > 600) throw new Error(`Locale lock held for too long: remove ${lock} if stale.`);
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  }
+  try {
+    return await fn();
+  } finally {
+    rmSync(lock, { recursive: true, force: true });
+  }
+}
 const write = (l, d) => {
   const sorted = Object.fromEntries(
     Object.keys(d)
@@ -33,7 +55,8 @@ async function codeDefaults() {
   try {
     const { TOOLS } = await vite.ssrLoadModule('/src/core/registry.ts');
     const tt = await vite.ssrLoadModule('/src/i18n/tool-text.ts');
-    const out = { ...tt.categoryDefaultStrings() };
+    const { SIGNATURES } = await vite.ssrLoadModule('/src/lib/signatures.ts');
+    const out = { ...tt.categoryDefaultStrings(), ...tt.signatureDefaultStrings(SIGNATURES) };
     for (const tool of TOOLS) Object.assign(out, tt.toolDefaultStrings(tool));
     return out;
   } finally {
@@ -84,8 +107,12 @@ function usedKeys() {
 }
 
 async function extract() {
-  const en = read('en');
   const defaults = await codeDefaults();
+  await withLock(() => extractInto(defaults));
+}
+
+function extractInto(defaults) {
+  const en = read('en');
   let added = 0;
   let changed = 0;
   let removed = 0;
@@ -200,11 +227,57 @@ async function check(prefix) {
   console.log(`i18n check: ${enBases.size} keys × ${LOCALES.length} locales consistent.`);
 }
 
+/** Merge a fragment { en: {...}, fr: {...}, ... } into the locale files (under the lock). */
+async function add(file) {
+  const frag = JSON.parse(readFileSync(file, 'utf8'));
+  const unknown = Object.keys(frag).filter((l) => !LOCALES.includes(l));
+  if (unknown.length) throw new Error(`Unknown locale(s) in ${file}: ${unknown.join(', ')}`);
+  await withLock(() => {
+    for (const l of LOCALES) {
+      if (!frag[l]) continue;
+      const d = read(l);
+      for (const [k, v] of Object.entries(frag[l])) {
+        if (typeof v !== 'string') throw new Error(`${l}: "${k}" must be a string`);
+        d[k] = v;
+      }
+      write(l, d);
+    }
+  });
+  console.log(
+    `Merged ${file}: ${LOCALES.map((l) => `${l} ${Object.keys(frag[l] ?? {}).length}`).join(', ')}`,
+  );
+}
+
+/** Print the English text of keys a locale lacks (optionally under a prefix), as JSON. */
+function missing(locale, prefix = '') {
+  const en = read('en');
+  const d = read(locale);
+  const cats = new Intl.PluralRules(locale).resolvedOptions().pluralCategories;
+  const out = {};
+  for (const [base, forms] of bases(en)) {
+    if (!base.startsWith(prefix)) continue;
+    if (!forms.size) {
+      if (!(base in d)) out[base] = en[base];
+      continue;
+    }
+    for (const c of cats) {
+      if ((OPTIONAL_FORMS[locale] ?? []).includes(c)) continue;
+      const k = `${base}_${c}`;
+      if (!(k in d)) out[k] = en[k] ?? en[`${base}_other`];
+    }
+  }
+  console.log(JSON.stringify(out, null, 2));
+}
+
 const cmd = process.argv[2];
 if (cmd === 'extract') await extract();
 else if (cmd === 'check')
   await check(process.argv.find((a) => a.startsWith('--prefix='))?.slice(9));
+else if (cmd === 'add') await add(process.argv[3]);
+else if (cmd === 'missing') missing(process.argv[3], process.argv[4] ?? '');
 else {
-  console.error('usage: node scripts/i18n.mjs extract|check');
+  console.error(
+    'usage: node scripts/i18n.mjs extract | check [--prefix=…] | add <frag.json> | missing <locale> [prefix]',
+  );
   process.exit(2);
 }

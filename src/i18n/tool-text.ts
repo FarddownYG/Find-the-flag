@@ -77,3 +77,12 @@ export function categoryDefaultStrings(): Record<string, string> {
   }
   return out;
 }
+
+/** Display name of a magic-byte signature (src/lib/signatures.ts), translated via sig.<id>. */
+export const signatureName = (sig: { id: string; name: string }) => tOr(`sig.${sig.id}`, sig.name);
+
+export function signatureDefaultStrings(
+  sigs: readonly { id: string; name: string }[],
+): Record<string, string> {
+  return Object.fromEntries(sigs.map((s) => [`sig.${s.id}`, s.name]));
+}
