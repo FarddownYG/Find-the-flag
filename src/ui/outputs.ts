@@ -6,6 +6,7 @@ import type { Output, RgbaImage, ToolResult } from '../core/types';
 import { formatSize, isValidUtf8, printableRatio, utf8Decode } from '../lib/bytes';
 import { clear, copyText, downloadBytes, h, type Child } from './dom';
 import { flagSettings } from './settings';
+import { mapBlock } from './map';
 
 export interface OutputContext {
   /** Open another tool with this data as its input. */
@@ -218,12 +219,32 @@ function bytesBlock(o: Extract<Output, { type: 'bytes' }>, ctx: OutputContext): 
   );
 }
 
+/** Long tables and lists get a filter box (metadata dumps, strings, packet lists...). */
+const FILTER_MIN_ROWS = 12;
+
+function filterBox(onInput: (q: string) => void): HTMLInputElement {
+  return h('input', {
+    type: 'search',
+    class: 'out-filter',
+    placeholder: 'Filter',
+    'aria-label': 'Filter rows',
+    spellcheck: false,
+    oninput: (e: Event) => onInput((e.target as HTMLInputElement).value.trim().toLowerCase()),
+  });
+}
+
 function tableBlock(o: Extract<Output, { type: 'table' }>, ctx: OutputContext): HTMLElement {
   const tbody = h('tbody');
   const hl = new Set(o.highlight ?? []);
+  const meta = h('span', null, `${o.rows.length} rows`);
+  let query = '';
   const fill = (n: number) => {
     clear(tbody);
-    o.rows.slice(0, n).forEach((r, i) => {
+    const rows = o.rows
+      .map((r, i) => ({ r, i }))
+      .filter(({ r }) => !query || r.some((c) => String(c).toLowerCase().includes(query)));
+    meta.textContent = query ? `${rows.length} of ${o.rows.length} rows` : `${o.rows.length} rows`;
+    for (const { r, i } of rows.slice(0, n)) {
       tbody.append(
         h(
           'tr',
@@ -231,8 +252,8 @@ function tableBlock(o: Extract<Output, { type: 'table' }>, ctx: OutputContext): 
           ...r.map((c) => h('td', null, ...flagged(String(c), ctx))),
         ),
       );
-    });
-    if (o.rows.length > n) {
+    }
+    if (rows.length > n) {
       tbody.append(
         h(
           'tr',
@@ -240,7 +261,7 @@ function tableBlock(o: Extract<Output, { type: 'table' }>, ctx: OutputContext): 
           h(
             'td',
             { colspan: o.columns.length },
-            button(`Show all ${o.rows.length} rows`, () => fill(o.rows.length)),
+            button(`Show all ${rows.length} rows`, () => fill(rows.length)),
           ),
         ),
       );
@@ -249,10 +270,17 @@ function tableBlock(o: Extract<Output, { type: 'table' }>, ctx: OutputContext): 
   fill(ROW_LIMIT);
   const tsv = () => [o.columns, ...o.rows].map((r) => r.join('\t')).join('\n');
   const copy: HTMLButtonElement = button('Copy TSV', () => copyText(tsv(), copy));
+  const filter =
+    o.rows.length >= FILTER_MIN_ROWS
+      ? filterBox((q) => {
+          query = q;
+          fill(ROW_LIMIT);
+        })
+      : null;
   return h(
     'section',
     { class: 'out out-table' },
-    header(o.label, `${o.rows.length} rows`, [copy]),
+    header(o.label, meta, [filter, copy]),
     h(
       'div',
       { class: 'table-scroll' },
@@ -270,19 +298,20 @@ function kvBlock(o: Extract<Output, { type: 'kv' }>, ctx: OutputContext): HTMLEl
   const copy: HTMLButtonElement = button('Copy', () =>
     copyText(o.entries.map(([k, v]) => `${k}: ${v}`).join('\n'), copy),
   );
-  return h(
-    'section',
-    { class: 'out out-kv' },
-    header(o.label, null, [copy]),
-    h(
-      'dl',
-      { class: 'kv' },
-      ...o.entries.flatMap(([k, v]) => [
+  const dl = h('dl', { class: 'kv' });
+  const fill = (q: string) => {
+    clear(dl);
+    for (const [k, v] of o.entries) {
+      if (q && !`${k} ${v}`.toLowerCase().includes(q)) continue;
+      dl.append(
         h('dt', null, k, h('span', { class: 'visually-hidden' }, ': ')),
         h('dd', null, ...flagged(v, ctx)),
-      ]),
-    ),
-  );
+      );
+    }
+  };
+  fill('');
+  const filter = o.entries.length >= FILTER_MIN_ROWS ? filterBox(fill) : null;
+  return h('section', { class: 'out out-kv' }, header(o.label, null, [filter, copy]), dl);
 }
 
 export function imageCanvas(img: RgbaImage): HTMLCanvasElement {
@@ -352,6 +381,21 @@ function filesBlock(o: Extract<Output, { type: 'files' }>, ctx: OutputContext): 
   );
 }
 
+function pictureBlock(o: Extract<Output, { type: 'picture' }>, ctx: OutputContext): HTMLElement {
+  const url = URL.createObjectURL(new Blob([o.data as BlobPart], { type: o.mime }));
+  const img = h('img', { class: 'out-picture', src: url, alt: o.label ?? 'Embedded image' });
+  const name = o.filename ?? `image.${o.mime.split('/')[1] ?? 'bin'}`;
+  return h(
+    'section',
+    { class: 'out out-image' },
+    header(o.label ?? 'Picture', `${o.mime} · ${formatSize(o.data.length)}`, [
+      button('Download', () => downloadBytes(o.data, name)),
+      pipeSelect(() => ({ bytes: o.data, name }), ctx),
+    ]),
+    h('div', { class: 'canvas-frame' }, img),
+  );
+}
+
 function noteBlock(o: Extract<Output, { type: 'note' }>, ctx: OutputContext): HTMLElement {
   return h(
     'p',
@@ -377,6 +421,10 @@ export function renderResult(result: ToolResult, ctx: OutputContext): HTMLElemen
         return filesBlock(o, ctx);
       case 'note':
         return noteBlock(o, ctx);
+      case 'picture':
+        return pictureBlock(o, ctx);
+      case 'map':
+        return mapBlock(o);
     }
   });
 }

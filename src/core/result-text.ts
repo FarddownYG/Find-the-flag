@@ -1,6 +1,16 @@
 import type { ToolResult } from './types';
 import { utf8Decode } from '../lib/bytes';
 
+/** Links that open a location in a map site (a user-initiated navigation, not a request). */
+export function mapLinks(lat: number, lon: number) {
+  const la = lat.toFixed(6);
+  const lo = lon.toFixed(6);
+  return {
+    google: `https://www.google.com/maps/search/?api=1&query=${la},${lo}`,
+    osm: `https://www.openstreetmap.org/?mlat=${la}&mlon=${lo}#map=16/${la}/${lo}`,
+  };
+}
+
 /** Flatten a result to plain text — what example `expect` strings are matched against. */
 export function resultToText(result: ToolResult): string {
   const parts: string[] = [];
@@ -27,6 +37,12 @@ export function resultToText(result: ToolResult): string {
         break;
       case 'image':
         parts.push(`[image ${o.image.width}x${o.image.height}]`);
+        break;
+      case 'picture':
+        parts.push(`[picture ${o.mime}, ${o.data.length} bytes]`);
+        break;
+      case 'map':
+        parts.push(`${o.lat.toFixed(6)}, ${o.lon.toFixed(6)}`, mapLinks(o.lat, o.lon).google);
         break;
     }
   }

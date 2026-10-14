@@ -1050,3 +1050,46 @@ tr.is-hl td:first-child {
   clip-path: inset(50%);
   white-space: nowrap;
 }
+
+/* ---------- filters, pictures, maps ---------- */
+.out-filter {
+  width: 14ch;
+  font-size: var(--fs-0);
+  padding: 3px 8px;
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+}
+.out-picture {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  image-rendering: pixelated;
+}
+.map-info {
+  padding: 10px 12px;
+  display: grid;
+  gap: 8px;
+}
+.map-coords {
+  margin: 0;
+  font-size: var(--fs-2);
+  font-stretch: 87.5%;
+}
+.map-links {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.map-links a {
+  text-decoration: none;
+}
+.map-holder {
+  height: 320px;
+  border-top: 1px solid var(--line);
+}
+.map-holder .leaflet-control-attribution {
+  font-family: var(--font);
+  font-size: 10px;
+}

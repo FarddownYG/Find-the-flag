@@ -126,6 +126,13 @@ export type Output =
   | { type: 'kv'; label?: string; entries: [string, string][] }
   | { type: 'image'; label?: string; image: RgbaImage; filename?: string }
   | { type: 'files'; label?: string; files: { name: string; data: Uint8Array; note?: string }[] }
+  /** An encoded image shown as-is (JPEG thumbnail, embedded PNG...), with download and "Send to". */
+  | { type: 'picture'; label?: string; data: Uint8Array; mime: string; filename?: string }
+  /**
+   * A location. Coordinates and map links render with no network access; the interactive map
+   * only loads OpenStreetMap tiles after the user clicks "Show map".
+   */
+  | { type: 'map'; label?: string; lat: number; lon: number; zoom?: number }
   | { type: 'note'; level: 'info' | 'warn' | 'error' | 'success'; text: string };
 
 export type ToolResult = Output[];

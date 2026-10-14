@@ -26,11 +26,14 @@
     "fast-png": "^8.0.0",
     "fflate": "^0.8.3",
     "hash-wasm": "^4.12.0",
-    "jsqr": "^1.4.0"
+    "jpeg-js": "^0.4.4",
+    "jsqr": "^1.4.0",
+    "leaflet": "^1.9.4"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@playwright/test": "1.56",
+    "@types/leaflet": "^1.9.22",
     "@types/node": "^22.20.5",
     "eslint": "^10.12.0",
     "globals": "^17.13.0",
