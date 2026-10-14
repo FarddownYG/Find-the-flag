@@ -1,6 +1,9 @@
 import { defineTool, select, toggle } from '../../core/define';
+import { toolT } from '../../i18n/tool-text';
 import { utf8Encode } from '../../lib/bytes';
 import type { Output } from '../../core/types';
+
+const T = toolT('html-entities');
 
 // HTML 4 Latin-1 names, in code point order from U+00A0 to U+00FF (96 names).
 const LATIN1 = (
@@ -225,7 +228,7 @@ export default defineTool({
     return {
       score,
       options: { mode: 'decode' },
-      reason: `${count} HTML entit${count === 1 ? 'y' : 'ies'}`,
+      reason: T('detect.count', { count }),
     };
   },
   run(text, { mode, scope, format }) {
@@ -233,14 +236,14 @@ export default defineTool({
     const { text: value, count, unknown } = htmlDecodeDetailed(text);
     const out: Output[] = [{ type: 'text', value }];
     if (count === 0) {
-      out.push({ type: 'note', level: 'info', text: 'No HTML entities found in the input.' });
+      out.push({ type: 'note', level: 'info', text: T('note.none') });
     }
     if (unknown.length) {
       const shown = [...new Set(unknown)].slice(0, 8).join(' ');
       out.push({
         type: 'note',
         level: 'warn',
-        text: `${unknown.length} sequence(s) look like entities but are unknown and were left as is: ${shown}`,
+        text: T('note.unknown', { count: unknown.length, list: shown }),
       });
     }
     return out;

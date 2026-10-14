@@ -1,7 +1,10 @@
 import { defineTool, toggle } from '../../core/define';
 import { ToolError } from '../../core/errors';
+import { toolT } from '../../i18n/tool-text';
 import { utf8Decode, utf8Encode } from '../../lib/bytes';
 import { bytesResult } from './_common';
+
+const T = toolT('charcode');
 
 export type CharBase = 'dec' | 'hex' | 'oct';
 /** 'codepoint': each number is a Unicode code point. 'utf8': each number is one UTF-8 byte. */
@@ -9,9 +12,16 @@ export type CharUnit = 'codepoint' | 'utf8';
 export type CharSeparator = 'space' | 'comma' | 'comma-space' | 'newline';
 
 const RADIX: Record<CharBase, number> = { dec: 10, hex: 16, oct: 8 };
-const NAME: Record<CharBase, string> = { dec: 'decimal', hex: 'hexadecimal', oct: 'octal' };
 const DIGITS: Record<number, RegExp> = { 10: /^[0-9]+$/, 16: /^[0-9a-f]+$/i, 8: /^[0-7]+$/ };
 const MAX_CODE_POINT = 0x10ffff;
+
+/** '"x" is not a decimal number.' — one whole sentence per base (and with the hex hint). */
+function notANumber(token: string, base: CharBase, hexHint: boolean): string {
+  const p = { token };
+  if (base === 'dec') return hexHint ? T('error.notDecimalHint', p) : T('error.notDecimal', p);
+  if (base === 'oct') return hexHint ? T('error.notOctalHint', p) : T('error.notOctal', p);
+  return hexHint ? T('error.notHexHint', p) : T('error.notHex', p);
+}
 
 function parseToken(tok: string, base: CharBase): number {
   let radix = RADIX[base];
@@ -22,15 +32,11 @@ function parseToken(tok: string, base: CharBase): number {
     digits = prefix[2]!;
   }
   if (!DIGITS[radix]!.test(digits)) {
-    const hint =
-      radix !== 16 && DIGITS[16]!.test(digits)
-        ? ' Those look like hex digits — set the base to Hexadecimal.'
-        : '';
-    throw new ToolError(`"${tok}" is not a ${NAME[base]} number.${hint}`);
+    throw new ToolError(notANumber(tok, base, radix !== 16 && DIGITS[16]!.test(digits)));
   }
   const value = parseInt(digits, radix);
   if (value > MAX_CODE_POINT) {
-    throw new ToolError(`${tok} is larger than the last Unicode code point (1114111 / 0x10FFFF).`);
+    throw new ToolError(T('error.tooLarge', { token: tok }));
   }
   return value;
 }
@@ -67,9 +73,7 @@ export function charcodeDecodeBytes(
   if (unit === 'utf8') {
     const big = codes.find((c) => c > 255);
     if (big !== undefined) {
-      throw new ToolError(
-        `${big} does not fit in one byte (max 255). Switch to "Unicode code points" if these are characters.`,
-      );
+      throw new ToolError(T('error.notByte', { value: big }));
     }
     return Uint8Array.from(codes);
   }
@@ -185,14 +189,14 @@ export default defineTool({
       return {
         score: 0.82,
         options: { mode: 'decode', base: 'dec' },
-        reason: 'Numbers 32–126: ASCII codes',
+        reason: T('detect.ascii'),
       };
     }
     if (nums.every((n) => n <= 255) && nums.length >= 6) {
       return {
         score: 0.5,
         options: { mode: 'decode', base: 'dec' },
-        reason: 'List of byte values',
+        reason: T('detect.bytes'),
       };
     }
     return null;
@@ -201,7 +205,7 @@ export default defineTool({
     if (mode === 'encode') {
       return [{ type: 'text', value: charcodeEncode(text, base, separator, unit) }];
     }
-    if (!text.trim()) throw new ToolError('Paste a list of character codes, e.g. 102 108 97 103.');
+    if (!text.trim()) throw new ToolError(T('error.empty'));
     return bytesResult(charcodeDecodeBytes(text, base, unit));
   },
 });

@@ -1,5 +1,8 @@
 import { defineTool, bool, toggle } from '../../core/define';
+import { toolT } from '../../i18n/tool-text';
 import { fromBase64, isValidUtf8, toBase64 } from '../../lib/bytes';
+
+const T = toolT('base64');
 
 const STD = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 const URL_SAFE = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
@@ -39,7 +42,7 @@ export default defineTool({
     if (t.length < 8 || !/^[A-Za-z0-9+/_-]+={0,2}$/.test(t.replace(/\s+/g, ''))) return null;
     const len = t.replace(/\s+/g, '').length;
     const score = len % 4 === 0 || !t.includes('=') ? 0.8 : 0.5;
-    return { score, options: { mode: 'decode' }, reason: 'Only Base64 characters' };
+    return { score, options: { mode: 'decode' }, reason: T('detect.charset') };
   },
   run({ bytes }, { mode, alphabet, pad }) {
     const abc = alphabet === 'url' ? URL_SAFE : STD;
@@ -54,7 +57,7 @@ export default defineTool({
             {
               type: 'note' as const,
               level: 'info' as const,
-              text: 'Output is binary — see the hex view, or pipe it to File type.',
+              text: T('note.binary'),
             },
           ]),
     ];

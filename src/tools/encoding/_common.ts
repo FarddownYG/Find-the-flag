@@ -1,5 +1,9 @@
 import type { Output } from '../../core/types';
+import { toolT } from '../../i18n/tool-text';
 import { isValidUtf8 } from '../../lib/bytes';
+
+/** Same note as the Base64 tool, so it shares its key. */
+const T = toolT('base64');
 
 /**
  * Result block for a decoder whose output may be binary: the bytes, plus a hint when they are
@@ -11,7 +15,7 @@ export function bytesResult(value: Uint8Array, filename = 'decoded.bin'): Output
     out.push({
       type: 'note',
       level: 'info',
-      text: 'Output is binary — see the hex view, or pipe it to File type.',
+      text: T('note.binary'),
     });
   }
   return out;

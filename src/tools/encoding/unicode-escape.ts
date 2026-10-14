@@ -1,7 +1,10 @@
 import { defineTool, bool, select, toggle } from '../../core/define';
 import { ToolError } from '../../core/errors';
+import { toolT } from '../../i18n/tool-text';
 import { concatBytes, isValidUtf8, utf8Decode, utf8Encode } from '../../lib/bytes';
 import { bytesResult } from './_common';
+
+const T = toolT('unicode-escape');
 
 export type EscapeStyle = 'u' | 'u-brace' | 'x' | 'U' | 'percent-u' | 'uplus' | 'octal';
 export type EscapeScope = 'nonascii' | 'all';
@@ -51,9 +54,7 @@ function tokenize(input: string, simple: boolean): { pieces: Piece[]; escapes: n
     else if (simple) piece = { kind: 'cp', value: SIMPLE[m[8]!] ?? m[8]!.charCodeAt(0) };
     else continue;
     if (piece.kind === 'cp' && piece.value > MAX_CODE_POINT) {
-      throw new ToolError(
-        `${m[0]} is beyond the last Unicode code point (U+10FFFF). Check the digits.`,
-      );
+      throw new ToolError(T('error.beyond', { escape: m[0] }));
     }
     if (at > last) pieces.push({ kind: 'text', text: input.slice(last, at) });
     pieces.push(piece);
@@ -119,9 +120,7 @@ export function unicodeUnescapeBytes(
 ): Uint8Array {
   const { pieces, escapes } = tokenize(text, simple);
   if (escapes === 0) {
-    throw new ToolError(
-      'No escape sequences found. Looked for \\uXXXX, \\u{…}, \\xHH, \\UXXXXXXXX, %uXXXX, U+XXXX and octal \\NNN.',
-    );
+    throw new ToolError(T('error.none'));
   }
   if (byteMode === 'codepoint') return assemble(pieces, false);
   const asBytes = assemble(pieces, true);
@@ -312,7 +311,7 @@ export default defineTool({
     return {
       score: n >= 3 ? 0.88 : n === 2 ? 0.75 : 0.55,
       options: { mode: 'decode' },
-      reason: `${n} escape sequence${n === 1 ? '' : 's'}`,
+      reason: T('detect.count', { count: n }),
     };
   },
   run(text, { mode, bytes, simple, style, scope }) {

@@ -1,7 +1,10 @@
 import { defineTool, toggle } from '../../core/define';
 import { ToolError } from '../../core/errors';
+import { toolT } from '../../i18n/tool-text';
 import { printableRatio, utf8Decode } from '../../lib/bytes';
 import { bytesResult, showChar } from './_common';
+
+const T = toolT('binary');
 
 /**
  * Bytes as a string of 0 and 1. Each byte is padded to `width` bits (8, or 7 for plain ASCII).
@@ -12,9 +15,7 @@ export function binaryEncode(bytes: Uint8Array, width: 7 | 8 = 8, separator = ' 
   for (let i = 0; i < bytes.length; i++) {
     const b = bytes[i]!;
     if (width === 7 && b > 127) {
-      throw new ToolError(
-        `Byte ${i + 1} is ${b} (0x${b.toString(16)}), which does not fit in 7 bits. Use 8 bits per group, or restrict the text to ASCII.`,
-      );
+      throw new ToolError(T('error.over7bits', { index: i + 1, value: b, hex: b.toString(16) }));
     }
     groups[i] = b.toString(2).padStart(width, '0');
   }
@@ -32,9 +33,7 @@ export function binaryDecode(text: string, width: 7 | 8 = 8): Uint8Array {
   const cleaned = text.replace(/0b(?=[01])/gi, ' ');
   const bad = cleaned.match(/[^01\s,;|]/);
   if (bad) {
-    throw new ToolError(
-      `Not binary: unexpected character "${showChar(bad[0])}" at position ${bad.index! + 1}. Only 0, 1 and separators are allowed.`,
-    );
+    throw new ToolError(T('error.badChar', { char: showChar(bad[0]), pos: bad.index! + 1 }));
   }
   const groups = cleaned.split(/[\s,;|]+/).filter(Boolean);
   if (groups.length === 0) return new Uint8Array();
@@ -52,9 +51,7 @@ export function binaryDecode(text: string, width: 7 | 8 = 8): Uint8Array {
   const other = width === 8 ? 7 : 8;
   const use = bits.length % width === 0 ? width : bits.length % other === 0 ? other : 0;
   if (!use) {
-    throw new ToolError(
-      `${bits.length} binary digits is not a multiple of 8 (or 7). Some digits are missing or extra — check the start and end.`,
-    );
+    throw new ToolError(T('error.length', { count: bits.length }));
   }
   const out = new Uint8Array(bits.length / use);
   for (let i = 0; i < out.length; i++) out[i] = parseInt(bits.slice(i * use, (i + 1) * use), 2);
@@ -118,11 +115,11 @@ export default defineTool({
     try {
       const out = binaryDecode(t);
       if (printableRatio(out) >= 0.9) {
-        return { score: 0.9, options: { mode: 'decode' }, reason: 'Only 0 and 1, decodes to text' };
+        return { score: 0.9, options: { mode: 'decode' }, reason: T('detect.text') };
       }
-      return { score: 0.55, options: { mode: 'decode' }, reason: 'Only 0 and 1' };
+      return { score: 0.55, options: { mode: 'decode' }, reason: T('detect.bits') };
     } catch {
-      return { score: 0.35, options: { mode: 'decode' }, reason: 'Only 0 and 1 (length odd)' };
+      return { score: 0.35, options: { mode: 'decode' }, reason: T('detect.odd') };
     }
   },
   run({ bytes }, { mode, width, separator }) {

@@ -2,6 +2,7 @@ import { defineTool, number, text as textOption } from '../../core/define';
 import { ToolError } from '../../core/errors';
 import { DEFAULT_FLAG_PATTERN } from '../../core/flags';
 import type { Output } from '../../core/types';
+import { signatureName, toolT } from '../../i18n/tool-text';
 import {
   formatSize,
   fromBase64,
@@ -25,6 +26,8 @@ import { htmlDecodeBytes } from './html-entities';
 import { morseDecode } from './morse';
 import { hasUnicodeEscape, unicodeUnescapeBytes } from './unicode-escape';
 import { urlDecodeOnce } from './url';
+
+const T = toolT('auto-decode');
 
 // ---------------------------------------------------------------------------------------------
 // Scoring
@@ -76,7 +79,8 @@ function analyse(bytes: Uint8Array): Info {
 }
 
 function strongSignature(bytes: Uint8Array): string | null {
-  return identify(bytes.subarray(0, 600)).find((s) => !s.weak)?.name ?? null;
+  const sig = identify(bytes.subarray(0, 600)).find((s) => !s.weak);
+  return sig ? signatureName(sig) : null;
 }
 
 function scoreOf(
@@ -414,7 +418,7 @@ export function autoDecode(bytes: Uint8Array, opts: AutoDecodeOptions = {}): Aut
 
 const arrow = ' → ';
 export const recipeName = (c: Candidate): string =>
-  c.recipe.length ? c.recipe.join(arrow) : '(input as is)';
+  c.recipe.length ? c.recipe.join(arrow) : T('value.inputAsIs');
 
 function previewOf(c: Candidate): string {
   if (c.textLike && c.text !== null) {
@@ -423,7 +427,8 @@ function previewOf(c: Candidate): string {
   }
   const sig = strongSignature(c.bytes);
   const head = toHex(c.bytes.subarray(0, 12), ' ');
-  return `[binary, ${formatSize(c.bytes.length)}${sig ? `, ${sig}` : ''}] ${head}`;
+  const p = { size: formatSize(c.bytes.length), hex: head };
+  return sig ? T('value.binaryFile', { ...p, type: sig }) : T('value.binary', p);
 }
 
 export default defineTool({
@@ -492,15 +497,15 @@ export default defineTool({
   ],
   detect({ text, bytes }) {
     if (bytes.length >= 20 && bytes[0] === 0x1f && bytes[1] === 0x8b) {
-      return { score: 0.5, reason: 'gzip header' };
+      return { score: 0.5, reason: T('detect.gzip') };
     }
     const t = text?.trim() ?? '';
     if (t.length < 12 || t.length > 100000 || /\s/.test(t) || /^[a-z]+$/i.test(t)) return null;
     if (printableRatio(utf8Encode(t)) < 1) return null;
-    return { score: 0.3, reason: 'Looks like one opaque encoded token' };
+    return { score: 0.3, reason: T('detect.token') };
   },
   run({ bytes }, { maxDepth, beamWidth, flagPrefix }) {
-    if (!bytes.length) throw new ToolError('Paste or open the data to decode first.');
+    if (!bytes.length) throw new ToolError(T('error.empty'));
     const result = autoDecode(bytes, { maxDepth, beamWidth, flagPrefix });
     const { best, input, ranked, explored } = result;
     const out: Output[] = [];
@@ -509,26 +514,26 @@ export default defineTool({
       out.push({
         type: 'note',
         level: 'info',
-        text: `No chain of up to ${maxDepth} decoders gave anything more readable than the input (${explored} candidates tried).`,
+        text: T('note.nothing', { depth: maxDepth, count: explored }),
       });
     } else {
       out.push({
         type: 'bytes',
-        label: `Best result · ${recipeName(best)}`,
+        label: T('label.best', { recipe: recipeName(best) }),
         value: best.bytes,
         filename: 'decoded.bin',
       });
       const sig = best.textLike ? null : strongSignature(best.bytes);
       out.push(
         best.flag
-          ? { type: 'note', level: 'success', text: 'A flag-looking token was found.' }
+          ? { type: 'note', level: 'success', text: T('note.flag') }
           : sig
             ? {
                 type: 'note',
                 level: 'info',
-                text: `The result looks like a file (${sig}): see File type or Hexdump.`,
+                text: T('note.file', { type: sig }),
               }
-            : { type: 'note', level: 'info', text: `${explored} candidates tried.` },
+            : { type: 'note', level: 'info', text: T('note.tried', { count: explored }) },
       );
     }
 
@@ -536,8 +541,8 @@ export default defineTool({
     if (shown.length > 1 || best === input) {
       out.push({
         type: 'table',
-        label: 'Top recipes',
-        columns: ['#', 'Recipe', 'Score', 'Preview'],
+        label: T('label.top'),
+        columns: ['#', T('col.recipe'), T('col.score'), T('col.preview')],
         rows: shown.map((c, i) => [i + 1, recipeName(c), c.score.toFixed(1), previewOf(c)]),
         highlight: [0],
       });

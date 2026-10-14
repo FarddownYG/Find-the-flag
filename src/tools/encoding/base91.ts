@@ -1,7 +1,10 @@
 import { defineTool, toggle } from '../../core/define';
 import { ToolError } from '../../core/errors';
+import { toolT } from '../../i18n/tool-text';
 import { printableRatio, utf8Decode } from '../../lib/bytes';
 import { bytesResult, showChar, stripSpace } from './_common';
+
+const T = toolT('base91');
 
 /** basE91 by Joachim Henke: 91 printable characters, no space, "-", "'" or "\". */
 export const BASE91_ALPHABET =
@@ -49,9 +52,7 @@ export function base91Decode(text: string): Uint8Array {
     const c = s.charCodeAt(i);
     const d = c < 128 ? map[c]! : -1;
     if (d < 0) {
-      throw new ToolError(
-        `Not basE91: "${showChar(s[i])}" at position ${i + 1} is not in the alphabet (no space, "-", "'" or "\\").`,
-      );
+      throw new ToolError(T('error.notInAlphabet', { char: showChar(s[i]), pos: i + 1 }));
     }
     if (v < 0) {
       v = d;
@@ -104,7 +105,7 @@ export default defineTool({
     try {
       const out = base91Decode(t);
       if (out.length >= 6 && printableRatio(out) >= 0.95) {
-        return { score: 0.6, options: { mode: 'decode' }, reason: 'Decodes to text as basE91' };
+        return { score: 0.6, options: { mode: 'decode' }, reason: T('detect.text') };
       }
     } catch {
       return null;

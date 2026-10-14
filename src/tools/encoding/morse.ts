@@ -1,6 +1,9 @@
 import { defineTool, bool, text as textOption, toggle } from '../../core/define';
 import { ToolError } from '../../core/errors';
 import type { Output } from '../../core/types';
+import { toolT } from '../../i18n/tool-text';
+
+const T = toolT('morse');
 
 /** International Morse (ITU-R M.1677) plus the usual accented letters. */
 const TABLE: [string, string][] = [
@@ -33,16 +36,16 @@ function symbols(opts: MorseSymbols): { dot: string; dash: string; custom: boole
   const dot = opts.dot || '.';
   const dash = opts.dash || '-';
   for (const [name, s] of [
-    ['Dot', dot],
-    ['Dash', dash],
+    ['dot', dot],
+    ['dash', dash],
   ] as const) {
     if ([...s].length !== 1 || /\s/.test(s) || s === '/') {
       throw new ToolError(
-        `${name} symbol must be one visible character other than "/" (got "${s}").`,
+        name === 'dot' ? T('error.dotSymbol', { got: s }) : T('error.dashSymbol', { got: s }),
       );
     }
   }
-  if (dot === dash) throw new ToolError('Dot and dash symbols must be different.');
+  if (dot === dash) throw new ToolError(T('error.sameSymbols'));
   return { dot, dash, custom: dot !== '.' || dash !== '-' };
 }
 
@@ -106,10 +109,8 @@ export function morseDecode(
   }
   const bad = s.match(/[^.\-\s/]/);
   if (bad) {
-    const shown = bad[0] === '\u0000' ? 'a plain . or -' : `"${bad[0]}"`;
-    throw new ToolError(
-      `Not Morse: found ${shown} at position ${bad.index! + 1}. Expected "${dot}" and "${dash}" separated by spaces; set the dot and dash symbols if the message uses others.`,
-    );
+    const p = { char: bad[0], pos: bad.index! + 1, dot, dash };
+    throw new ToolError(bad[0] === '\u0000' ? T('error.plainMark', p) : T('error.badChar', p));
   }
 
   let out = '';
@@ -195,7 +196,7 @@ export default defineTool({
       const { text: decoded, unknown } = morseDecode(t);
       const letters = decoded.replace(/\s/g, '').length;
       if (letters >= 2 && unknown <= letters * 0.2) {
-        return { score: 0.88, options: { mode: 'decode' }, reason: 'Dots and dashes that decode' };
+        return { score: 0.88, options: { mode: 'decode' }, reason: T('detect.decodes') };
       }
     } catch {
       return null;
@@ -210,19 +211,19 @@ export default defineTool({
         out.push({
           type: 'note',
           level: 'warn',
-          text: `No Morse code for ${skipped.map((c) => `"${c}"`).join(' ')}: skipped.`,
+          text: T('note.skipped', { chars: skipped.map((c) => `"${c}"`).join(' ') }),
         });
       }
       return out;
     }
-    if (!input.trim()) throw new ToolError('Paste Morse code, e.g. .... .. (dots and dashes).');
+    if (!input.trim()) throw new ToolError(T('error.empty'));
     const { text, unknown } = morseDecode(input, { dot, dash });
     const out: Output[] = [{ type: 'text', value: lower ? text.toLowerCase() : text }];
     if (unknown) {
       out.push({
         type: 'note',
         level: 'warn',
-        text: `${unknown} unknown code${unknown === 1 ? '' : 's'} shown as "?". Check the spacing between letters.`,
+        text: T('note.unknown', { count: unknown }),
       });
     }
     return out;

@@ -1,7 +1,10 @@
 import { defineTool, toggle } from '../../core/define';
+import { toolT } from '../../i18n/tool-text';
 import { printableRatio, utf8Decode } from '../../lib/bytes';
 import { bigBaseDecode, bigBaseEncode } from './_bigbase';
 import { bytesResult } from './_common';
+
+const T = toolT('base62');
 
 export const BASE62_ALPHABETS = {
   /** 0-9 A-Z a-z: the usual one (Python "base62", most URL shorteners). */
@@ -70,7 +73,7 @@ export default defineTool({
         return {
           score: 0.45,
           options: { mode: 'decode', alphabet },
-          reason: 'Decodes to text as Base62',
+          reason: T('detect.text'),
         };
       }
     }

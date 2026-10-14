@@ -1,7 +1,10 @@
 import { defineTool, bool, toggle } from '../../core/define';
 import { ToolError } from '../../core/errors';
+import { toolT } from '../../i18n/tool-text';
 import { printableRatio, utf8Decode } from '../../lib/bytes';
 import { bytesResult, showChar, stripSpace } from './_common';
+
+const T = toolT('base85');
 
 export type Base85Variant = 'ascii85' | 'z85' | 'rfc1924';
 
@@ -77,9 +80,7 @@ export function base85Decode(text: string, variant: Base85Variant = 'ascii85'): 
     let v = 0;
     for (let j = 0; j < 5; j++) v = v * 85 + (j < size ? group[j]! : 84);
     if (v > 0xffffffff) {
-      throw new ToolError(
-        `Not ${NAMES[variant]}: a group of 5 characters is too large for 4 bytes. Wrong variant, or corrupted data?`,
-      );
+      throw new ToolError(T('error.overflow', { name: NAMES[variant] }));
     }
     const n = size === 5 ? 4 : size - 1;
     for (let j = 0; j < n; j++) out.push(Math.floor(v / 256 ** (3 - j)) & 0xff);
@@ -89,8 +90,7 @@ export function base85Decode(text: string, variant: Base85Variant = 'ascii85'): 
   for (let i = 0; i < s.length; i++) {
     const ch = s[i]!;
     if (ch === 'z' && variant === 'ascii85') {
-      if (group.length)
-        throw new ToolError(`Not Ascii85: "z" in the middle of a group (position ${i + 1}).`);
+      if (group.length) throw new ToolError(T('error.zInGroup', { pos: i + 1 }));
       out.push(0, 0, 0, 0);
       continue;
     }
@@ -98,16 +98,14 @@ export function base85Decode(text: string, variant: Base85Variant = 'ascii85'): 
     const d = c < 128 ? map[c]! : -1;
     if (d < 0) {
       throw new ToolError(
-        `Not ${NAMES[variant]}: "${showChar(ch)}" at position ${i + 1} is not in its alphabet. Try another variant.`,
+        T('error.notInAlphabet', { name: NAMES[variant], char: showChar(ch), pos: i + 1 }),
       );
     }
     group.push(d);
     if (group.length === 5) flush(5);
   }
   if (group.length === 1) {
-    throw new ToolError(
-      `Truncated ${NAMES[variant]}: one character is left over (groups of 5 hold 4 bytes). Check for missing characters.`,
-    );
+    throw new ToolError(T('error.truncated', { name: NAMES[variant] }));
   }
   if (group.length) flush(group.length);
   return Uint8Array.from(out);
@@ -166,7 +164,7 @@ export default defineTool({
       return {
         score: 0.92,
         options: { mode: 'decode', variant: 'ascii85' },
-        reason: '<~ ~> frame',
+        reason: T('detect.frame'),
       };
     }
     if (t.length < 10 || t.length > 20000 || /[ \t]/.test(t)) return null;
@@ -177,7 +175,7 @@ export default defineTool({
           return {
             score: 0.5,
             options: { mode: 'decode', variant },
-            reason: `Decodes to text as ${NAMES[variant]}`,
+            reason: T('detect.text', { name: NAMES[variant] }),
           };
         }
       } catch {

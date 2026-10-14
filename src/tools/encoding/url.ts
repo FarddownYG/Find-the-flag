@@ -1,6 +1,9 @@
 import { defineTool, bool, select, toggle } from '../../core/define';
+import { toolT } from '../../i18n/tool-text';
 import { isValidUtf8, toHex, utf8Decode, utf8Encode } from '../../lib/bytes';
 import type { Output } from '../../core/types';
+
+const T = toolT('url');
 
 export type UrlScope = 'component' | 'uri' | 'reserved' | 'all';
 
@@ -180,7 +183,7 @@ export default defineTool({
     return {
       score,
       options: { mode: 'decode', repeat: double, plus: /\+/.test(t) && /[?&]\w+=/.test(t) },
-      reason: double ? 'Percent escapes, some doubly encoded' : `${n} percent escape(s)`,
+      reason: double ? T('detect.double') : T('detect.count', { count: n }),
     };
   },
   run(text, { mode, scope, plus, repeat }) {
@@ -193,29 +196,29 @@ export default defineTool({
       out.push({
         type: 'note',
         level: 'info',
-        text: 'Nothing to decode: no %XX escapes' + (plus ? ' or + signs' : '') + ' found.',
+        text: plus ? T('note.nothingPlus') : T('note.nothing'),
       });
     } else if (passes > 1) {
-      out.push({ type: 'note', level: 'info', text: `Decoded ${passes} times until stable.` });
+      out.push({ type: 'note', level: 'info', text: T('note.passes', { count: passes }) });
     }
     if (!isValidUtf8(bytes)) {
       out.push({
         type: 'note',
         level: 'info',
-        text: `Result is not UTF-8 text (${toHex(bytes.subarray(0, 8), ' ')}…): see the hex view.`,
+        text: T('note.notUtf8', { hex: toHex(bytes.subarray(0, 8), ' ') }),
       });
     } else if (!repeat && hasPercentEscape(utf8Decode(bytes))) {
       out.push({
         type: 'note',
         level: 'warn',
-        text: 'The result still contains %XX escapes — it was encoded more than once. Enable "Repeat until stable".',
+        text: T('note.stillEncoded'),
       });
     }
     if (/%u[0-9a-fA-F]{4}/.test(text)) {
       out.push({
         type: 'note',
         level: 'info',
-        text: '%uXXXX escapes are not standard percent-encoding: use the Unicode escapes tool.',
+        text: T('note.percentU'),
       });
     }
     return out;

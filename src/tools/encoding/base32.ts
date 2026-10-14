@@ -1,7 +1,10 @@
 import { defineTool, bool, toggle } from '../../core/define';
 import { ToolError } from '../../core/errors';
+import { toolT } from '../../i18n/tool-text';
 import { printableRatio, utf8Decode } from '../../lib/bytes';
 import { bytesResult, showChar, stripSpace } from './_common';
+
+const T = toolT('base32');
 
 export const BASE32_ALPHABETS = {
   std: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567',
@@ -55,11 +58,10 @@ export function base32Decode(text: string, alphabet: Base32Alphabet = 'std'): Ui
     const c = s.charCodeAt(i);
     const v = c < 128 ? map[c]! : -1;
     if (v < 0) {
-      const hint =
-        alphabet === 'std' && '0189'.includes(s[i]!)
-          ? ' Standard Base32 has no 0, 1, 8 or 9 — try the base32hex or Crockford alphabet.'
-          : '';
-      throw new ToolError(`Not Base32: "${showChar(s[i])}" at position ${i + 1}.${hint}`);
+      const p = { char: showChar(s[i]), pos: i + 1 };
+      throw new ToolError(
+        alphabet === 'std' && '0189'.includes(s[i]!) ? T('error.digit', p) : T('error.char', p),
+      );
     }
     acc = ((acc << 5) | v) & 0xffff;
     bits += 5;
@@ -69,9 +71,7 @@ export function base32Decode(text: string, alphabet: Base32Alphabet = 'std'): Ui
     }
   }
   if ([1, 3, 6].includes(s.length % 8)) {
-    throw new ToolError(
-      `Truncated Base32: ${s.length} characters cannot end a block (blocks of 8 hold 1, 2, 3, 4 or 5 bytes). Check for missing characters.`,
-    );
+    throw new ToolError(T('error.truncated', { count: s.length }));
   }
   return out.subarray(0, o);
 }
@@ -132,7 +132,7 @@ export default defineTool({
       const printable = printableRatio(out) >= 0.9;
       const padded = t.includes('=') && t.length % 8 === 0;
       const score = printable ? 0.88 : padded ? 0.75 : 0.3;
-      return { score, options: { mode: 'decode', alphabet: 'std' }, reason: 'Only A–Z and 2–7' };
+      return { score, options: { mode: 'decode', alphabet: 'std' }, reason: T('detect.charset') };
     } catch {
       return null;
     }

@@ -1,6 +1,9 @@
 import { defineTool, bool, select, toggle } from '../../core/define';
+import { toolT } from '../../i18n/tool-text';
 import { fromHex, printableRatio, toHex, utf8Decode } from '../../lib/bytes';
 import { bytesResult } from './_common';
+
+const T = toolT('hex');
 
 export type HexSeparator = 'none' | 'space' | 'colon' | 'comma' | 'x' | '0x' | 'c';
 
@@ -102,10 +105,10 @@ export default defineTool({
         return {
           score: 0.88,
           options: { mode: 'decode' },
-          reason: 'Hex digits that decode to text',
+          reason: T('detect.text'),
         };
       }
-      return { score: 0.45, options: { mode: 'decode' }, reason: 'Only hex digits' };
+      return { score: 0.45, options: { mode: 'decode' }, reason: T('detect.charset') };
     } catch {
       return null;
     }

@@ -1,5 +1,9 @@
 import { ToolError } from '../../core/errors';
+import { toolT } from '../../i18n/tool-text';
 import { showChar } from './_common';
+
+/** Shared by Base58 and Base62: the message keys live under the Base58 tool. */
+const T = toolT('base58');
 
 /**
  * Big-integer base conversion shared by Base58 and Base62: the bytes are one big-endian
@@ -46,9 +50,7 @@ export function bigBaseDecode(text: string, alphabet: string, name: string): Uin
   for (let i = 0; i < clean.length; i++) {
     const v = index.get(clean[i]!);
     if (v === undefined) {
-      throw new ToolError(
-        `Not ${name}: "${showChar(clean[i])}" at position ${i + 1} is not in the alphabet.`,
-      );
+      throw new ToolError(T('error.notInAlphabet', { name, char: showChar(clean[i]), pos: i + 1 }));
     }
     values[i] = v;
   }

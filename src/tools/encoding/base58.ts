@@ -1,8 +1,11 @@
 import { defineTool, toggle } from '../../core/define';
 import { ToolError } from '../../core/errors';
+import { toolT } from '../../i18n/tool-text';
 import { printableRatio, utf8Decode } from '../../lib/bytes';
 import { bigBaseDecode, bigBaseEncode } from './_bigbase';
 import { bytesResult } from './_common';
+
+const T = toolT('base58');
 
 export const BASE58_ALPHABETS = {
   bitcoin: '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz',
@@ -24,9 +27,7 @@ export function base58Decode(text: string, alphabet: Base58Alphabet = 'bitcoin')
     return bigBaseDecode(text, abc, 'Base58');
   } catch (e) {
     if (e instanceof ToolError && /"[0OIl]"/.test(e.message) && !abc.includes('0')) {
-      throw new ToolError(
-        `${e.message} Base58 drops the look-alikes 0, O, I and l — check the text, or the alphabet (Bitcoin / Flickr / Ripple).`,
-      );
+      throw new ToolError(T('error.lookalikes', { message: e.message }));
     }
     throw e;
   }
@@ -77,10 +78,10 @@ export default defineTool({
         return {
           score: 0.8,
           options: { mode: 'decode' },
-          reason: 'Base58 alphabet, decodes to text',
+          reason: T('detect.text'),
         };
       }
-      return { score: 0.3, options: { mode: 'decode' }, reason: 'Only Base58 characters' };
+      return { score: 0.3, options: { mode: 'decode' }, reason: T('detect.charset') };
     } catch {
       return null;
     }
