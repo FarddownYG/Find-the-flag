@@ -441,21 +441,96 @@ function actionsBlock(o: Extract<Output, { type: 'actions' }>, ctx: OutputContex
   );
 }
 
+/**
+ * The ↑/↓ button pressed last: a move re-runs the tool and the whole output is drawn again, so
+ * the next reorder block of the same option puts the focus back on that item's button (keyboard
+ * users can press again instead of tabbing back from the top).
+ */
+let reorderFocus: { option: string; id: string; dir: 'up' | 'down' } | null = null;
+
+/**
+ * A drag in progress in a reorder list. Every move re-runs the tool; a result that arrived in
+ * the middle of the next drag would replace the list under the pointer and lose that drop, so
+ * the tool view waits for {@link dragSettled} before drawing a new result.
+ */
+let dragEnd: { done: Promise<void>; finish: () => void } | null = null;
+const DRAG_LIMIT_MS = 20_000; // a drag whose dragend never comes stops holding results back
+
+export function dragSettled(): Promise<void> {
+  return dragEnd?.done ?? Promise.resolve();
+}
+
+function startDrag(): void {
+  dragEnd?.finish();
+  let finish = () => {};
+  const done = new Promise<void>((resolve) => (finish = resolve));
+  const timer = setTimeout(() => endDrag(), DRAG_LIMIT_MS);
+  dragEnd = {
+    done,
+    finish: () => {
+      clearTimeout(timer);
+      finish();
+    },
+  };
+}
+
+function endDrag(): void {
+  const d = dragEnd;
+  dragEnd = null;
+  d?.finish();
+}
+
 function reorderBlock(o: Extract<Output, { type: 'reorder' }>, ctx: OutputContext): HTMLElement {
   const items = [...o.items];
   const list = h('ol', { class: 'reorder' });
+  const buttons = new Map<string, { up: HTMLButtonElement; down: HTMLButtonElement }>();
   const commit = () => ctx.setOptions?.({ [o.option]: items.map((i) => i.id).join(' ') });
-  const move = (from: number, to: number) => {
+  const move = (from: number, to: number, dir?: 'up' | 'down') => {
     if (to < 0 || to >= items.length || from === to) return;
     const [it] = items.splice(from, 1);
     items.splice(to, 0, it!);
+    reorderFocus = dir ? { option: o.option, id: it!.id, dir } : null;
     draw();
+    focusMoved();
     commit();
+  };
+  const focusMoved = () => {
+    const f = reorderFocus;
+    const b = f && f.option === o.option ? buttons.get(f.id) : undefined;
+    if (!f || !b) return;
+    // At the top (or bottom) the pressed button is disabled: the other one keeps the focus.
+    const target =
+      f.dir === 'up' ? (b.up.disabled ? b.down : b.up) : b.down.disabled ? b.up : b.down;
+    target.focus();
   };
   let dragFrom = -1;
   const draw = () => {
     clear(list);
+    buttons.clear();
     items.forEach((it, i) => {
+      const up = h(
+        'button',
+        {
+          type: 'button',
+          class: 'btn btn-ghost',
+          'aria-label': t('ui.reorder.up', { item: it.label }),
+          disabled: i === 0,
+          onclick: () => move(i, i - 1, 'up'),
+        },
+        '↑',
+      );
+      const down = h(
+        'button',
+        {
+          type: 'button',
+          class: 'btn btn-ghost',
+          'aria-label': t('ui.reorder.down', { item: it.label }),
+          disabled: i === items.length - 1,
+          onclick: () => move(i, i + 1, 'down'),
+        },
+        '↓',
+      );
+      buttons.set(it.id, { up, down });
       list.append(
         h(
           'li',
@@ -464,8 +539,10 @@ function reorderBlock(o: Extract<Output, { type: 'reorder' }>, ctx: OutputContex
             draggable: 'true',
             ondragstart: (ev: DragEvent) => {
               dragFrom = i;
+              startDrag();
               ev.dataTransfer?.setData('text/plain', it.id);
             },
+            ondragend: endDrag,
             ondragover: (ev: DragEvent) => ev.preventDefault(),
             ondrop: (ev: DragEvent) => {
               ev.preventDefault();
@@ -475,37 +552,19 @@ function reorderBlock(o: Extract<Output, { type: 'reorder' }>, ctx: OutputContex
           h('span', { class: 'reorder-grip', 'aria-hidden': 'true' }, '⋮⋮'),
           h('span', { class: 'reorder-label' }, it.label),
           it.detail ? h('span', { class: 'reorder-detail' }, it.detail) : null,
-          h(
-            'span',
-            { class: 'reorder-btns' },
-            h(
-              'button',
-              {
-                type: 'button',
-                class: 'btn btn-ghost',
-                'aria-label': t('ui.reorder.up', { item: it.label }),
-                disabled: i === 0,
-                onclick: () => move(i, i - 1),
-              },
-              '↑',
-            ),
-            h(
-              'button',
-              {
-                type: 'button',
-                class: 'btn btn-ghost',
-                'aria-label': t('ui.reorder.down', { item: it.label }),
-                disabled: i === items.length - 1,
-                onclick: () => move(i, i + 1),
-              },
-              '↓',
-            ),
-          ),
+          h('span', { class: 'reorder-btns' }, up, down),
         ),
       );
     });
   };
   draw();
+  // Drawn again after a move: once the block is in the page, the focus goes back.
+  if (reorderFocus?.option === o.option) {
+    queueMicrotask(() => {
+      focusMoved();
+      reorderFocus = null;
+    });
+  }
   return h(
     'section',
     { class: 'out out-reorder' },

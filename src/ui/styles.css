@@ -1191,6 +1191,12 @@ tr.is-hl td:first-child {
   gap: 8px;
   padding: 10px 12px;
 }
+/* Action labels are sentences in some languages: let them wrap on a phone. */
+.action-row .btn {
+  white-space: normal;
+  text-align: left;
+  max-width: 100%;
+}
 .reorder {
   list-style: none;
   margin: 0;

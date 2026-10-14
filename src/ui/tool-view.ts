@@ -20,7 +20,7 @@ import type { AnyTool, ExampleInput, OptionSpec } from '../core/types';
 import { formatSize, fromBase64, fromHex, toHex } from '../lib/bytes';
 import { identify } from '../lib/signatures';
 import { clear, copyText, debounce, h } from './dom';
-import { renderResult } from './outputs';
+import { dragSettled, renderResult } from './outputs';
 import { flagSettings } from './settings';
 
 type PasteAs = 'text' | 'hex' | 'base64';
@@ -578,7 +578,9 @@ export function renderTool(
     );
   }
 
+  let runCount = 0;
   async function run() {
+    const runId = ++runCount;
     let raw: RawInput | null;
     try {
       raw = currentRaw();
@@ -598,6 +600,9 @@ export function renderTool(
       const t0 = performance.now();
       const result = await runner.run(tool.id, prepared.value, { ...state.values });
       const ms = performance.now() - t0;
+      // A reorder list being dragged stays in place until the drop, which starts a newer run.
+      await dragSettled();
+      if (runId !== runCount) return;
       clear(outBody);
       const flags = selectFlags(resultToText(result), flagSettings.regex, flagSettings.pattern);
       outBody.append(
