@@ -60,3 +60,13 @@ test('search finds tools by alias and opens with Enter', async ({ page }) => {
   await page.keyboard.press('Enter');
   await expect(page).toHaveURL(/#\/tool\/caesar/);
 });
+
+test('typing a number option keeps focus and the value when tabbing away', async ({ page }) => {
+  await page.goto('./#/tool/caesar');
+  await page.locator('.options').getByRole('button', { name: 'Fixed shift' }).click();
+  const shift = page.locator('.options input[type=number]');
+  await shift.fill('5');
+  await shift.press('Tab');
+  await expect(shift).toHaveValue('5');
+  expect(await page.evaluate(() => document.activeElement?.tagName)).not.toBe('BODY');
+});

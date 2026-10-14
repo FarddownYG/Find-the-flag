@@ -194,6 +194,13 @@ export function renderTool(
   }
 
   // ---------- options ----------
+  const visibleKeys = () =>
+    Object.entries(tool.options ?? {})
+      .filter(([, spec]) => !spec.showIf || spec.showIf(state.values))
+      .map(([key]) => key)
+      .join(',');
+  let shownKeys = '';
+
   function renderOptions() {
     clear(optionsBar);
     const specs = Object.entries(tool.options ?? {});
@@ -202,6 +209,12 @@ export function renderTool(
       if (spec.showIf && !spec.showIf(state.values)) continue;
       optionsBar.append(optionControl(key, spec));
     }
+    shownKeys = visibleKeys();
+  }
+
+  /** Re-render only when a value changes which options are shown (keeps focus while typing). */
+  function refreshOptionsIfNeeded() {
+    if (visibleKeys() !== shownKeys) renderOptions();
   }
 
   function setValue(key: string, v: unknown) {
@@ -322,7 +335,7 @@ export function renderTool(
             if (live) scheduleRun();
           }
         },
-        onchange: () => renderOptions(),
+        onchange: () => refreshOptionsIfNeeded(),
       });
     } else {
       control = h('input', {
@@ -336,6 +349,7 @@ export function renderTool(
           state.values[key] = (e.target as HTMLInputElement).value;
           if (live) scheduleRun();
         },
+        onchange: () => refreshOptionsIfNeeded(),
       });
     }
     return h(
