@@ -1,0 +1,23 @@
+[
+  {
+    "path": "/A long file name, made by mtools.txt",
+    "sha256": "c00bd96d52f3bf9e44cb60001a4868d01d0494d26587887a6c20e4d26f53e6ac",
+    "size": 10990
+  },
+  {
+    "path": "/Sub dir with spaces/ramp data.bin",
+    "sha256": "aa4f182336e966a27ff5740573af2733480d1dfc3edbd6d1cdb755e0a7873144",
+    "size": 6000
+  },
+  {
+    "path": "/SHORT.TXT",
+    "sha256": "70378edb3ccc1d3630f8fe97f92f2602fd5426ae62a68c904bfa1f6a1025a4c8",
+    "size": 11
+  },
+  {
+    "path": "/Deleted long name.txt",
+    "sha256": "9f253e723151794e3aac3518fbac2dd36b4fb9e52e68a25044041972f8a54cef",
+    "size": 1120,
+    "deleted": true
+  }
+]

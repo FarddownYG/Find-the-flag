@@ -47,7 +47,7 @@ export function autoBlockSize(length: number): number {
 }
 
 /** Block boundaries: whole blocks, and a last short block only if it is at least half a block. */
-function edges(length: number, block: number): number[] {
+export function edges(length: number, block: number): number[] {
   const full = Math.floor(length / block);
   const rest = length - full * block;
   const out: number[] = [];

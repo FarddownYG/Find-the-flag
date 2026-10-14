@@ -33,7 +33,7 @@ function asciiColumn(row: Uint8Array): string {
   return s;
 }
 
-function dumpXxd(
+export function dumpXxd(
   data: Uint8Array,
   base: number,
   cols: number,

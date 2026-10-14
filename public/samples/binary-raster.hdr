@@ -1,0 +1,11 @@
+ENVI
+description = {Find The Flag synthetic raster}
+samples = 64
+lines = 48
+bands = 1
+header offset = 0
+file type = ENVI Standard
+data type = 4
+interleave = bsq
+byte order = 0
+band names = { ramp with a ring }

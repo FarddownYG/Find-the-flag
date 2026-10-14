@@ -45,7 +45,7 @@ interface Anchor {
 }
 
 /** Signatures that can be carved: strong magics, plus weak ones that bring their own check. */
-const isCarvable = (s: Signature) => !s.weak || s.valid !== undefined;
+export const isCarvable = (s: Signature) => !s.weak || s.valid !== undefined;
 
 /** Anchor on a byte that is rare in real data: 0x00 and 0xFF are everywhere in binaries. */
 function anchorIndex(sig: Signature): number {
@@ -66,7 +66,7 @@ function buildTable(sigs: Signature[]): (Anchor[] | undefined)[] {
   return table;
 }
 
-const strength = (s: Signature) =>
+export const strength = (s: Signature) =>
   (s.weak ? 0 : 1000) + s.magic.filter((m) => m !== null).length + (s.end ? 1 : 0);
 
 const DEFAULT_TABLE = buildTable(SIGNATURES.filter(isCarvable));

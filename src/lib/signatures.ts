@@ -157,7 +157,7 @@ export const SIGNATURES: Signature[] = [
     magic: ascii('%PDF-'),
     valid: (b, s) => (b[s + 5] === 0x31 || b[s + 5] === 0x32) && b[s + 6] === 0x2e,
     end: pdfEnd,
-    endHow: 'last %%EOF',
+    endHow: '%%EOF, incremental updates included',
   },
   {
     id: 'ole',
@@ -753,13 +753,54 @@ function asciiAt(b: Uint8Array, o: number, n: number): string {
 function indexOfAscii(b: Uint8Array, needle: string, from: number): number {
   const first = needle.charCodeAt(0);
   const n = needle.length;
-  for (let i = from; i + n <= b.length; i++) {
-    if (b[i] !== first) continue;
+  // Native indexOf finds the first byte: far faster than a byte loop on big buffers.
+  for (
+    let i = b.indexOf(first, Math.max(0, from));
+    i >= 0 && i + n <= b.length;
+    i = b.indexOf(first, i + 1)
+  ) {
     let k = 1;
     while (k < n && b[i + k] === needle.charCodeAt(k)) k++;
     if (k === n) return i;
   }
   return -1;
+}
+
+/**
+ * Every offset of `needle` in `b`, found once per buffer: end hooks that look for a marker far
+ * ahead (%%EOF, IEND) stay linear when a buffer holds thousands of candidate starts. Hooks
+ * never modify `b`, so the positions stay valid while the buffer lives.
+ */
+const NEEDLES = new WeakMap<Uint8Array, Map<string, number[]>>();
+
+function positionsOf(b: Uint8Array, needle: string): number[] {
+  let byNeedle = NEEDLES.get(b);
+  if (!byNeedle) {
+    byNeedle = new Map();
+    NEEDLES.set(b, byNeedle);
+  }
+  let list = byNeedle.get(needle);
+  if (!list) {
+    list = [];
+    for (let i = indexOfAscii(b, needle, 0); i >= 0; i = indexOfAscii(b, needle, i + 1)) {
+      list.push(i);
+    }
+    byNeedle.set(needle, list);
+  }
+  return list;
+}
+
+/** First offset of `needle` at or after `from`, or -1 (memoised per buffer). */
+function nextOf(b: Uint8Array, needle: string, from: number): number {
+  const list = positionsOf(b, needle);
+  let lo = 0;
+  let hi = list.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (list[mid]! < from) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo < list.length ? list[lo]! : -1;
 }
 
 const CRC32_TABLE: Uint32Array = (() => {
@@ -1005,7 +1046,7 @@ function pngEnd(b: Uint8Array, s: number): number | null {
     p = next;
   }
   // Chunk lengths are damaged (a classic CTF trick): fall back to the fixed IEND chunk bytes.
-  const i = indexOfAscii(b, 'IEND\xae\x42\x60\x82', s + 8);
+  const i = nextOf(b, 'IEND\xae\x42\x60\x82', s + 8);
   return i >= 0 ? i + 8 : null;
 }
 
@@ -1031,7 +1072,9 @@ function jpegEnd(b: Uint8Array, s: number): number | null {
     }
     if (m === 0xd9) return p + 2;
     if (m === 0x00) return null;
-    if (m === 0x01 || (m >= 0xd0 && m <= 0xd8)) {
+    // A new SOI outside any segment: this image was cut short and another one starts.
+    if (m === 0xd8) return null;
+    if (m === 0x01 || (m >= 0xd0 && m <= 0xd7)) {
       p += 2;
       continue;
     }
@@ -1042,19 +1085,23 @@ function jpegEnd(b: Uint8Array, s: number): number | null {
     if (m === 0xda) {
       // Entropy-coded data: runs until a marker that is not a stuffed 0xFF00 or an RSTn.
       while (p + 1 < b.length) {
-        if (b[p] === 0xff) {
-          const n = b[p + 1]!;
-          if (n === 0x00 || (n >= 0xd0 && n <= 0xd7)) {
-            p += 2;
-            continue;
-          }
-          if (n === 0xff) {
-            p++;
-            continue;
-          }
+        const f = b.indexOf(0xff, p);
+        if (f < 0) {
+          p = b.length;
           break;
         }
-        p++;
+        p = f;
+        if (p + 1 >= b.length) break;
+        const n = b[p + 1]!;
+        if (n === 0x00 || (n >= 0xd0 && n <= 0xd7)) {
+          p += 2;
+          continue;
+        }
+        if (n === 0xff) {
+          p++;
+          continue;
+        }
+        break;
       }
     }
   }
@@ -1194,26 +1241,77 @@ function mp4End(b: Uint8Array, s: number): number | null {
 
 // ---- PDF ----
 
-function pdfEnd(b: Uint8Array, s: number): number | null {
-  const next = indexOfAscii(b, '%PDF-', s + 5);
-  const lastEof = (limit: number): number => {
-    let last = -1;
-    for (
-      let i = indexOfAscii(b, '%%EOF', s);
-      i >= 0 && i < limit;
-      i = indexOfAscii(b, '%%EOF', i + 5)
-    ) {
-      last = i;
-    }
-    return last;
-  };
-  let last = lastEof(next > 0 ? next : b.length);
-  if (last < 0 && next > 0) last = lastEof(b.length);
-  if (last < 0) return null;
-  let e = last + 5;
+const isPdfSpace = (c: number | undefined) =>
+  c === 0x20 || c === 0x0a || c === 0x0d || c === 0x09 || c === 0x0c || c === 0x00;
+const isDigit = (c: number | undefined) => c !== undefined && c >= 0x30 && c <= 0x39;
+
+/** Offset after the "%%EOF" at `i` and its end of line. */
+function afterEof(b: Uint8Array, i: number): number {
+  let e = i + 5;
   if (b[e] === 0x0d) e++;
   if (b[e] === 0x0a) e++;
   return e;
+}
+
+/** Skip PDF white space and comment lines from `p`. */
+function skipPdfSpace(b: Uint8Array, p: number): number {
+  for (let n = 0; n < 64 && p < b.length; n++) {
+    while (p < b.length && isPdfSpace(b[p])) p++;
+    if (b[p] !== 0x25) break;
+    while (p < b.length && b[p] !== 0x0a && b[p] !== 0x0d) p++;
+  }
+  return p;
+}
+
+/** An incremental update starts at `p`: new objects ("12 0 obj") or an "xref" section. */
+function updateStartsAt(b: Uint8Array, p: number): boolean {
+  let q = skipPdfSpace(b, p);
+  if (asciiAt(b, q, 4) === 'xref') return true;
+  for (const maxDigits of [10, 5]) {
+    let d = 0;
+    while (isDigit(b[q]) && d <= maxDigits) {
+      q++;
+      d++;
+    }
+    if (d === 0 || d > maxDigits || !isPdfSpace(b[q])) return false;
+    while (isPdfSpace(b[q])) q++;
+  }
+  return asciiAt(b, q, 3) === 'obj';
+}
+
+/**
+ * End of a PDF: its first %%EOF, then the %%EOF of each incremental update appended after it
+ * (an update starts with new objects or an xref section right after the previous %%EOF, and
+ * ends with its own trailer / startxref). A stray %%EOF further on (another file, random
+ * bytes) is not part of the document. A %%EOF inside a stream (an embedded PDF) is skipped.
+ */
+function pdfEnd(b: Uint8Array, s: number): number | null {
+  let eof = nextOf(b, '%%EOF', s + 5);
+  for (let n = 0; eof >= 0 && n < 64; n++) {
+    // "%%EOF" followed by "endstream": the end of a PDF stored inside this one.
+    if (asciiAt(b, skipPdfSpace(b, afterEof(b, eof)), 9) !== 'endstream') break;
+    eof = nextOf(b, '%%EOF', eof + 5);
+  }
+  if (eof < 0) return null;
+  let end = afterEof(b, eof);
+  const nextPdf = nextOf(b, '%PDF-', end);
+  for (let updates = 0; updates < 1000 && updateStartsAt(b, end); updates++) {
+    let found = -1;
+    let e = nextOf(b, '%%EOF', end);
+    for (let k = 0; e >= 0 && k < 64; k++, e = nextOf(b, '%%EOF', e + 5)) {
+      if (nextPdf >= 0 && e > nextPdf) break;
+      const lo = Math.max(end, e - 4096);
+      const trailer = nextOf(b, 'trailer', lo);
+      const startxref = nextOf(b, 'startxref', lo);
+      if ((trailer >= 0 && trailer < e) || (startxref >= 0 && startxref < e)) {
+        found = e;
+        break;
+      }
+    }
+    if (found < 0) break;
+    end = afterEof(b, found);
+  }
+  return end;
 }
 
 // ---- ZIP ----
@@ -1321,11 +1419,13 @@ function sevenZipEnd(b: Uint8Array, s: number): number | null {
 
 // ---- GZIP / zlib ----
 
-let scanMemo: { b: Uint8Array; start: number; res: DeflateScan | null } | null = null;
+/** Last scan per buffer, for valid() then end(); weak, so no buffer outlives its caller. */
+const scanMemo = new WeakMap<Uint8Array, { start: number; res: DeflateScan | null }>();
 
 /** Deflate scan of the gzip member at `s` (header sanity first); memoised for valid()+end(). */
 function gzipScan(b: Uint8Array, s: number): DeflateScan | null {
-  if (scanMemo && scanMemo.b === b && scanMemo.start === s) return scanMemo.res;
+  const memo = scanMemo.get(b);
+  if (memo && memo.start === s) return memo.res;
   let res: DeflateScan | null = null;
   if (has(b, s, 18) && b[s] === 0x1f && b[s + 1] === 0x8b && b[s + 2] === 8) {
     const flg = b[s + 3]!;
@@ -1346,7 +1446,7 @@ function gzipScan(b: Uint8Array, s: number): DeflateScan | null {
       if (p < b.length) res = deflateScan(b, p);
     }
   }
-  scanMemo = { b, start: s, res };
+  scanMemo.set(b, { start: s, res });
   return res;
 }
 
