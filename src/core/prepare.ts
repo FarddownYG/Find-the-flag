@@ -1,6 +1,7 @@
 import { decodeAudioInBrowser, decodeWav } from './decode-audio';
 import { decodeImageExact, decodeImageInBrowser } from './decode-image';
 import { ToolError } from './errors';
+import { t } from '../i18n';
 import type { AnyTool, ExampleInput, InputKind } from './types';
 import { fromHex, utf8Decode, utf8Encode } from '../lib/bytes';
 
@@ -20,14 +21,14 @@ export async function prepareInput(kind: InputKind, raw: RawInput): Promise<unkn
   const base = { bytes, name: raw.name };
   if (kind === 'bytes') return base;
   if (!bytes.length)
-    throw new ToolError(`Drop or open ${kind === 'image' ? 'an image' : 'an audio file'}.`);
+    throw new ToolError(t(kind === 'image' ? 'core.input.needImage' : 'core.input.needAudio'));
   if (kind === 'image') {
     const image = decodeImageExact(bytes) ?? (inBrowser ? await decodeImageInBrowser(bytes) : null);
-    if (!image) throw new ToolError('Unsupported image format (PNG and BMP decode everywhere).');
+    if (!image) throw new ToolError(t('core.input.imageFormat'));
     return { ...base, image };
   }
   const audio = decodeWav(bytes) ?? (inBrowser ? await decodeAudioInBrowser(bytes) : null);
-  if (!audio) throw new ToolError('Unsupported audio format (WAV decodes everywhere).');
+  if (!audio) throw new ToolError(t('core.input.audioFormat'));
   return { ...base, ...audio };
 }
 

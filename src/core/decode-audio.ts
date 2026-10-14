@@ -1,4 +1,5 @@
 import { ToolError } from './errors';
+import { t } from '../i18n';
 import { u16le, u32le } from '../lib/bytes';
 
 export interface DecodedAudio {
@@ -27,13 +28,13 @@ export function decodeWav(b: Uint8Array): DecodedAudio | null {
         bits: u16le(b, body + 14),
       };
     } else if (id === 'data') {
-      if (!fmt) throw new ToolError('WAV "data" chunk before "fmt " chunk.');
+      if (!fmt) throw new ToolError(t('core.wav.dataBeforeFmt'));
       const end = Math.min(b.length, body + size);
       return pcmToFloat(b.subarray(body, end), fmt);
     }
     p = body + size + (size & 1);
   }
-  throw new ToolError('WAV file has no "data" chunk.');
+  throw new ToolError(t('core.wav.noData'));
 }
 
 function pcmToFloat(
@@ -42,7 +43,7 @@ function pcmToFloat(
 ): DecodedAudio {
   const bytesPer = f.bits / 8;
   if (!f.channels || !Number.isInteger(bytesPer) || bytesPer < 1) {
-    throw new ToolError(`Unsupported WAV layout (${f.bits} bits, ${f.channels} channels).`);
+    throw new ToolError(t('core.wav.layout', { bits: f.bits, channels: f.channels }));
   }
   const frames = Math.floor(d.length / (bytesPer * f.channels));
   const channels = Array.from({ length: f.channels }, () => new Float32Array(frames));
@@ -66,13 +67,13 @@ function pcmToFloat(
 /** Browser-only fallback (MP3, OGG, FLAC, ...). */
 export async function decodeAudioInBrowser(bytes: Uint8Array): Promise<DecodedAudio> {
   const Ctx = globalThis.OfflineAudioContext;
-  if (!Ctx) throw new ToolError('Audio decoding is unavailable in this browser.');
+  if (!Ctx) throw new ToolError(t('core.audio.unavailable'));
   const ctx = new Ctx(1, 1, 44100);
   let buf: AudioBuffer;
   try {
     buf = await ctx.decodeAudioData(bytes.slice().buffer);
   } catch {
-    throw new ToolError('This file is not an audio format the browser can decode.');
+    throw new ToolError(t('core.audio.undecodable'));
   }
   return {
     sampleRate: buf.sampleRate,

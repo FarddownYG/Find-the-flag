@@ -1,4 +1,5 @@
 import { ToolError } from '../core/errors';
+import { t } from '../i18n';
 
 const enc = new TextEncoder();
 const dec = new TextDecoder('utf-8', { fatal: false });
@@ -44,9 +45,9 @@ export function fromHex(s: string): Uint8Array {
   const clean = s.replace(/0x|\\x|[\s:,;-]/gi, '');
   if (!/^[0-9a-f]*$/i.test(clean)) {
     const bad = clean.match(/[^0-9a-f]/i)?.[0];
-    throw new ToolError(`Not hex: unexpected character "${bad}".`);
+    throw new ToolError(t('lib.hex.badChar', { char: bad ?? '?' }));
   }
-  if (clean.length % 2) throw new ToolError(`Odd number of hex digits (${clean.length}).`);
+  if (clean.length % 2) throw new ToolError(t('lib.hex.odd', { count: clean.length }));
   const out = new Uint8Array(clean.length / 2);
   for (let i = 0; i < out.length; i++) out[i] = parseInt(clean.substr(i * 2, 2), 16);
   return out;
@@ -93,7 +94,7 @@ export function fromBase64(s: string, alphabet = B64): Uint8Array {
   for (let i = 0; i < clean.length; i++) {
     const c = clean.charCodeAt(i);
     const v = c < 128 ? map[c]! : -1;
-    if (v < 0) throw new ToolError(`Not base64: "${clean[i]}" at position ${i}.`);
+    if (v < 0) throw new ToolError(t('lib.base64.badChar', { char: clean[i] ?? '?', position: i }));
     acc = (acc << 6) | v;
     bits += 6;
     if (bits >= 8) {

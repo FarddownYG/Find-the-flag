@@ -1,5 +1,6 @@
 import { mapLinks } from '../core/result-text';
 import type { Output } from '../core/types';
+import { t } from '../i18n';
 import { h } from './dom';
 
 const TILES = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
@@ -27,7 +28,7 @@ export function mapBlock(o: Extract<Output, { type: 'map' }>): HTMLElement {
       class: 'btn btn-ghost',
       onclick: async () => {
         show.disabled = true;
-        show.textContent = 'Loading map…';
+        show.textContent = t('ui.map.loading');
         try {
           const [{ default: L }] = await Promise.all([
             import('leaflet'),
@@ -56,24 +57,20 @@ export function mapBlock(o: Extract<Output, { type: 'map' }>): HTMLElement {
           notice.remove();
         } catch {
           show.disabled = false;
-          show.textContent = 'Map failed to load — retry';
+          show.textContent = t('ui.map.failed');
         }
       },
     },
-    'Show map',
+    t('ui.map.show'),
   );
-  const notice = h(
-    'span',
-    { class: 'fine' },
-    'Loads tiles from openstreetmap.org, which will see this area. Your file never leaves the page.',
-  );
+  const notice = h('span', { class: 'fine' }, t('ui.map.notice'));
   return h(
     'section',
     { class: 'out out-map', 'data-lat': o.lat, 'data-lon': o.lon },
     h(
       'div',
       { class: 'out-head' },
-      h('span', { class: 'out-label' }, o.label ?? 'Location'),
+      h('span', { class: 'out-label' }, o.label ?? t('ui.map.location')),
       h('span', { class: 'out-meta' }, `${o.lat.toFixed(6)}, ${o.lon.toFixed(6)}`),
     ),
     h(
@@ -91,12 +88,12 @@ export function mapBlock(o: Extract<Output, { type: 'map' }>): HTMLElement {
             rel: 'noopener noreferrer',
             class: 'btn btn-ghost',
           },
-          'Open in Google Maps',
+          t('ui.map.google'),
         ),
         h(
           'a',
           { href: links.osm, target: '_blank', rel: 'noopener noreferrer', class: 'btn btn-ghost' },
-          'Open in OpenStreetMap',
+          t('ui.map.osm'),
         ),
         show,
       ),

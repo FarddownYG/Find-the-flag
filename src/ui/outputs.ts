@@ -2,9 +2,11 @@ import { encode as encodePng } from 'fast-png';
 import { findFlags } from '../core/flags';
 import type { RawInput } from '../core/prepare';
 import { TOOLS } from '../core/registry';
-import type { Output, RgbaImage, ToolResult } from '../core/types';
+import type { Category, Output, RgbaImage, ToolResult } from '../core/types';
 import { formatSize, isValidUtf8, printableRatio, utf8Decode } from '../lib/bytes';
 import { clear, copyText, downloadBytes, h, type Child } from './dom';
+import { t } from '../i18n';
+import { categoryName, toolName } from '../i18n/tool-text';
 import { flagSettings } from './settings';
 import { mapBlock } from './map';
 
@@ -39,27 +41,31 @@ function pipeSelect(raw: () => RawInput, ctx: OutputContext): HTMLSelectElement 
     'select',
     {
       class: 'pipe',
-      'aria-label': 'Send this output to another tool',
+      'aria-label': t('ui.out.sendToLabel'),
       onchange: () => {
         if (sel.value) ctx.pipe(sel.value, raw());
         sel.value = '';
       },
     },
-    h('option', { value: '' }, 'Send to…'),
+    h('option', { value: '' }, t('ui.out.sendTo')),
     ...groupTools().map(([cat, tools]) =>
-      h('optgroup', { label: cat }, ...tools.map((t) => h('option', { value: t.id }, t.name))),
+      h(
+        'optgroup',
+        { label: categoryName(cat) },
+        ...tools.map((x) => h('option', { value: x.id }, toolName(x))),
+      ),
     ),
   );
   return sel;
 }
 
 function groupTools() {
-  const groups = new Map<string, (typeof TOOLS)[number][]>();
-  for (const t of TOOLS) {
-    if (t.input === 'audio') continue;
-    const list = groups.get(t.category) ?? [];
-    list.push(t);
-    groups.set(t.category, list);
+  const groups = new Map<Category, (typeof TOOLS)[number][]>();
+  for (const tool of TOOLS) {
+    if (tool.input === 'audio') continue;
+    const list = groups.get(tool.category) ?? [];
+    list.push(tool);
+    groups.set(tool.category, list);
   }
   return [...groups.entries()];
 }
@@ -68,7 +74,7 @@ function header(label: string | undefined, meta: Child, actions: Child[]): HTMLE
   return h(
     'div',
     { class: 'out-head' },
-    h('span', { class: 'out-label' }, label ?? 'Output'),
+    h('span', { class: 'out-label' }, label ?? t('ui.tool.output')),
     meta ? h('span', { class: 'out-meta' }, meta) : null,
     h('span', { class: 'out-actions' }, ...actions),
   );
@@ -93,17 +99,20 @@ function textBlock(o: Extract<Output, { type: 'text' }>, ctx: OutputContext): HT
         h(
           'button',
           { type: 'button', class: 'btn btn-ghost more', onclick: () => fill(true) },
-          `Show all ${o.value.length} characters`,
+          t('ui.out.showAllChars', { count: o.value.length }),
         ),
       );
     }
   };
   fill(false);
-  const copy: HTMLButtonElement = button('Copy', () => copyText(o.value, copy));
+  const copy: HTMLButtonElement = button(t('ui.out.copy'), () => copyText(o.value, copy));
   return h(
     'section',
     { class: 'out out-text' },
-    header(o.label, `${o.value.length} chars`, [copy, pipeSelect(() => ({ text: o.value }), ctx)]),
+    header(o.label, t('ui.input.chars', { count: o.value.length }), [
+      copy,
+      pipeSelect(() => ({ text: o.value }), ctx),
+    ]),
     pre,
   );
 }
@@ -144,7 +153,7 @@ export function hexView(bytes: Uint8Array, rowsPerPage = 64): HTMLElement {
         '\n',
       );
     }
-    pos.textContent = pages > 1 ? `page ${page + 1} / ${pages}` : '';
+    pos.textContent = pages > 1 ? t('ui.hex.page', { page: page + 1, pages }) : '';
   };
   render();
   const nav =
@@ -152,12 +161,12 @@ export function hexView(bytes: Uint8Array, rowsPerPage = 64): HTMLElement {
       ? h(
           'div',
           { class: 'hex-nav' },
-          button('‹ Prev', () => {
+          button(t('ui.hex.prev'), () => {
             page = Math.max(0, page - 1);
             render();
           }),
           pos,
-          button('Next ›', () => {
+          button(t('ui.hex.next'), () => {
             page = Math.min(pages - 1, page + 1);
             render();
           }),
@@ -165,7 +174,7 @@ export function hexView(bytes: Uint8Array, rowsPerPage = 64): HTMLElement {
             type: 'text',
             class: 'hex-goto',
             placeholder: 'go to 0x…',
-            'aria-label': 'Go to offset',
+            'aria-label': t('ui.hex.gotoLabel'),
             onkeydown: (ev: KeyboardEvent) => {
               if (ev.key !== 'Enter') return;
               const v = (ev.target as HTMLInputElement).value.trim();
@@ -205,14 +214,16 @@ function bytesBlock(o: Extract<Output, { type: 'bytes' }>, ctx: OutputContext): 
     );
   }
   show();
-  const copy: HTMLButtonElement = button('Copy', () => copyText(utf8Decode(o.value), copy));
+  const copy: HTMLButtonElement = button(t('ui.out.copy'), () =>
+    copyText(utf8Decode(o.value), copy),
+  );
   return h(
     'section',
     { class: 'out out-bytes' },
     header(o.label, formatSize(o.value.length), [
       tabs,
       copy,
-      button('Download', () => downloadBytes(o.value, o.filename ?? 'output.bin')),
+      button(t('ui.out.download'), () => downloadBytes(o.value, o.filename ?? 'output.bin')),
       pipeSelect(() => ({ bytes: o.value, name: o.filename }), ctx),
     ]),
     body,
@@ -226,8 +237,8 @@ function filterBox(onInput: (q: string) => void): HTMLInputElement {
   return h('input', {
     type: 'search',
     class: 'out-filter',
-    placeholder: 'Filter',
-    'aria-label': 'Filter rows',
+    placeholder: t('ui.out.filter'),
+    'aria-label': t('ui.out.filterLabel'),
     spellcheck: false,
     oninput: (e: Event) => onInput((e.target as HTMLInputElement).value.trim().toLowerCase()),
   });
@@ -243,7 +254,9 @@ function tableBlock(o: Extract<Output, { type: 'table' }>, ctx: OutputContext): 
     const rows = o.rows
       .map((r, i) => ({ r, i }))
       .filter(({ r }) => !query || r.some((c) => String(c).toLowerCase().includes(query)));
-    meta.textContent = query ? `${rows.length} of ${o.rows.length} rows` : `${o.rows.length} rows`;
+    meta.textContent = query
+      ? t('ui.out.rowsOf', { shown: rows.length, count: o.rows.length })
+      : t('ui.out.rows', { count: o.rows.length });
     for (const { r, i } of rows.slice(0, n)) {
       tbody.append(
         h(
@@ -261,7 +274,7 @@ function tableBlock(o: Extract<Output, { type: 'table' }>, ctx: OutputContext): 
           h(
             'td',
             { colspan: o.columns.length },
-            button(`Show all ${rows.length} rows`, () => fill(rows.length)),
+            button(t('ui.out.showAllRows', { count: rows.length }), () => fill(rows.length)),
           ),
         ),
       );
@@ -269,7 +282,7 @@ function tableBlock(o: Extract<Output, { type: 'table' }>, ctx: OutputContext): 
   };
   fill(ROW_LIMIT);
   const tsv = () => [o.columns, ...o.rows].map((r) => r.join('\t')).join('\n');
-  const copy: HTMLButtonElement = button('Copy TSV', () => copyText(tsv(), copy));
+  const copy: HTMLButtonElement = button(t('ui.out.copyTsv'), () => copyText(tsv(), copy));
   const filter =
     o.rows.length >= FILTER_MIN_ROWS
       ? filterBox((q) => {
@@ -295,7 +308,7 @@ function tableBlock(o: Extract<Output, { type: 'table' }>, ctx: OutputContext): 
 }
 
 function kvBlock(o: Extract<Output, { type: 'kv' }>, ctx: OutputContext): HTMLElement {
-  const copy: HTMLButtonElement = button('Copy', () =>
+  const copy: HTMLButtonElement = button(t('ui.out.copy'), () =>
     copyText(o.entries.map(([k, v]) => `${k}: ${v}`).join('\n'), copy),
   );
   const dl = h('dl', { class: 'kv' });
@@ -319,7 +332,7 @@ export function imageCanvas(img: RgbaImage): HTMLCanvasElement {
   const c2d = canvas.getContext('2d');
   if (c2d)
     c2d.putImageData(new ImageData(new Uint8ClampedArray(img.data), img.width, img.height), 0, 0);
-  canvas.title = 'Click to toggle actual size';
+  canvas.title = t('ui.out.zoomHint');
   canvas.addEventListener('click', () => canvas.classList.toggle('is-actual'));
   return canvas;
 }
@@ -341,7 +354,7 @@ function imageBlock(o: Extract<Output, { type: 'image' }>, ctx: OutputContext): 
     'section',
     { class: 'out out-image' },
     header(o.label, `${o.image.width}×${o.image.height}`, [
-      button('Download PNG', () =>
+      button(t('ui.out.downloadPng'), () =>
         canvas.toBlob((b) => b && downloadBytes(b, o.filename ?? 'image.png'), 'image/png'),
       ),
       pipeSelect(asPng, ctx),
@@ -354,7 +367,7 @@ function filesBlock(o: Extract<Output, { type: 'files' }>, ctx: OutputContext): 
   return h(
     'section',
     { class: 'out out-files' },
-    header(o.label ?? 'Files', `${o.files.length} file${o.files.length === 1 ? '' : 's'}`, []),
+    header(o.label ?? t('ui.out.files'), t('ui.out.fileCount', { count: o.files.length }), []),
     h(
       'ul',
       { class: 'files' },
@@ -372,7 +385,9 @@ function filesBlock(o: Extract<Output, { type: 'files' }>, ctx: OutputContext): 
           h(
             'span',
             { class: 'out-actions' },
-            button('Download', () => downloadBytes(f.data, f.name.split('/').pop() || 'file.bin')),
+            button(t('ui.out.download'), () =>
+              downloadBytes(f.data, f.name.split('/').pop() || 'file.bin'),
+            ),
             pipeSelect(() => ({ bytes: f.data, name: f.name }), ctx),
           ),
         ),
@@ -388,8 +403,8 @@ function pictureBlock(o: Extract<Output, { type: 'picture' }>, ctx: OutputContex
   return h(
     'section',
     { class: 'out out-image' },
-    header(o.label ?? 'Picture', `${o.mime} · ${formatSize(o.data.length)}`, [
-      button('Download', () => downloadBytes(o.data, name)),
+    header(o.label ?? t('ui.out.picture'), `${o.mime} · ${formatSize(o.data.length)}`, [
+      button(t('ui.out.download'), () => downloadBytes(o.data, name)),
       pipeSelect(() => ({ bytes: o.data, name }), ctx),
     ]),
     h('div', { class: 'canvas-frame' }, img),

@@ -1,3 +1,5 @@
+import { t } from '../i18n';
+
 /** Tiny DOM builder. Strings always become text nodes: untrusted tool data can never inject HTML. */
 export type Child = Node | string | number | null | undefined | false | Child[];
 type Props = Record<string, unknown> & { class?: string };
@@ -54,9 +56,9 @@ export function downloadBytes(data: Uint8Array | Blob, filename: string): void {
 export async function copyText(text: string, button?: HTMLElement): Promise<void> {
   try {
     await navigator.clipboard.writeText(text);
-    if (button) flash(button, 'Copied');
+    if (button) flash(button, t('ui.out.copied'));
   } catch {
-    if (button) flash(button, 'Copy blocked');
+    if (button) flash(button, t('ui.out.copyBlocked'));
   }
 }
 

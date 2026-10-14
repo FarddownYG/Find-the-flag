@@ -1,21 +1,25 @@
 import { selectFlags } from '../core/flags';
 import { getTool, TOOLS } from '../core/registry';
 import { CATEGORIES, type AnyTool, type Sample } from '../core/types';
+import { getLocale, LOCALES, isLocale, onLocaleChange, setLocale, t } from '../i18n';
+import { categoryBlurb, categoryName, toolDescription, toolName } from '../i18n/tool-text';
 import { isValidUtf8, printableRatio, utf8Decode, utf8Encode } from '../lib/bytes';
 import { clear, copyText, debounce, h } from './dom';
 import { flagSettings } from './settings';
 import { renderTool, setPending } from './tool-view';
 
 /** Rank tools for a query: exact names/aliases first, then prefixes, then any mention. */
-function matchScore(t: AnyTool, w: string): number {
-  const name = t.name.toLowerCase();
-  const tags = (t.tags ?? []).map((x) => x.toLowerCase());
-  if (t.id === w || name === w || tags.includes(w)) return 100;
-  if (name.startsWith(w) || t.id.startsWith(w)) return 80;
+function matchScore(tool: AnyTool, w: string): number {
+  // Both the English name and the translated one match, so aliases keep working in any language.
+  const names = [tool.name, toolName(tool)].map((x) => x.toLowerCase());
+  const tags = (tool.tags ?? []).map((x) => x.toLowerCase());
+  const desc = `${tool.description} ${toolDescription(tool)}`.toLowerCase();
+  if (tool.id === w || names.includes(w) || tags.includes(w)) return 100;
+  if (names.some((n) => n.startsWith(w)) || tool.id.startsWith(w)) return 80;
   if (tags.some((x) => x.startsWith(w))) return 70;
-  if (name.includes(w)) return 60;
+  if (names.some((n) => n.includes(w))) return 60;
   if (tags.some((x) => x.includes(w))) return 50;
-  if (t.description.toLowerCase().includes(w)) return 20;
+  if (desc.includes(w)) return 20;
   return 0;
 }
 
@@ -32,79 +36,83 @@ const search = (q: string): AnyTool[] => {
 };
 
 export function mountApp(root: HTMLElement): void {
-  const nav = h('nav', { class: 'toollist', 'aria-label': 'Tools' });
   const main = h('main', { class: 'main', id: 'main', tabindex: '-1' });
-  const searchBox = h('input', {
-    type: 'search',
-    class: 'search',
-    placeholder: 'Search tools',
-    'aria-label': 'Search tools',
-    'aria-keyshortcuts': '/',
-    autocomplete: 'off',
-    spellcheck: false,
-    oninput: () => renderNav(),
-    onkeydown: (ev: KeyboardEvent) => {
-      if (ev.key === 'Enter') {
-        const first = search(searchBox.value)[0];
-        if (first) location.hash = `#/tool/${first.id}`;
-      } else if (ev.key === 'Escape') {
-        searchBox.value = '';
-        renderNav();
-        searchBox.blur();
-      }
-    },
-  });
-  const sidebar = h(
-    'aside',
-    { class: 'sidebar', id: 'sidebar' },
-    h(
-      'a',
-      { class: 'brand', href: '#/' },
-      h('span', { class: 'pennant', 'aria-hidden': 'true' }),
-      h('span', null, 'find the flag'),
-    ),
-    h(
-      'div',
-      { class: 'search-wrap' },
-      searchBox,
-      h('kbd', { class: 'search-kbd', 'aria-hidden': 'true' }, '/'),
-    ),
-    nav,
-    settingsPanel(),
-  );
-  const menuBtn = h(
-    'button',
-    {
-      type: 'button',
-      class: 'menu-btn',
-      'aria-controls': 'sidebar',
-      'aria-expanded': 'false',
-      onclick: () => {
-        const open = root.classList.toggle('nav-open');
-        menuBtn.setAttribute('aria-expanded', String(open));
-      },
-    },
-    'Tools',
-  );
-  const topbar = h(
-    'header',
-    { class: 'topbar' },
-    h(
-      'a',
-      { class: 'brand', href: '#/' },
-      h('span', { class: 'pennant', 'aria-hidden': 'true' }),
-      h('span', null, 'find the flag'),
-    ),
-    menuBtn,
-  );
-  root.append(h('a', { class: 'skip', href: '#main' }, 'Skip to content'), topbar, sidebar, main);
-
+  let nav = h('nav');
+  let searchBox = h('input');
+  let menuBtn = h('button');
   let current = '';
+
+  /** Everything around <main>; rebuilt when the language changes. */
+  function buildChrome(): Node[] {
+    nav = h('nav', { class: 'toollist', 'aria-label': t('ui.nav.label') });
+    searchBox = h('input', {
+      type: 'search',
+      class: 'search',
+      placeholder: t('ui.search.placeholder'),
+      'aria-label': t('ui.search.placeholder'),
+      'aria-keyshortcuts': '/',
+      autocomplete: 'off',
+      spellcheck: false,
+      oninput: () => renderNav(),
+      onkeydown: (ev: KeyboardEvent) => {
+        if (ev.key === 'Enter') {
+          const first = search(searchBox.value)[0];
+          if (first) location.hash = `#/tool/${first.id}`;
+        } else if (ev.key === 'Escape') {
+          searchBox.value = '';
+          renderNav();
+          searchBox.blur();
+        }
+      },
+    });
+    const brand = () =>
+      h(
+        'a',
+        { class: 'brand', href: '#/' },
+        h('span', { class: 'pennant', 'aria-hidden': 'true' }),
+        h('span', null, 'find the flag'),
+      );
+    const sidebar = h(
+      'aside',
+      { class: 'sidebar', id: 'sidebar' },
+      h('div', { class: 'sidebar-head' }, brand(), languagePicker('lang-side')),
+      h(
+        'div',
+        { class: 'search-wrap' },
+        searchBox,
+        h('kbd', { class: 'search-kbd', 'aria-hidden': 'true' }, '/'),
+      ),
+      nav,
+      settingsPanel(),
+    );
+    menuBtn = h(
+      'button',
+      {
+        type: 'button',
+        class: 'menu-btn',
+        'aria-controls': 'sidebar',
+        'aria-expanded': 'false',
+        onclick: () => {
+          const open = root.classList.toggle('nav-open');
+          menuBtn.setAttribute('aria-expanded', String(open));
+        },
+      },
+      t('ui.nav.menu'),
+    );
+    const topbar = h(
+      'header',
+      { class: 'topbar' },
+      brand(),
+      h('div', { class: 'topbar-actions' }, languagePicker('lang-top'), menuBtn),
+    );
+    return [h('a', { class: 'skip', href: '#main' }, t('ui.skip')), topbar, sidebar];
+  }
+
   function renderNav() {
     clear(nav);
-    const found = new Set(search(searchBox.value).map((t) => t.id));
+    const found = new Set(search(searchBox.value).map((x) => x.id));
     for (const cat of CATEGORIES) {
-      const tools = TOOLS.filter((t) => t.category === cat.id && found.has(t.id));
+      const tools = TOOLS.filter((x) => x.category === cat.id && found.has(x.id));
       if (!tools.length) continue;
       nav.append(
         h(
@@ -114,19 +122,19 @@ export function mountApp(root: HTMLElement): void {
             'h2',
             null,
             h('span', { class: `glyph glyph-${cat.id}`, 'aria-hidden': 'true' }),
-            cat.name,
+            categoryName(cat.id),
           ),
           h(
             'ul',
             null,
-            ...tools.map((t) =>
+            ...tools.map((x) =>
               h(
                 'li',
                 null,
                 h(
                   'a',
-                  { href: `#/tool/${t.id}`, 'aria-current': t.id === current ? 'page' : undefined },
-                  t.name,
+                  { href: `#/tool/${x.id}`, 'aria-current': x.id === current ? 'page' : undefined },
+                  toolName(x),
                 ),
               ),
             ),
@@ -134,8 +142,7 @@ export function mountApp(root: HTMLElement): void {
         ),
       );
     }
-    if (!found.size)
-      nav.append(h('p', { class: 'nav-empty' }, 'No tool matches. Try another word.'));
+    if (!found.size) nav.append(h('p', { class: 'nav-empty' }, t('ui.search.none')));
   }
 
   let teardown: (() => void) | null = null;
@@ -149,19 +156,24 @@ export function mountApp(root: HTMLElement): void {
     const tool = m ? getTool(m[1]!) : undefined;
     current = tool?.id ?? '';
     if (tool) {
-      document.title = `${tool.name} · Find The Flag`;
+      document.title = `${toolName(tool)} · Find The Flag`;
       teardown = renderTool(tool, main, (id) => (location.hash = `#/tool/${id}`));
     } else {
-      document.title = 'Find The Flag — CTF toolbox';
+      document.title = t('ui.title');
       renderHome(main);
     }
     renderNav();
     main.scrollTo?.(0, 0);
   }
 
+  function render() {
+    root.replaceChildren(...buildChrome(), main);
+    route();
+  }
+
   document.addEventListener('keydown', (ev) => {
-    const t = ev.target as HTMLElement;
-    const typing = t.closest('input, textarea, select, [contenteditable]');
+    const target = ev.target as HTMLElement;
+    const typing = target.closest('input, textarea, select, [contenteditable]');
     if (ev.key === '/' && !typing) {
       ev.preventDefault();
       searchBox.focus();
@@ -169,7 +181,31 @@ export function mountApp(root: HTMLElement): void {
     }
   });
   window.addEventListener('hashchange', route);
-  route();
+  onLocaleChange(render);
+  render();
+}
+
+function languagePicker(id: string): HTMLElement {
+  const sel = h(
+    'select',
+    {
+      id,
+      class: 'lang',
+      onchange: () => {
+        if (isLocale(sel.value)) void setLocale(sel.value, { remember: true });
+      },
+    },
+    ...LOCALES.map((l) =>
+      h('option', { value: l.id, selected: l.id === getLocale(), lang: l.id }, l.name),
+    ),
+  );
+  return h(
+    'label',
+    { class: 'lang-wrap', for: id },
+    h('span', { class: 'visually-hidden' }, t('ui.lang.label')),
+    h('span', { class: 'lang-icon', 'aria-hidden': 'true' }, '文A'),
+    sel,
+  );
 }
 
 function settingsPanel(): HTMLElement {
@@ -177,26 +213,18 @@ function settingsPanel(): HTMLElement {
     type: 'text',
     class: 'flag-pattern',
     value: flagSettings.pattern,
-    placeholder: String.raw`e.g. RM\{[^}]+\}`,
+    placeholder: t('ui.flagFormat.placeholder', { example: String.raw`RM\{[^}]+\}` }),
     spellcheck: false,
-    'aria-label': 'Extra flag pattern (regular expression)',
+    'aria-label': t('ui.flagFormat.inputLabel'),
     onchange: () => flagSettings.set(input.value),
   });
   return h(
     'details',
     { class: 'settings' },
-    h('summary', null, 'Flag format'),
-    h(
-      'p',
-      null,
-      'Outputs are scanned for prefix{…}. Add your event’s format as a regular expression:',
-    ),
+    h('summary', null, t('ui.flagFormat.title')),
+    h('p', null, t('ui.flagFormat.help')),
     input,
-    h(
-      'p',
-      { class: 'fine' },
-      'Saved in this browser only. Find The Flag runs entirely client-side: no server, no tracking.',
-    ),
+    h('p', { class: 'fine' }, t('ui.flagFormat.privacy')),
   );
 }
 
@@ -243,8 +271,8 @@ function renderHome(main: HTMLElement) {
     class: 'triage-input',
     spellcheck: false,
     autocomplete: 'off',
-    placeholder: 'Paste a string you found, or drop a file here.',
-    'aria-label': 'Paste data to identify',
+    placeholder: t('ui.home.placeholder'),
+    'aria-label': t('ui.home.inputLabel'),
     oninput: debounce(() => {
       file = null;
       update();
@@ -263,7 +291,13 @@ function renderHome(main: HTMLElement) {
     if (file) {
       const textual = isValidUtf8(file.bytes) && printableRatio(file.bytes) > 0.9;
       sample = sampleFrom(textual ? utf8Decode(file.bytes) : null, file.bytes, file.name);
-      results.append(h('p', { class: 'triage-file' }, `${file.name} · ${file.bytes.length} bytes`));
+      results.append(
+        h(
+          'p',
+          { class: 'triage-file' },
+          t('ui.home.fileInfo', { name: file.name, count: file.bytes.length }),
+        ),
+      );
     } else {
       const text = ta.value.trim();
       if (!text) return;
@@ -277,7 +311,7 @@ function renderHome(main: HTMLElement) {
         h(
           'div',
           { class: 'flag-strip' },
-          h('span', { class: 'flag-strip-label' }, 'Already a flag'),
+          h('span', { class: 'flag-strip-label' }, t('ui.home.alreadyFlag')),
           ...flags.map((f) => {
             const b: HTMLButtonElement = h(
               'button',
@@ -291,17 +325,11 @@ function renderHome(main: HTMLElement) {
     }
     const ranked = rank(sample);
     if (!ranked.length) {
-      results.append(
-        h(
-          'p',
-          { class: 'empty' },
-          'No tool recognises this. Try Auto-decode, Strings, or browse the tools below.',
-        ),
-      );
+      results.append(h('p', { class: 'empty' }, t('ui.home.noGuess')));
       return;
     }
     results.append(
-      h('h2', { class: 'triage-h' }, 'Looks like'),
+      h('h2', { class: 'triage-h' }, t('ui.home.looksLike')),
       h(
         'ol',
         { class: 'guesses' },
@@ -328,8 +356,8 @@ function renderHome(main: HTMLElement) {
                 style: `--score:${Math.round(r.score * 100)}%`,
                 'aria-hidden': 'true',
               }),
-              h('span', { class: 'guess-name' }, r.tool.name),
-              h('span', { class: 'guess-why' }, r.reason ?? r.tool.description),
+              h('span', { class: 'guess-name' }, toolName(r.tool)),
+              h('span', { class: 'guess-why' }, r.reason ?? toolDescription(r.tool)),
               h('span', { class: 'guess-score' }, `${Math.round(r.score * 100)}%`),
             ),
           ),
@@ -361,9 +389,9 @@ function renderHome(main: HTMLElement) {
       h(
         'button',
         { type: 'button', class: 'btn btn-ghost', onclick: () => fileInput.click() },
-        'Open file',
+        t('ui.input.openFile'),
       ),
-      h('span', { class: 'fine' }, 'Nothing is uploaded. Every tool runs in this tab.'),
+      h('span', { class: 'fine' }, t('ui.home.local')),
     ),
     fileInput,
   );
@@ -372,19 +400,15 @@ function renderHome(main: HTMLElement) {
     h(
       'section',
       { class: 'home' },
-      h('h1', { class: 'home-title' }, 'What did you find?'),
-      h(
-        'p',
-        { class: 'home-lede' },
-        `${TOOLS.length} tools for decoding, cracking and digging through CTF challenge files. Paste or drop anything to get a guess.`,
-      ),
+      h('h1', { class: 'home-title' }, t('ui.home.title')),
+      h('p', { class: 'home-lede' }, t('ui.home.lede', { count: TOOLS.length })),
       drop,
       results,
       h(
         'div',
         { class: 'index' },
         ...CATEGORIES.map((cat) => {
-          const tools = TOOLS.filter((t) => t.category === cat.id);
+          const tools = TOOLS.filter((x) => x.category === cat.id);
           if (!tools.length) return null;
           return h(
             'section',
@@ -393,21 +417,21 @@ function renderHome(main: HTMLElement) {
               'h2',
               null,
               h('span', { class: `glyph glyph-${cat.id}`, 'aria-hidden': 'true' }),
-              cat.name,
+              categoryName(cat.id),
             ),
-            h('p', { class: 'index-blurb' }, cat.blurb),
+            h('p', { class: 'index-blurb' }, categoryBlurb(cat.id)),
             h(
               'ul',
               null,
-              ...tools.map((t) =>
+              ...tools.map((tool) =>
                 h(
                   'li',
                   null,
                   h(
                     'a',
-                    { href: `#/tool/${t.id}` },
-                    h('span', null, t.name),
-                    h('small', null, t.description),
+                    { href: `#/tool/${tool.id}` },
+                    h('span', null, toolName(tool)),
+                    h('small', null, toolDescription(tool)),
                   ),
                 ),
               ),

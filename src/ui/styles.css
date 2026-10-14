@@ -18,7 +18,10 @@
   --ok: #63cfa6;
   --amber: #e5a046;
 
-  --font: 'Martian Mono Variable', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  /* Martian Mono covers Latin and Cyrillic; Chinese and Devanagari fall through to Noto. */
+  --font:
+    'Martian Mono Variable', 'Noto Sans SC Variable', 'Noto Sans Devanagari Variable', ui-monospace,
+    'SF Mono', Menlo, Consolas, monospace;
   --fs-0: 11px;
   --fs-1: 12.5px;
   --fs-2: 14px;
@@ -1017,7 +1020,8 @@ tr.is-hl td:first-child {
     border-right: 0;
     padding: 16px;
   }
-  .sidebar > .brand {
+  /* The top bar already shows the brand and the language picker. */
+  .sidebar-head {
     display: none;
   }
   .main {
@@ -1093,4 +1097,77 @@ tr.is-hl td:first-child {
 .map-holder .leaflet-control-attribution {
   font-family: var(--font);
   font-size: 10px;
+}
+
+/* ---------- language picker ---------- */
+.sidebar-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 8px;
+}
+.brand {
+  white-space: nowrap;
+}
+.lang-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--mute);
+  font-size: var(--fs-0);
+}
+.lang-icon {
+  font-stretch: 87.5%;
+  letter-spacing: -0.04em;
+}
+.lang {
+  font-size: var(--fs-0);
+  padding: 3px 4px;
+  max-width: 11ch;
+}
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.topbar .lang-icon {
+  display: none;
+}
+/* Han and Devanagari need more line height than the Latin metrics give. */
+:lang(zh),
+:lang(hi) {
+  line-height: 1.7;
+}
+
+/* Devanagari prose reads badly with monospace spaces between words: prose uses Noto, while data,
+   code and tool names keep the monospace face. */
+:root:lang(hi) {
+  --font-prose:
+    'Noto Sans Devanagari Variable', 'Martian Mono Variable', 'Noto Sans SC Variable', sans-serif;
+}
+:lang(hi) body {
+  font-family: var(--font-prose);
+}
+:lang(hi)
+  :is(
+    pre,
+    code,
+    kbd,
+    textarea,
+    input,
+    select,
+    table,
+    .kv dd,
+    .hex,
+    .brand,
+    .navgroup a,
+    .index-cat a span,
+    .guess-name,
+    .tool-head h1,
+    .chip,
+    .seg button,
+    .flag-chip
+  ) {
+  font-family: var(--font);
 }

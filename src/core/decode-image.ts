@@ -1,5 +1,6 @@
 import { decode as decodePng, type DecodedPng } from 'fast-png';
 import { ToolError } from './errors';
+import { t } from '../i18n';
 import type { RgbaImage } from './types';
 import { u16le, u32le } from '../lib/bytes';
 
@@ -14,7 +15,7 @@ export function decodeImageExact(bytes: Uint8Array): RgbaImage | null {
     try {
       png = decodePng(bytes);
     } catch (e) {
-      throw new ToolError(`PNG decode failed: ${(e as Error).message}`);
+      throw new ToolError(t('core.png.failed', { message: (e as Error).message }));
     }
     return pngToRgba(png);
   }
@@ -80,7 +81,7 @@ function pngToRgba(png: DecodedPng): RgbaImage {
 
 /** Uncompressed BMP (1/4/8/24/32 bpp, BI_RGB or BI_BITFIELDS with standard masks). */
 export function decodeBmp(b: Uint8Array): RgbaImage {
-  if (b.length < 54) throw new ToolError('BMP too short.');
+  if (b.length < 54) throw new ToolError(t('core.bmp.short'));
   const dataOffset = u32le(b, 10);
   const headerSize = u32le(b, 14);
   const width = u32le(b, 18) | 0;
@@ -88,12 +89,12 @@ export function decodeBmp(b: Uint8Array): RgbaImage {
   const bpp = u16le(b, 28);
   const compression = u32le(b, 30);
   if (compression !== 0 && compression !== 3) {
-    throw new ToolError(`BMP compression ${compression} is not supported (only uncompressed).`);
+    throw new ToolError(t('core.bmp.compression', { compression }));
   }
   const height = Math.abs(rawHeight);
   const bottomUp = rawHeight > 0;
   if (width <= 0 || height <= 0 || width * height > 100_000_000) {
-    throw new ToolError(`Implausible BMP size ${width}x${height}.`);
+    throw new ToolError(t('core.bmp.size', { width, height }));
   }
   const rowSize = Math.ceil((bpp * width) / 32) * 4;
   const palette: number[][] = [];
@@ -126,7 +127,7 @@ export function decodeBmp(b: Uint8Array): RgbaImage {
         out[o + 2] = c[2]!;
         out[o + 3] = 255;
       } else {
-        throw new ToolError(`BMP with ${bpp} bits per pixel is not supported.`);
+        throw new ToolError(t('core.bmp.bpp', { bpp }));
       }
     }
   }
@@ -140,11 +141,11 @@ export async function decodeImageInBrowser(bytes: Uint8Array): Promise<RgbaImage
   try {
     bmp = await createImageBitmap(blob, { colorSpaceConversion: 'none', premultiplyAlpha: 'none' });
   } catch {
-    throw new ToolError('This file is not an image format the browser can decode.');
+    throw new ToolError(t('core.image.undecodable'));
   }
   const canvas = new OffscreenCanvas(bmp.width, bmp.height);
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
-  if (!ctx) throw new ToolError('Canvas 2D is unavailable in this browser.');
+  if (!ctx) throw new ToolError(t('core.image.noCanvas'));
   ctx.drawImage(bmp, 0, 0);
   const img = ctx.getImageData(0, 0, bmp.width, bmp.height);
   return { width: img.width, height: img.height, data: img.data };

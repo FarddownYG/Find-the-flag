@@ -1,4 +1,5 @@
 import { ToolError } from './errors';
+import { getLocale, t } from '../i18n';
 import { getTool } from './registry';
 import type { ToolResult } from './types';
 import type { RunRequest, RunResponse } from './worker';
@@ -45,7 +46,13 @@ export class Runner {
         this.worker = null;
         reject(new Error(ev.message || 'The tool crashed.'));
       };
-      worker.postMessage({ id, toolId, input, options } satisfies RunRequest);
+      worker.postMessage({
+        id,
+        toolId,
+        input,
+        options,
+        locale: getLocale(),
+      } satisfies RunRequest);
     });
   }
 }
@@ -56,6 +63,6 @@ export class CancelledError extends Error {
 
 async function runInline(toolId: string, input: unknown, options: Record<string, unknown>) {
   const tool = getTool(toolId);
-  if (!tool) throw new ToolError(`Unknown tool "${toolId}".`);
+  if (!tool) throw new ToolError(t('core.unknownTool', { id: toolId }));
   return tool.run(input as never, options as never);
 }

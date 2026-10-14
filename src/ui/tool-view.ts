@@ -1,10 +1,22 @@
 import { ToolError } from '../core/errors';
+import { t } from '../i18n';
+import {
+  categoryName,
+  choiceLabel,
+  exampleLabel,
+  optionHint,
+  optionLabel,
+  optionPlaceholder,
+  toolDescription,
+  toolName,
+  toolPlaceholder,
+} from '../i18n/tool-text';
 import { selectFlags } from '../core/flags';
 import { resultToText } from '../core/result-text';
 import { exampleToRaw, prepareInput, resolveExampleOptions, type RawInput } from '../core/prepare';
 import { defaultOptions } from '../core/registry';
 import { CancelledError, Runner } from '../core/runner';
-import { CATEGORIES, type AnyTool, type ExampleInput, type OptionSpec } from '../core/types';
+import type { AnyTool, ExampleInput, OptionSpec } from '../core/types';
 import { formatSize, fromBase64, fromHex, toHex } from '../lib/bytes';
 import { identify } from '../lib/signatures';
 import { clear, copyText, debounce, h } from './dom';
@@ -31,7 +43,7 @@ export function setPending(toolId: string, raw: RawInput, options?: Record<strin
 
 export async function loadSample(name: string): Promise<Uint8Array> {
   const res = await fetch(`samples/${encodeURIComponent(name)}`);
-  if (!res.ok) throw new ToolError(`Sample "${name}" is missing.`);
+  if (!res.ok) throw new ToolError(t('ui.tool.sampleMissing', { name }));
   return new Uint8Array(await res.arrayBuffer());
 }
 
@@ -80,13 +92,16 @@ export function renderTool(
   }
 
   // ---------- layout ----------
-  const cat = CATEGORIES.find((c) => c.id === tool.category);
   const status = h('span', { class: 'status', role: 'status', 'aria-live': 'polite' });
   const outBody = h('div', { class: 'out-stack' });
   const flagStrip = h('div', { class: 'flag-strip', hidden: true });
   const inputBox = h('div', { class: 'input-box' });
   const optionsBar = h('div', { class: 'options' });
-  const runBtn = h('button', { type: 'button', class: 'btn btn-run', onclick: () => run() }, 'Run');
+  const runBtn = h(
+    'button',
+    { type: 'button', class: 'btn btn-run', onclick: () => run() },
+    t('ui.tool.run'),
+  );
 
   root.append(
     h(
@@ -99,10 +114,10 @@ export function renderTool(
           'p',
           { class: 'crumb' },
           h('span', { class: `glyph glyph-${tool.category}`, 'aria-hidden': 'true' }),
-          cat?.name ?? tool.category,
+          categoryName(tool.category),
         ),
-        h('h1', null, tool.name),
-        h('p', { class: 'tool-desc' }, tool.description),
+        h('h1', null, toolName(tool)),
+        h('p', { class: 'tool-desc' }, toolDescription(tool)),
       ),
       optionsBar,
       h(
@@ -110,22 +125,22 @@ export function renderTool(
         { class: 'panes' },
         h(
           'section',
-          { class: 'pane pane-in', 'aria-label': 'Input' },
+          { class: 'pane pane-in', 'aria-label': t('ui.tool.input') },
           h(
             'div',
             { class: 'pane-head' },
-            h('span', { class: 'pane-title' }, 'Input'),
+            h('span', { class: 'pane-title' }, t('ui.tool.input')),
             examplesBar(),
           ),
           inputBox,
         ),
         h(
           'section',
-          { class: 'pane pane-out', 'aria-label': 'Output' },
+          { class: 'pane pane-out', 'aria-label': t('ui.tool.output') },
           h(
             'div',
             { class: 'pane-head' },
-            h('span', { class: 'pane-title' }, 'Output'),
+            h('span', { class: 'pane-title' }, t('ui.tool.output')),
             status,
             live ? null : runBtn,
           ),
@@ -140,12 +155,12 @@ export function renderTool(
     return h(
       'div',
       { class: 'examples' },
-      h('span', { class: 'examples-label' }, 'Try'),
+      h('span', { class: 'examples-label' }, t('ui.tool.try')),
       ...tool.examples.map((ex) =>
         h(
           'button',
           { type: 'button', class: 'chip', onclick: () => loadExample(ex.input, ex.options) },
-          ex.label,
+          exampleLabel(tool, ex.label),
         ),
       ),
     );
@@ -198,7 +213,7 @@ export function renderTool(
     if (spec.type === 'select' && spec.segmented) {
       control = h(
         'span',
-        { class: 'seg', role: 'group', 'aria-label': spec.label },
+        { class: 'seg', role: 'group', 'aria-label': optionLabel(tool, key, spec) },
         ...spec.choices.map((c) =>
           h(
             'button',
@@ -207,16 +222,16 @@ export function renderTool(
               'aria-pressed': String(v === c.value),
               onclick: () => setValue(key, c.value),
             },
-            c.label,
+            choiceLabel(tool, key, c.value, c.label),
           ),
         ),
       );
       return h(
         'div',
         { class: 'opt' },
-        h('span', { class: 'opt-label' }, spec.label),
+        h('span', { class: 'opt-label' }, optionLabel(tool, key, spec)),
         control,
-        hint(spec),
+        hint(key, spec),
       );
     }
     if (spec.type === 'select') {
@@ -224,7 +239,11 @@ export function renderTool(
         'select',
         { id, onchange: (e: Event) => setValue(key, (e.target as HTMLSelectElement).value) },
         ...spec.choices.map((c) =>
-          h('option', { value: c.value, selected: v === c.value }, c.label),
+          h(
+            'option',
+            { value: c.value, selected: v === c.value },
+            choiceLabel(tool, key, c.value, c.label),
+          ),
         ),
       );
     } else if (spec.type === 'bool') {
@@ -236,8 +255,8 @@ export function renderTool(
           checked: Boolean(v),
           onchange: (e: Event) => setValue(key, (e.target as HTMLInputElement).checked),
         }),
-        spec.label,
-        hint(spec),
+        optionLabel(tool, key, spec),
+        hint(key, spec),
       );
     } else if (spec.type === 'file') {
       const picker = h('input', {
@@ -262,12 +281,12 @@ export function renderTool(
       return h(
         'div',
         { class: 'opt' },
-        h('span', { class: 'opt-label' }, spec.label),
+        h('span', { class: 'opt-label' }, optionLabel(tool, key, spec)),
         picker,
         h(
           'button',
           { type: 'button', class: 'btn btn-ghost', onclick: () => picker.click() },
-          chosen ?? 'Choose file',
+          chosen ?? t('ui.tool.chooseFile'),
         ),
         chosen
           ? h(
@@ -275,13 +294,13 @@ export function renderTool(
               {
                 type: 'button',
                 class: 'btn btn-ghost',
-                'aria-label': `Remove ${spec.label}`,
+                'aria-label': t('ui.tool.removeFile', { label: optionLabel(tool, key, spec) }),
                 onclick: () => setValue(key, null),
               },
               '×',
             )
           : null,
-        hint(spec),
+        hint(key, spec),
       );
     } else if (spec.type === 'number') {
       control = h('input', {
@@ -306,7 +325,7 @@ export function renderTool(
         id,
         type: 'text',
         value: String(v ?? ''),
-        placeholder: spec.placeholder,
+        placeholder: optionPlaceholder(tool, key, spec),
         spellcheck: false,
         autocomplete: 'off',
         oninput: (e: Event) => {
@@ -318,16 +337,15 @@ export function renderTool(
     return h(
       'div',
       { class: 'opt' },
-      h('label', { class: 'opt-label', for: id }, spec.label),
+      h('label', { class: 'opt-label', for: id }, optionLabel(tool, key, spec)),
       control,
-      hint(spec),
+      hint(key, spec),
     );
   }
 
-  function hint(spec: OptionSpec) {
-    return spec.hint
-      ? h('span', { class: 'opt-hint', title: spec.hint, 'aria-label': spec.hint }, '?')
-      : null;
+  function hint(key: string, spec: OptionSpec) {
+    const text = optionHint(tool, key, spec);
+    return text ? h('span', { class: 'opt-hint', title: text, 'aria-label': text }, '?') : null;
   }
 
   // ---------- input ----------
@@ -370,8 +388,12 @@ export function renderTool(
         h(
           'button',
           { type: 'button', class: 'dropzone', onclick: () => fileInput.click() },
-          h('strong', null, tool.input === 'image' ? 'Drop an image' : 'Drop an audio file'),
-          h('span', null, 'or click to open one — it never leaves your browser'),
+          h(
+            'strong',
+            null,
+            t(tool.input === 'image' ? 'ui.input.dropImage' : 'ui.input.dropAudio'),
+          ),
+          h('span', null, t('ui.input.dropHint')),
         ),
       );
       return;
@@ -381,14 +403,14 @@ export function renderTool(
       spellcheck: false,
       autocomplete: 'off',
       placeholder:
-        tool.placeholder ??
-        (tool.input === 'bytes' ? 'Paste data or drop a file' : 'Paste text or drop a file'),
-      'aria-label': 'Input',
+        toolPlaceholder(tool) ??
+        t(tool.input === 'bytes' ? 'ui.input.placeholderBytes' : 'ui.input.placeholderText'),
+      'aria-label': t('ui.tool.input'),
       value: state.text,
       oninput: () => {
         state.text = ta.value;
         prepared = null;
-        count.textContent = `${ta.value.length} chars`;
+        count.textContent = t('ui.input.chars', { count: ta.value.length });
         if (live) scheduleRun();
       },
       onkeydown: (ev: KeyboardEvent) => {
@@ -398,17 +420,17 @@ export function renderTool(
         }
       },
     });
-    const count = h('span', { class: 'count' }, `${state.text.length} chars`);
+    const count = h('span', { class: 'count' }, t('ui.input.chars', { count: state.text.length }));
     const pasteAs =
       tool.input === 'bytes'
         ? h(
             'label',
             { class: 'paste-as' },
-            'Read as ',
+            `${t('ui.input.readAs')} `,
             h(
               'select',
               {
-                'aria-label': 'Interpret pasted text as',
+                'aria-label': t('ui.input.readAsLabel'),
                 onchange: (e: Event) => {
                   state.pasteAs = (e.target as HTMLSelectElement).value as PasteAs;
                   prepared = null;
@@ -419,7 +441,7 @@ export function renderTool(
                 h(
                   'option',
                   { value: v, selected: state.pasteAs === v },
-                  v === 'text' ? 'UTF-8 text' : v,
+                  v === 'text' ? t('ui.input.utf8') : v,
                 ),
               ),
             ),
@@ -433,7 +455,7 @@ export function renderTool(
         h(
           'button',
           { type: 'button', class: 'btn btn-ghost', onclick: () => fileInput.click() },
-          'Open file',
+          t('ui.input.openFile'),
         ),
         pasteAs,
         count,
@@ -445,7 +467,7 @@ export function renderTool(
                 class: 'btn btn-ghost',
                 onclick: () => ((state.text = ''), renderInput(), showEmpty()),
               },
-              'Clear',
+              t('ui.input.clear'),
             )
           : null,
       ),
@@ -478,7 +500,7 @@ export function renderTool(
           h(
             'button',
             { type: 'button', class: 'btn btn-ghost', onclick: () => fileInput.click() },
-            'Replace',
+            t('ui.input.replace'),
           ),
           h(
             'button',
@@ -487,7 +509,7 @@ export function renderTool(
               class: 'btn btn-ghost',
               onclick: () => ((state.file = null), (prepared = null), renderInput(), showEmpty()),
             },
-            'Remove',
+            t('ui.input.remove'),
           ),
         ),
       ),
@@ -503,13 +525,7 @@ export function renderTool(
     flagStrip.hidden = true;
     status.textContent = '';
     outBody.append(
-      h(
-        'p',
-        { class: 'empty' },
-        fileKind
-          ? 'Open a file, or pick an example above.'
-          : 'Paste input, or pick an example above.',
-      ),
+      h('p', { class: 'empty' }, t(fileKind ? 'ui.tool.emptyFile' : 'ui.tool.emptyText')),
     );
   }
 
@@ -519,7 +535,11 @@ export function renderTool(
     const msg = e instanceof Error ? e.message : String(e);
     const user = e instanceof ToolError;
     outBody.append(
-      h('p', { class: 'note note-error', role: 'alert' }, user ? msg : `Unexpected error: ${msg}`),
+      h(
+        'p',
+        { class: 'note note-error', role: 'alert' },
+        user ? msg : t('ui.tool.unexpected', { message: msg }),
+      ),
     );
   }
 
@@ -533,7 +553,7 @@ export function renderTool(
     }
     if (!raw) return showEmpty();
     clearTimeout(busyTimer);
-    busyTimer = setTimeout(() => (status.textContent = 'Running…'), 200);
+    busyTimer = setTimeout(() => (status.textContent = t('ui.tool.running')), 200);
     root.classList.add('is-busy');
     try {
       const key = raw.bytes ?? raw.text;
@@ -551,9 +571,9 @@ export function renderTool(
           pipe: (id, r) => (setPending(id, r), open(id)),
         }),
       );
-      if (!result.length) outBody.append(h('p', { class: 'empty' }, 'No output.'));
+      if (!result.length) outBody.append(h('p', { class: 'empty' }, t('ui.tool.noOutput')));
       renderFlags(flags);
-      status.textContent = `${ms < 1 ? '<1' : Math.round(ms)} ms`;
+      status.textContent = ms < 1 ? '<1 ms' : `${Math.round(ms)} ms`;
     } catch (e) {
       if (e instanceof CancelledError) return;
       status.textContent = '';
@@ -569,15 +589,16 @@ export function renderTool(
     flagStrip.hidden = flags.size === 0;
     if (!flags.size) return;
     flagStrip.append(
-      h(
-        'span',
-        { class: 'flag-strip-label' },
-        flags.size === 1 ? 'Flag candidate' : `${flags.size} flag candidates`,
-      ),
+      h('span', { class: 'flag-strip-label' }, t('ui.flags.candidates', { count: flags.size })),
       ...[...flags].slice(0, 8).map((f) => {
         const b: HTMLButtonElement = h(
           'button',
-          { type: 'button', class: 'flag-chip', title: 'Copy', onclick: () => copyText(f, b) },
+          {
+            type: 'button',
+            class: 'flag-chip',
+            title: t('ui.out.copy'),
+            onclick: () => copyText(f, b),
+          },
           f,
         );
         return b;
