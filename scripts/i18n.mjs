@@ -4,6 +4,7 @@
 //   node scripts/i18n.mjs check --prefix=tool.base64.   only report keys under a prefix
 //   node scripts/i18n.mjs add frag.json   merge { en: {...}, fr: {...}, ... } into the locales
 //   node scripts/i18n.mjs missing fr tool.base64.   English text of keys fr still lacks
+//   node scripts/i18n.mjs remove tool.x.old tool.x.gone   delete keys (and their plural forms) everywhere
 import { mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { createServer } from 'vite';
@@ -251,6 +252,25 @@ async function add(file) {
   );
 }
 
+/** Delete keys from every locale, plural forms included (under the lock). */
+async function remove(keys) {
+  if (!keys.length) throw new Error('remove: give the keys to delete');
+  await withLock(() => {
+    for (const l of LOCALES) {
+      const d = read(l);
+      let n = 0;
+      for (const k of Object.keys(d)) {
+        if (keys.includes(k) || keys.includes(k.replace(PLURAL, ''))) {
+          delete d[k];
+          n++;
+        }
+      }
+      write(l, d);
+      console.log(`${l}: ${n} removed`);
+    }
+  });
+}
+
 /** Print the English text of keys a locale lacks (optionally under a prefix), as JSON. */
 function missing(locale, prefix = '') {
   const en = read('en');
@@ -278,9 +298,10 @@ else if (cmd === 'check')
   await check(process.argv.find((a) => a.startsWith('--prefix='))?.slice(9));
 else if (cmd === 'add') await add(process.argv[3]);
 else if (cmd === 'missing') missing(process.argv[3], process.argv[4] ?? '');
+else if (cmd === 'remove') await remove(process.argv.slice(3));
 else {
   console.error(
-    'usage: node scripts/i18n.mjs extract | check [--prefix=…] | add <frag.json> | missing <locale> [prefix]',
+    'usage: node scripts/i18n.mjs extract | check [--prefix=…] | add <frag.json> | missing <locale> [prefix] | remove <key…>',
   );
   process.exit(2);
 }
