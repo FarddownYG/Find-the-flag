@@ -48,8 +48,7 @@ Whitespace, hash, flag, GPS…) stay as they are in every language.
 
 The Russian, Chinese and Hindi files were written without a native speaker; corrections
 are welcome, and [docs/TRANSLATION_REVIEW.md](docs/TRANSLATION_REVIEW.md) lists what to check
-first. The Carve, Entropy and Hexdump tools still show English text in every language
-(translation in progress). `npm run i18n:check` fails on a key missing from one language, a stale key, a
+first. `npm run i18n:check` fails on a key missing from one language, a stale key, a
 missing plural form, a placeholder mismatch or a translated technical term.
 
 ## Run it
@@ -73,7 +72,7 @@ One file in `src/tools/<category>/`, nothing else to register. See
 ## Checks
 
 ```sh
-npm run check      # types, lint, format, unit tests (every tool example runs), privacy
+npm run check      # types, lint, format, unit tests (every tool example runs), i18n, privacy
 npm run test:e2e   # every tool example, clicked through the real UI in Chromium
 npm run docs:tools # regenerate docs/TOOLS.md after adding a tool
 ```
