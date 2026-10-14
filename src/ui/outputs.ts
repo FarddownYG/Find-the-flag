@@ -1,3 +1,4 @@
+import { encode as encodePng } from 'fast-png';
 import { findFlags } from '../core/flags';
 import type { RawInput } from '../core/prepare';
 import { TOOLS } from '../core/registry';
@@ -291,8 +292,19 @@ export function imageCanvas(img: RgbaImage): HTMLCanvasElement {
   return canvas;
 }
 
-function imageBlock(o: Extract<Output, { type: 'image' }>): HTMLElement {
+function imageBlock(o: Extract<Output, { type: 'image' }>, ctx: OutputContext): HTMLElement {
   const canvas = imageCanvas(o.image);
+  // Piping an image (e.g. a bit plane hiding a QR code) sends it as a lossless PNG.
+  const asPng = (): RawInput => ({
+    bytes: encodePng({
+      width: o.image.width,
+      height: o.image.height,
+      data: o.image.data,
+      channels: 4,
+      depth: 8,
+    }),
+    name: o.filename ?? 'image.png',
+  });
   return h(
     'section',
     { class: 'out out-image' },
@@ -300,6 +312,7 @@ function imageBlock(o: Extract<Output, { type: 'image' }>): HTMLElement {
       button('Download PNG', () =>
         canvas.toBlob((b) => b && downloadBytes(b, o.filename ?? 'image.png'), 'image/png'),
       ),
+      pipeSelect(asPng, ctx),
     ]),
     h('div', { class: 'canvas-frame' }, canvas),
   );
@@ -356,7 +369,7 @@ export function renderResult(result: ToolResult, ctx: OutputContext): HTMLElemen
       case 'kv':
         return kvBlock(o, ctx);
       case 'image':
-        return imageBlock(o);
+        return imageBlock(o, ctx);
       case 'files':
         return filesBlock(o, ctx);
       case 'note':
