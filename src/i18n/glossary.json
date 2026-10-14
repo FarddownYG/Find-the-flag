@@ -58,7 +58,8 @@
     "Strings",
     "hashcat",
     "John the Ripper",
-    "T9"
+    "T9",
+    "EMD"
   ],
   "exempt": {
     "tool.file-type.description": ["flag"],
