@@ -1083,6 +1083,13 @@ tr.is-hl td:first-child {
   height: auto;
   image-rendering: pixelated;
 }
+.audio-frame {
+  padding: 10px 12px;
+}
+.out-audio {
+  display: block;
+  width: 100%;
+}
 .map-info {
   padding: 10px 12px;
   display: grid;

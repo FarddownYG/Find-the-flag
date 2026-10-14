@@ -38,7 +38,15 @@ export function flagged(text: string, ctx?: OutputContext): Child[] {
   return out;
 }
 
-function pipeSelect(raw: () => RawInput, ctx: OutputContext): HTMLSelectElement {
+type ToolFilter = (tool: (typeof TOOLS)[number]) => boolean;
+/** By default results go to tools that read text or bytes; audio tools need a sound. */
+const notAudio: ToolFilter = (tool) => tool.input !== 'audio';
+
+function pipeSelect(
+  raw: () => RawInput,
+  ctx: OutputContext,
+  accepts: ToolFilter = notAudio,
+): HTMLSelectElement {
   const sel = h(
     'select',
     {
@@ -50,7 +58,7 @@ function pipeSelect(raw: () => RawInput, ctx: OutputContext): HTMLSelectElement 
       },
     },
     h('option', { value: '' }, t('ui.out.sendTo')),
-    ...groupTools().map(([cat, tools]) =>
+    ...groupTools(accepts).map(([cat, tools]) =>
       h(
         'optgroup',
         { label: categoryName(cat) },
@@ -61,10 +69,10 @@ function pipeSelect(raw: () => RawInput, ctx: OutputContext): HTMLSelectElement 
   return sel;
 }
 
-function groupTools() {
+function groupTools(accepts: ToolFilter) {
   const groups = new Map<Category, (typeof TOOLS)[number][]>();
   for (const tool of TOOLS) {
-    if (tool.input === 'audio') continue;
+    if (!accepts(tool)) continue;
     const list = groups.get(tool.category) ?? [];
     list.push(tool);
     groups.set(tool.category, list);
@@ -426,6 +434,51 @@ function pictureBlock(o: Extract<Output, { type: 'picture' }>, ctx: OutputContex
   );
 }
 
+/**
+ * Object URLs of the players on screen. Drawing a new result revokes them, so re-running a tool
+ * many times does not keep every past sound alive.
+ */
+let audioUrls: string[] = [];
+
+function releaseAudio(): void {
+  for (const url of audioUrls) URL.revokeObjectURL(url);
+  audioUrls = [];
+}
+
+function audioBlock(o: Extract<Output, { type: 'audio' }>, ctx: OutputContext): HTMLElement {
+  const mime = o.mime ?? 'audio/wav';
+  const blob = o.data instanceof Blob ? o.data : new Blob([o.data as BlobPart], { type: mime });
+  const url = URL.createObjectURL(blob);
+  audioUrls.push(url);
+  const name = o.filename ?? `audio.${mime.split('/')[1] ?? 'bin'}`;
+  const data = o.data;
+  const raw = (): RawInput => (data instanceof Blob ? { file: data, name } : { bytes: data, name });
+  const label = o.label ?? t('ui.out.audio');
+  const info = `${mime} · ${formatSize(blob.size)}`;
+  const meta = h('span', null, info);
+  const player = h('audio', {
+    class: 'out-audio',
+    controls: true,
+    preload: 'metadata',
+    src: url,
+    'aria-label': label,
+  });
+  player.addEventListener('loadedmetadata', () => {
+    if (Number.isFinite(player.duration)) {
+      meta.textContent = `${info} · ${player.duration.toFixed(2)} s`;
+    }
+  });
+  return h(
+    'section',
+    { class: 'out out-audio-block' },
+    header(label, meta, [
+      button(t('ui.out.download'), () => downloadBytes(blob, name)),
+      pipeSelect(raw, ctx, (tool) => tool.input === 'audio'),
+    ]),
+    h('div', { class: 'audio-frame' }, player),
+  );
+}
+
 function actionsBlock(o: Extract<Output, { type: 'actions' }>, ctx: OutputContext): HTMLElement {
   return h(
     'section',
@@ -596,6 +649,7 @@ function noteBlock(o: Extract<Output, { type: 'note' }>, ctx: OutputContext): HT
 }
 
 export function renderResult(result: ToolResult, ctx: OutputContext): HTMLElement[] {
+  releaseAudio(); // the previous result's players are about to be replaced
   return result.map((o) => {
     switch (o.type) {
       case 'text':
@@ -614,6 +668,8 @@ export function renderResult(result: ToolResult, ctx: OutputContext): HTMLElemen
         return noteBlock(o, ctx);
       case 'picture':
         return pictureBlock(o, ctx);
+      case 'audio':
+        return audioBlock(o, ctx);
       case 'map':
         return mapBlock(o);
       case 'actions':

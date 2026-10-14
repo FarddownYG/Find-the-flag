@@ -3,6 +3,7 @@ import { getTool } from './registry';
 import { ToolError } from './errors';
 import { lazyFile } from './prepare';
 import { getLocale, isLocale, setLocale, t } from '../i18n';
+import type { Output } from './types';
 
 export interface RunRequest {
   id: number;
@@ -26,7 +27,7 @@ self.onmessage = async (ev: MessageEvent<RunRequest>) => {
     const wire = input as { __lazyFile?: boolean; blob?: Blob; name?: string } | null;
     const value = wire?.__lazyFile && wire.blob ? lazyFile(wire.blob, wire.name) : input;
     const result = await tool.run(value as never, options as never);
-    self.postMessage({ id, ok: true, result } satisfies RunResponse);
+    self.postMessage({ id, ok: true, result: forPage(result) } satisfies RunResponse);
   } catch (e) {
     const err = e as Error;
     self.postMessage({
@@ -37,3 +38,15 @@ self.onmessage = async (ev: MessageEvent<RunRequest>) => {
     } satisfies RunResponse);
   }
 };
+
+/**
+ * Audio results cross as Blobs: the bytes are copied into the Blob here, off the page's thread,
+ * and the page gets a handle it plays and downloads without ever touching them.
+ */
+function forPage(result: Output[]): Output[] {
+  return result.map((o) =>
+    o.type === 'audio' && o.data instanceof Uint8Array
+      ? { ...o, data: new Blob([o.data as BlobPart], { type: o.mime ?? 'audio/wav' }) }
+      : o,
+  );
+}

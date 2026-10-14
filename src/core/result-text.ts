@@ -41,6 +41,13 @@ export function resultToText(result: ToolResult): string {
       case 'picture':
         parts.push(`[picture ${o.mime}, ${o.data.length} bytes]`);
         break;
+      case 'audio': {
+        const size = o.data instanceof Uint8Array ? o.data.length : o.data.size;
+        parts.push(
+          `[audio ${o.mime ?? 'audio/wav'}${o.filename ? ` ${o.filename}` : ''}, ${size} bytes]`,
+        );
+        break;
+      }
       case 'map':
         parts.push(`${o.lat.toFixed(6)}, ${o.lon.toFixed(6)}`, mapLinks(o.lat, o.lon).google);
         break;

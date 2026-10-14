@@ -148,6 +148,19 @@ export type Output =
   /** An encoded image shown as-is (JPEG thumbnail, embedded PNG...), with download and "Send to". */
   | { type: 'picture'; label?: string; data: Uint8Array; mime: string; filename?: string }
   /**
+   * Sound to listen to (a WAV the tool produced): native player, download, "Send to" an audio
+   * tool. A Uint8Array leaves the worker as a Blob (one copy in the worker, none on the page),
+   * so the tool must not reuse that array after returning it.
+   */
+  | {
+      type: 'audio';
+      label?: string;
+      data: Uint8Array | Blob;
+      /** Default 'audio/wav'. */
+      mime?: string;
+      filename?: string;
+    }
+  /**
    * A location. Coordinates and map links render with no network access; the interactive map
    * only loads OpenStreetMap tiles after the user clicks "Show map".
    */

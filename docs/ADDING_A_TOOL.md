@@ -85,11 +85,15 @@ In examples, a file option takes a sample name: `options: { other: { sample: 'b.
 | `{ type: 'image', image: RgbaImage, filename? }`    | canvas, click to zoom 1:1, PNG download                   |
 | `{ type: 'files', files: [{ name, data, note? }] }` | list with download + "Send to…" per file                  |
 | `{ type: 'picture', data, mime, filename? }`        | an encoded image shown as-is (e.g. a JPEG thumbnail)      |
+| `{ type: 'audio', data, mime?, filename? }`         | audio player + download + "Send to" an audio tool         |
 | `{ type: 'map', lat, lon, zoom? }`                  | coordinates + map links; opt-in OpenStreetMap map         |
 | `{ type: 'note', level, text }`                     | info / warn / error / success line                        |
 
 Return bytes rather than a lossy string when the result can be binary. For a large extracted
 file, put a `Blob` in `files[].blob` (with an empty `data`): it is downloaded without copying.
+For sound, put the encoded file (e.g. a 16-bit WAV) in `audio.data`: the worker hands a
+`Uint8Array` to the page as a Blob (so don't reuse the array after returning it), the player
+plays it from a `blob:` URL that is revoked when the output is drawn again.
 
 ## 5. Translations (required)
 
