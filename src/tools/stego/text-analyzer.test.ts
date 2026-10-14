@@ -119,13 +119,21 @@ describe('reference cases', () => {
     });
   }
 
-  it('every expected hidden message is the strong top hit (unless too short to prove it)', () => {
-    for (const c of ALL_CASES.filter((t) => t.expected && !t.weak)) {
-      const top = analyze(c.text).ranked[0]!;
-      expect(mentions(top, c.expected!), c.name).toBe(true);
-      expect(top.score, c.name).toBeGreaterThanOrEqual(STRONG);
-    }
-  });
+  // Runs the whole analyzer on every reference case: ~3 s alone, over the 5 s default when the
+  // machine is busy.
+  it(
+    'every expected hidden message is the strong top hit (unless too short to prove it)',
+    {
+      timeout: 60_000,
+    },
+    () => {
+      for (const c of ALL_CASES.filter((t) => t.expected && !t.weak)) {
+        const top = analyze(c.text).ranked[0]!;
+        expect(mentions(top, c.expected!), c.name).toBe(true);
+        expect(top.score, c.name).toBeGreaterThanOrEqual(STRONG);
+      }
+    },
+  );
 });
 
 /** Every table stays readable: capped rows, capped cells. */
