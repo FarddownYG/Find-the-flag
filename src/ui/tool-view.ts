@@ -348,16 +348,32 @@ export function renderTool(
       .map(([key]) => key)
       .join(',');
   let shownKeys = '';
+  let renderingOptions = false;
+  let optionsDirty = false;
 
   function renderOptions() {
-    clear(optionsBar);
-    const specs = Object.entries(tool.options ?? {});
-    optionsBar.hidden = specs.length === 0;
-    for (const [key, spec] of specs) {
-      if (spec.showIf && !spec.showIf(state.values)) continue;
-      optionsBar.append(optionControl(key, spec));
+    // Removing a focused text option fires its blur and change events, which can ask for another
+    // render while clear() is still removing nodes: queue it and render again afterwards.
+    if (renderingOptions) {
+      optionsDirty = true;
+      return;
     }
-    shownKeys = visibleKeys();
+    renderingOptions = true;
+    try {
+      do {
+        optionsDirty = false;
+        clear(optionsBar);
+        const specs = Object.entries(tool.options ?? {});
+        optionsBar.hidden = specs.length === 0;
+        for (const [key, spec] of specs) {
+          if (spec.showIf && !spec.showIf(state.values)) continue;
+          optionsBar.append(optionControl(key, spec));
+        }
+        shownKeys = visibleKeys();
+      } while (optionsDirty);
+    } finally {
+      renderingOptions = false;
+    }
     renderKeypad();
   }
 
