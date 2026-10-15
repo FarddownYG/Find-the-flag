@@ -86,6 +86,36 @@ export function adfgvx(plain, square, labels, key) {
   return columnar(stream, key);
 }
 
+/** Nihilist: Polybius coordinates (11 to 55, I and J together) plus a repeating key, added as numbers. */
+export function nihilist(plain, squareKeyword, key) {
+  const square = keywordSquare(
+    squareKeyword.toUpperCase().replace(/J/g, 'I'),
+    'ABCDEFGHIKLMNOPQRSTUVWXYZ',
+  );
+  const number = (ch) => {
+    const i = square.indexOf(ch === 'J' ? 'I' : ch);
+    return (Math.floor(i / 5) + 1) * 10 + (i % 5) + 1;
+  };
+  const k = [...key.toUpperCase()].map(number);
+  return [...plain.toUpperCase()]
+    .filter((c) => /[A-Z]/.test(c))
+    .map((c, i) => number(c) + k[i % k.length]);
+}
+
+/** Nihilist transposition: n x n square, rows and columns both put in key order, read by rows. */
+export function nihilistTransposition(text, key) {
+  const n = key.length;
+  const order = [...key.toUpperCase()]
+    .map((ch, i) => [ch, i])
+    .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : a[1] - b[1]))
+    .map(([, i]) => i);
+  let out = '';
+  for (let base = 0; base < text.length; base += n * n) {
+    for (const row of order) for (const col of order) out += text[base + row * n + col];
+  }
+  return out;
+}
+
 const ABC = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 const wikipedia = 'WEAREDISCOVEREDFLEEATONCE';
 if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split('/').pop())) {
@@ -134,6 +164,16 @@ if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split('/').pop()
       'ABCDEF',
       'LANTERN',
     ),
+    // Published (Wikipedia, Nihilist cipher): square keyword ZEBRAS, key RUSSIAN.
+    nihilistWikipedia: nihilist('DYNAMITE WINTER PALACE', 'ZEBRAS', 'RUSSIAN').join(' '),
+    // Self-made: an English message, square ZEBRAS, key RUSSIAN (7 numbers repeated).
+    nihilistLong: nihilist(
+      'THEKEYISARUSSIANWORDANDTHEFLAGISHIDDENINTHESUMSOFNUMBERSEVERYSEVENTHNUMBERSHARESAKEYNUMBERSOCOUNTTHEGROUPSANDLOOKATTHETENSANDUNITSBEFOREYOUTRYTOGUESSTHEWORD',
+      'ZEBRAS',
+      'RUSSIAN',
+    ).join(' '),
+    // Self-made: Nihilist transposition, key ZEBRAS (6 x 6 squares).
+    nihilistSquare: nihilistTransposition('readthisnow_flag{nihilist_square_ok}', 'ZEBRAS'),
     // Self-made: 6 x 6 grid read as a clockwise spiral from the top left.
     spiral: spiralEncrypt('readthisfirstflag{spiral_route_ok}go', 6),
   };

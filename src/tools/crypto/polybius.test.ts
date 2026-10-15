@@ -101,6 +101,8 @@ describe('polybius errors', () => {
   it('rejects odd, out-of-range and mixed input', () => {
     expect(() => polybiusDecode('231', 'polybius', '')).toThrow(/pairs/);
     expect(() => polybiusDecode('23 16', 'polybius', '')).toThrow(/outside 1-5/);
+    // Numbers up to 110 may be Nihilist sums: the message names that tool.
+    expect(() => polybiusDecode('37 106', 'polybius', '')).toThrow(/Nihilist cipher tool/);
     expect(() => polybiusDecode('2A 31', 'polybius', '')).toThrow(ToolError);
     expect(() => polybiusDecode('AZ BQ', 'polybius', '')).toThrow(/A-E/);
     expect(() => polybiusDecode('.. ... .', 'tap', '')).toThrow(/pairs/);

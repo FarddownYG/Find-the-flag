@@ -134,17 +134,16 @@ export function readCoordinates(input: string, cipher: Cipher): Coordinates {
       throw new ToolError(T('error.unexpected', { char: ch }));
     }
   }
+  const joined = symbols.join('');
+  // A digit above 5 is the more useful complaint, even when the count is odd (Nihilist numbers).
+  const tooBig = /^[0-9]+$/.test(joined) ? [...joined].find((c) => c > '5') : undefined;
+  if (tooBig) throw new ToolError(T('error.digit', { digit: tooBig }));
   if (symbols.length % 2) {
     throw new ToolError(T('error.oddSymbols', { count: symbols.length }));
   }
-  const joined = symbols.join('');
   let kind: Coordinates['kind'];
   let alphabet: string;
   if (/^[0-9]+$/.test(joined)) {
-    const bad = [...joined].find((c) => c > '5');
-    if (bad) {
-      throw new ToolError(T('error.digit', { digit: bad }));
-    }
     kind = joined.includes('0') ? 'digits0' : 'digits';
     alphabet = kind === 'digits0' ? '01234' : '12345';
     if (kind === 'digits0' && joined.includes('5')) {
