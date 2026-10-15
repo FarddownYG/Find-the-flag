@@ -48,7 +48,7 @@ public : un push sur `main` est une publication immédiate et définitive.
 ## AGENCE (mode autonome — état du run)
 
 ```
-ÉTAT: RUNNING | cycle 9/14 | sans-gain 0/2 | start 2026-10-15T10:30Z | budget 12 familles d'outils, 4 vagues
+ÉTAT: RUNNING | cycle 10/14 | sans-gain 0/2 | start 2026-10-15T10:30Z | budget 12 familles d'outils, 4 vagues
 FINI: [ ] portes vertes sur HEAD de autonome/2026-10-15 (check, docs:tools sans diff, build, e2e complet)
       [x] vague 1 intégrée : playfair, bifid, hill, adfgvx, columnar, nihilist, enigma (vecteurs publiés verts)
       [x] vague 2 : codes-barres 1D/2D, pack d'encodages, alphabets de symboles
@@ -76,6 +76,8 @@ FAIT: 072a021 base de départ — check 3730 tests verts, e2e 355 passed, CI ver
       codes VIS conformes, Robot 36 relu sur capture
       sqlite (sql.js 1.14.2 MIT, carving des lignes supprimées, WAL) — check 5083 verts, e2e 606
       passed ; échantillons relus par Python sqlite3, lockfile régénéré par npm, npm ci OK
+      audio-stego (LSB PCM, chunks, ID3, FLAC/Ogg) — check 5218 verts, e2e 618 passed ; FTF{wav_lsb} relu par
+      Python wave
 EN COURS: vague 1 (polygraphiques, transpositions) + vague 2 (codes-barres) en agents
 SUIVANT: vague 2 dès qu'un slot se libère
 DÉCISIONS: D2 fusion vers main = fast-forward depuis autonome/ (pas de PR, voir garde-fou e-mail)
