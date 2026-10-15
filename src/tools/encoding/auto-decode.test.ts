@@ -8,6 +8,7 @@ import { inflateCapped } from './_inflate';
 import autoDecodeTool, { autoDecode, recipeName } from './auto-decode';
 import { base100Encode } from './base100';
 import { base32Encode } from './base32';
+import { base26Encode, base36Encode } from './base36';
 import { base45Encode } from './base45';
 import { base58Encode } from './base58';
 import { base62Encode } from './base62';
@@ -39,6 +40,8 @@ describe('auto-decode: one layer', () => {
   const cases: [string, string, string, string?][] = [
     ['base64', b64(FLAG), 'base64'],
     ['base32', base32Encode(bytes(FLAG)), 'base32'],
+    ['base36 (big integer)', base36Encode(bytes(FLAG)), 'base36'],
+    ['base26 (letters)', base26Encode(bytes(FLAG)), 'base26'],
     ['base45', base45Encode(bytes(FLAG)), 'base45'],
     ['base100 (emoji)', base100Encode(bytes(FLAG)), 'base100'],
     ['Bubble Babble', bubbleBabbleEncode(bytes(FLAG)), 'bubblebabble'],
@@ -262,7 +265,7 @@ describe('auto-decode: restraint', () => {
 // Ordinary text that must never be "decoded" by the newer, stricter decoders (Base45, uuencode,
 // quoted-printable, Punycode, Base36, Base100, NATO, Braille, Bubble Babble): not as the best
 // result and not even as a candidate.
-const NEW_DECODERS = ['base45', 'base100', 'bubblebabble'];
+const NEW_DECODERS = ['base45', 'base100', 'bubblebabble', 'base36', 'base26'];
 const ORDINARY = [
   'The quick brown fox jumps over the lazy dog.',
   'Hello, World!',
@@ -289,6 +292,12 @@ const ORDINARY = [
   'ab12cd34ef56',
   'xerox machine at the xenon lab',
   'xylophone',
+  'internationalization',
+  'supercalifragilisticexpialidocious',
+  'ELECTROENCEPHALOGRAPHICALLY',
+  'hello1world2foo3bar4',
+  'a1b2c3d4e5f6a7b8',
+  'v2.3.1-beta-build42',
   'xesef-disof',
   '3.14159265358979323846264338327950288419716939937510',
   'lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor',

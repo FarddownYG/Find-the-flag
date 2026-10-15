@@ -16,6 +16,7 @@ import { identify } from '../../lib/signatures';
 import { inflateCapped, isGzip, isZlib } from './_inflate';
 import { base100Decode } from './base100';
 import { base32Decode } from './base32';
+import { base26Decode, base36Decode } from './base36';
 import { base45DecodeText } from './base45';
 import { base58Decode } from './base58';
 import { base62Decode } from './base62';
@@ -158,6 +159,9 @@ const RE_B32_UP = /^[A-Z2-7]+={0,6}$/;
 const RE_B32_LOW = /^[a-z2-7]+={0,6}$/;
 const RE_B45 = /^[0-9A-Z $%*+\-./:]{6,}$/;
 const RE_B100 = /^(?:[\u{1F3F7}-\u{1F4F6}]|\uFE0F|\s)+$/u;
+const RE_B36_LOW = /^(?=.*\d)(?=.*[a-z])[0-9a-z]{10,20000}$/;
+const RE_B36_UP = /^(?=.*\d)(?=.*[A-Z])[0-9A-Z]{10,20000}$/;
+const RE_B26 = /^(?:[a-z]{12,20000}|[A-Z]{12,20000})$/;
 const RE_B58 = /^[1-9A-HJ-NP-Za-km-z]{10,20000}$/;
 const RE_B62 = /^[0-9A-Za-z]{10,20000}$/;
 const RE_A85 = /^[!-u]{10,}$/;
@@ -225,6 +229,22 @@ const DECODERS: Step[] = [
         const { bytes } = base45DecodeText(v);
         return plausible(bytes) ? bytes : null;
       });
+    },
+  },
+  {
+    // Any digits-and-letters token is valid Base36: only keep a payload that looks like data.
+    name: 'base36',
+    run: (c) => {
+      const out = RE_B36_LOW.test(c.t) || RE_B36_UP.test(c.t) ? base36Decode(c.t) : null;
+      return out && out.length >= 5 && plausible(out) ? out : null;
+    },
+  },
+  {
+    // Same for a single-case run of letters (words are valid Base26), so the bar is higher.
+    name: 'base26',
+    run: (c) => {
+      const out = RE_B26.test(c.t) ? base26Decode(c.t) : null;
+      return out && out.length >= 7 && plausible(out) ? out : null;
     },
   },
   onText('base58', (t) => (RE_B58.test(t) ? base58Decode(t) : null)),

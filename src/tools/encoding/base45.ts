@@ -153,7 +153,10 @@ export default defineTool({
       const { bytes, prefix } = base45DecodeText(t);
       if (prefix) return { score: 0.9, options: { mode: 'decode' }, reason: T('detect.hc1') };
       if (printableRatio(bytes) >= 0.9) {
-        return { score: 0.75, options: { mode: 'decode' }, reason: T('detect.text') };
+        // Readable bytes by chance are unlikely, and this beats the generic Base64 guess that an
+        // upper-case-and-digits token also gets.
+        const score = bytes.length >= 5 ? 0.85 : 0.7;
+        return { score, options: { mode: 'decode' }, reason: T('detect.text') };
       }
       if (isZlib(bytes) || isGzip(bytes)) {
         return { score: 0.7, options: { mode: 'decode' }, reason: T('detect.compressed') };
