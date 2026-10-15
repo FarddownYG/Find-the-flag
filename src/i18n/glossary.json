@@ -74,7 +74,12 @@
     "CTR",
     "CFB",
     "OFB",
-    "GCM"
+    "GCM",
+    "Enigma",
+    "UKW",
+    "Ringstellung",
+    "Grundstellung",
+    "Steckerbrett"
   ],
   "exempt": {
     "tool.file-type.description": ["flag"],
