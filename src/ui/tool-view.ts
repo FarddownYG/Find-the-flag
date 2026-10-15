@@ -22,10 +22,11 @@ import {
 } from '../core/prepare';
 import { defaultOptions, getTool } from '../core/registry';
 import { CancelledError, Runner } from '../core/runner';
-import type { AnyTool, OptionSpec } from '../core/types';
+import type { AnyTool, KeypadKey, OptionSpec, OptionSpecs, OptionValues } from '../core/types';
 import { formatSize, fromBase64, fromHex, toHex } from '../lib/bytes';
 import { identify } from '../lib/signatures';
 import { clear, copyText, debounce, h } from './dom';
+import { glyphSvg } from './glyph';
 import { dragSettled, renderResult } from './outputs';
 import { flagSettings } from './settings';
 
@@ -164,6 +165,15 @@ export function renderTool(
   const flagStrip = h('div', { class: 'flag-strip', hidden: true });
   const demoBanner = h('div', { class: 'demo-banner', role: 'note', hidden: true });
   const inputBox = h('div', { class: 'input-box' });
+  /** The on-screen symbol keyboard of a tool that has one (see ToolDef.keypad). */
+  const keypadBox = h('div', { class: 'keypad-box' });
+  /** The text box on screen and its counter: the keypad types into them. */
+  let typing: {
+    ta: HTMLTextAreaElement;
+    count: HTMLElement;
+    /** Selection the text box had when it last lost the focus; null: never used. */
+    caret: [number, number] | null;
+  } | null = null;
   const optionsBar = h('div', { class: 'options' });
   const runBtn = h(
     'button',
@@ -348,6 +358,7 @@ export function renderTool(
       optionsBar.append(optionControl(key, spec));
     }
     shownKeys = visibleKeys();
+    renderKeypad();
   }
 
   /** Re-render only when a value changes which options are shown (keeps focus while typing). */
@@ -507,6 +518,102 @@ export function renderTool(
     return text ? h('span', { class: 'opt-hint', title: text, 'aria-label': text }, '?') : null;
   }
 
+  // ---------- symbol keyboard ----------
+  const hasKeypad = tool.input === 'text' && tool.keypad !== undefined;
+  const keypadNote = h('span', { class: 'visually-hidden', role: 'status', 'aria-live': 'polite' });
+
+  /** A change to the text: what goes where the selection is (from..to), and where the caret ends. */
+  type Edit = (text: string, from: number, to: number) => { text: string; caret: number };
+  const insertText =
+    (add: string): Edit =>
+    (text, from, to) => ({
+      text: text.slice(0, from) + add + text.slice(to),
+      caret: from + add.length,
+    });
+  /** Delete the selection, or the character (a whole code point) before the caret. */
+  const backspace: Edit = (text, from, to) => {
+    const start = from === to ? from - ([...text.slice(0, from)].at(-1)?.length ?? 0) : from;
+    return { text: text.slice(0, start) + text.slice(to), caret: start };
+  };
+  const clearAll: Edit = () => ({ text: '', caret: 0 });
+
+  /**
+   * Edit the input text from a key, at the caret (or over the selection) of the text box: the one
+   * it has now when it has the focus, the one it had when it lost it otherwise (a click on a key
+   * takes the focus away), the end of the text when it was never used. The edit counts as typing:
+   * a demo ends and a live tool runs again.
+   */
+  function pressKey(label: string, edit: Edit) {
+    const box = typing;
+    if (!box) return;
+    const length = box.ta.value.length;
+    const [from, to] =
+      document.activeElement === box.ta
+        ? [box.ta.selectionStart, box.ta.selectionEnd]
+        : (box.caret ?? [length, length]);
+    const next = edit(box.ta.value, Math.min(from, length), Math.min(to, length));
+    box.ta.value = next.text;
+    box.ta.setSelectionRange(next.caret, next.caret);
+    box.caret = [next.caret, next.caret];
+    state.text = next.text;
+    box.count.textContent = t('ui.input.chars', { count: next.text.length });
+    prepared = null;
+    inputSeq++; // pressing a key wins over an example or a file still being loaded
+    if (leaveDemo(false)) {
+      if (live) showAnalysing();
+      else showPressRun();
+    }
+    keypadNote.textContent = label;
+    if (live) scheduleRun();
+  }
+
+  function renderKeypad() {
+    clear(keypadBox);
+    keypadBox.hidden = !hasKeypad;
+    if (!hasKeypad || !tool.keypad) return;
+    const keys: KeypadKey[] = tool.keypad(state.values as OptionValues<OptionSpecs>);
+    const control = (id: string, label: string, edit: Edit) =>
+      h(
+        'button',
+        {
+          type: 'button',
+          class: 'key key-ctl',
+          'data-key': id,
+          onclick: () => pressKey(label, edit),
+        },
+        label,
+      );
+    keypadBox.append(
+      h(
+        'div',
+        { class: 'keypad', role: 'group', 'aria-label': t('ui.keypad.label') },
+        ...keys.map((k) =>
+          h(
+            'button',
+            {
+              type: 'button',
+              class: 'key',
+              'data-key': k.text,
+              'aria-label': k.label,
+              title: k.label,
+              onclick: () => pressKey(k.label, insertText(k.text)),
+            },
+            glyphSvg(k.glyph),
+          ),
+        ),
+      ),
+      h(
+        'div',
+        { class: 'keypad-ctl' },
+        control('space', t('ui.keypad.space'), insertText(' ')),
+        control('backspace', t('ui.keypad.backspace'), backspace),
+        control('clear', t('ui.keypad.clear'), clearAll),
+        h('span', { class: 'keypad-hint' }, t('ui.keypad.hint')),
+        keypadNote,
+      ),
+    );
+  }
+
   // ---------- input ----------
   const fileInput = h('input', {
     type: 'file',
@@ -547,6 +654,8 @@ export function renderTool(
 
   function renderInput() {
     clear(inputBox);
+    typing = null;
+    inputBox.classList.toggle('has-keypad', hasKeypad);
     inputBox.append(fileInput);
     if (state.file) {
       inputBox.append(fileCard(state.file));
@@ -622,8 +731,12 @@ export function renderTool(
             ),
           )
         : null;
+    const box = { ta, count, caret: null as [number, number] | null };
+    typing = box;
+    ta.addEventListener('blur', () => (box.caret = [ta.selectionStart, ta.selectionEnd]));
     inputBox.append(
       ta,
+      keypadBox,
       h(
         'div',
         { class: 'input-bar' },

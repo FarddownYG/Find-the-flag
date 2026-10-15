@@ -78,6 +78,16 @@ options: {
 Choices can be plain strings or `{ value, label }` when the label should be friendlier.
 In examples, a file option takes a sample name: `options: { other: { sample: 'b.png' } }`.
 
+### Symbol keyboard
+
+A text tool whose input is a picture alphabet (Pigpen, semaphore, Braille...) can add
+`keypad: (options) => KeypadKey[]`: an on-screen keyboard under the text box, one key per drawn
+symbol. A key is `{ text, label, glyph }`: pressing it types `text` at the caret of the text box
+(Space, Backspace and Clear come with the keyboard), `label` is the name a screen reader says (the
+letter), `glyph` is the symbol as SVG paths in a box (`{ w, h, shapes: [{ d, fill?, stroke?, width?,
+opacity? }] }`, `'ink'` is the text colour). The keys are asked again whenever an option changes.
+The page draws them with the DOM API, never from a markup string. See `symbol-ciphers`.
+
 ## 4. Outputs
 
 `run` returns an array of blocks (sync or async). Mix as many as useful:
@@ -90,7 +100,7 @@ In examples, a file option takes a sample name: `options: { other: { sample: 'b.
 | `{ type: 'kv', entries: [[k, v], ...] }`            | definition list                                           |
 | `{ type: 'image', image: RgbaImage, filename? }`    | canvas, click to zoom 1:1, PNG download                   |
 | `{ type: 'files', files: [{ name, data, note? }] }` | list with download + "Send to…" per file                  |
-| `{ type: 'picture', data, mime, filename? }`        | an encoded image shown as-is (e.g. a JPEG thumbnail)      |
+| `{ type: 'picture', data, mime, filename? }`        | an image shown as-is (JPEG...; SVG: + PNG, Print)         |
 | `{ type: 'audio', data, mime?, filename? }`         | audio player + download + "Send to" an audio tool         |
 | `{ type: 'map', lat, lon, zoom? }`                  | coordinates + map links; opt-in OpenStreetMap map         |
 | `{ type: 'note', level, text }`                     | info / warn / error / success line                        |

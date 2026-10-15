@@ -205,6 +205,43 @@ export interface Detection<O = Record<string, unknown>> {
 
 export type ExampleInput = string | { sample: string } | { hex: string };
 
+// ---------- symbol keyboard ----------
+
+/**
+ * One stroke or filled shape of a drawn symbol, as an SVG path in the symbol's own box. The ink
+ * is the page's text colour on screen and a fixed dark colour in a downloaded picture.
+ */
+export interface GlyphShape {
+  /** SVG path data. */
+  d: string;
+  /** A colour, 'ink' for the ink colour; omitted = not filled. */
+  fill?: string;
+  /** A colour, 'ink' for the ink colour (the default), 'none' for no outline. */
+  stroke?: string;
+  /** Outline width in the symbol's units (default 3). */
+  width?: number;
+  /** 0..1 (default 1). */
+  opacity?: number;
+}
+
+/** A symbol drawn in a w x h box. */
+export interface Glyph {
+  w: number;
+  h: number;
+  shapes: GlyphShape[];
+}
+
+/**
+ * A key of an on-screen keyboard shown next to the text input: pressing it appends `text` to the
+ * input (the Space and Backspace keys come with the keyboard). `label` is what a screen reader
+ * says, so a key reads as its letter.
+ */
+export interface KeypadKey {
+  text: string;
+  label: string;
+  glyph: Glyph;
+}
+
 export interface Example<O> {
   label: string;
   input: ExampleInput;
@@ -230,6 +267,12 @@ export interface ToolDef<K extends InputKind = InputKind, O extends OptionSpecs 
   live?: boolean;
   examples: Example<OptionValues<O>>[];
   detect?: (sample: Sample) => Detection<OptionValues<O>> | null;
+  /**
+   * Text tools only: an on-screen keyboard of drawn symbols under the input box (decode a picture
+   * alphabet by clicking what you see). Runs on the page, so keep it cheap; it is asked again
+   * whenever an option changes.
+   */
+  keypad?: (options: OptionValues<O>) => KeypadKey[];
   run: (input: InputValue<K>, options: OptionValues<O>) => ToolResult | Promise<ToolResult>;
 }
 

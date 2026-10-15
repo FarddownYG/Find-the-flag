@@ -419,19 +419,63 @@ function filesBlock(o: Extract<Output, { type: 'files' }>, ctx: OutputContext): 
   );
 }
 
+/** Draw a vector picture to a canvas (twice its size, for sharp edges) and save it as a PNG. */
+async function savePictureAsPng(img: HTMLImageElement, filename: string): Promise<void> {
+  await img.decode();
+  const scale = 2;
+  const canvas = h('canvas', {
+    width: Math.max(1, Math.round((img.naturalWidth || 300) * scale)),
+    height: Math.max(1, Math.round((img.naturalHeight || 150) * scale)),
+  });
+  const c2d = canvas.getContext('2d');
+  if (!c2d) return;
+  c2d.drawImage(img, 0, 0, canvas.width, canvas.height);
+  canvas.toBlob((b) => b && downloadBytes(b, filename), 'image/png');
+}
+
+/**
+ * Print one block alone: a print style hides the rest of the page while the class is set
+ * (print() returns once the print dialog has closed).
+ */
+function printBlock(block: HTMLElement): void {
+  block.classList.add('print-target');
+  document.body.classList.add('print-one');
+  try {
+    window.print();
+  } finally {
+    block.classList.remove('print-target');
+    document.body.classList.remove('print-one');
+  }
+}
+
 function pictureBlock(o: Extract<Output, { type: 'picture' }>, ctx: OutputContext): HTMLElement {
   const url = URL.createObjectURL(new Blob([o.data as BlobPart], { type: o.mime }));
-  const img = h('img', { class: 'out-picture', src: url, alt: o.label ?? 'Embedded image' });
-  const name = o.filename ?? `image.${o.mime.split('/')[1] ?? 'bin'}`;
-  return h(
+  const vector = o.mime === 'image/svg+xml';
+  const img = h('img', {
+    class: vector ? 'out-picture out-vector' : 'out-picture',
+    src: url,
+    alt: o.label ?? 'Embedded image',
+  });
+  const name = o.filename ?? `image.${o.mime.split('/')[1]?.split('+')[0] ?? 'bin'}`;
+  const block: HTMLElement = h(
     'section',
     { class: 'out out-image' },
     header(o.label ?? t('ui.out.picture'), `${o.mime} · ${formatSize(o.data.length)}`, [
-      button(t('ui.out.download'), () => downloadBytes(o.data, name)),
+      button(t(vector ? 'ui.out.downloadSvg' : 'ui.out.download'), () =>
+        downloadBytes(o.data, name),
+      ),
+      // A drawn picture (SVG) can also be saved as a PNG or printed.
+      vector
+        ? button(t('ui.out.downloadPng'), () =>
+            savePictureAsPng(img, name.replace(/\.svg$/i, '') + '.png'),
+          )
+        : null,
+      vector ? button(t('ui.out.print'), () => printBlock(block)) : null,
       pipeSelect(() => ({ bytes: o.data, name }), ctx),
     ]),
     h('div', { class: 'canvas-frame' }, img),
   );
+  return block;
 }
 
 /**
