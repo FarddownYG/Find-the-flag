@@ -60,7 +60,21 @@
     "hashcat",
     "John the Ripper",
     "T9",
-    "EMD"
+    "EMD",
+    "AES",
+    "DES",
+    "3DES",
+    "RC4",
+    "ChaCha20",
+    "OpenSSL",
+    "PBKDF2",
+    "PKCS#7",
+    "ECB",
+    "CBC",
+    "CTR",
+    "CFB",
+    "OFB",
+    "GCM"
   ],
   "exempt": {
     "tool.file-type.description": ["flag"],
