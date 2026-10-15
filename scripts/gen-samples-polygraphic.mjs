@@ -22,6 +22,7 @@ try {
   mods = {
     square: await vite.ssrLoadModule('/src/tools/crypto/_square.ts'),
     playfair: await vite.ssrLoadModule('/src/tools/crypto/_playfair.ts'),
+    bifid: await vite.ssrLoadModule('/src/tools/crypto/_bifid.ts'),
   };
 } finally {
   await vite.close();
@@ -66,4 +67,26 @@ if (!only || only === 'playfair') {
     "about wires, ghosts and a forgotten timer. Only the baker's daughter, who had climbed the tower " +
     'as a child, smiled and said that the key had never been lost.';
   print('playfair-e2e  key LANTERN LIGHT', playfair(e2e, 'lantern light'));
+}
+
+if (!only || only === 'bifid') {
+  const { toSymbols } = mods.square;
+  const { bifidGrid, trifidGrid, fractionate, joinBlocks } = mods.bifid;
+
+  const bifid = (plain, key, period) =>
+    joinBlocks(
+      fractionate(bifidGrid('ij', key), toSymbols('ij', plain).symbols, period, 'encrypt'),
+    );
+  const trifid = (plain, key, extra, period) =>
+    joinBlocks(fractionate(trifidGrid(extra, key), [...plain.toUpperCase()], period, 'encrypt'));
+
+  print(
+    'trifid-27th  key LIGHTHOUSE, period 0',
+    trifid('meet+at+the+bridge', 'lighthouse', '+', 0),
+  );
+  const english =
+    'The signal was sent at midnight from the old tower, and nobody on the coast could tell who ' +
+    'had sent it. Three short flashes, a pause, then two long ones: the fishermen said it meant ' +
+    'that the storm would turn before dawn, and for once they were right.';
+  print('bifid-period  key LIGHTHOUSE, period 7', bifid(english, 'lighthouse', 7));
 }
