@@ -78,6 +78,7 @@
   ],
   "exempt": {
     "tool.file-type.description": ["flag"],
+    "tool.unicode-hidden.kind.tagflag": ["flag"],
     "tool.zero-width.options.spaces.label": ["flag"],
     "tool.whitespace.label.found": ["Whitespace"],
     "tool.whitespace.label.visibleMap": ["Whitespace"],

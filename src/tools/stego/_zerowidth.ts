@@ -244,6 +244,11 @@ export interface Candidate {
   bytes: Uint8Array;
   text: string;
   score: number;
+  /**
+   * How many values one decoded unit (a byte, a 7-bit or a 16-bit character) can take: the
+   * higher it is, the less likely noise decodes to text. Unset for readings without such units.
+   */
+  unitValues?: number;
 }
 
 /** The four digits of the 330k tool, in order 0..3. */
@@ -293,6 +298,7 @@ function makeCandidate(
   bytes?: Uint8Array,
   /** Symbols that did not fit the framing (a reading with loose ends is less likely right). */
   leftover = 0,
+  unitValues?: number,
 ): Candidate {
   const b = bytes ?? utf8Encode(text);
   return {
@@ -302,6 +308,7 @@ function makeCandidate(
     bytes: b,
     text,
     score: readability(text) * (leftover > 0 ? 0.85 : 1),
+    ...(unitValues === undefined ? {} : { unitValues }),
   };
 }
 
@@ -381,10 +388,12 @@ function decodeBaseK(
             offset > 0 && T('detail.skipFirst', { n: offset }),
           );
           if (frame.kind === 'u16') {
-            out.push(makeCandidate(family, detail, fromUnits(values), undefined, rest));
+            out.push(
+              makeCandidate(family, detail, fromUnits(values), undefined, rest, frame.limit),
+            );
           } else {
             const bytes = Uint8Array.from(values);
-            out.push(makeCandidate(family, detail, utf8Decode(bytes), bytes, rest));
+            out.push(makeCandidate(family, detail, utf8Decode(bytes), bytes, rest, frame.limit));
           }
         }
       }
@@ -456,6 +465,7 @@ export function decodeAll(text: string): Candidate[] {
             fromUnits(wide),
             undefined,
             c330.length % 8,
+            65536,
           ),
         );
       }
@@ -472,6 +482,7 @@ export function decodeAll(text: string): Candidate[] {
             utf8Decode(bytes),
             bytes,
             c330.length % 4,
+            256,
           ),
         );
       }
@@ -503,6 +514,8 @@ export function decodeAll(text: string): Candidate[] {
         'VS1..VS256 = 0..255',
         utf8Decode(bytes),
         bytes,
+        0,
+        256,
       ),
     );
     weigh(out, from, vs.length, hidden.length);
@@ -608,17 +621,20 @@ export type Placement = 'after-first' | 'end' | 'spread';
 export const ZW_ZERO = 0x200b;
 export const ZW_ONE = 0x200c;
 
-/** The invisible payload for `secret` (a string of invisible characters) split in units. */
+/**
+ * The invisible payload for `secret` (a string of invisible characters) split in units. The
+ * binary scheme writes bit 0 and bit 1 with `pair` (ZWSP and ZWNJ unless told otherwise).
+ */
 export function encodePayload(
   secret: string,
   scheme: EncodeScheme,
+  pair: readonly [number, number] = [ZW_ZERO, ZW_ONE],
 ): { units: string[]; chars: number } {
   const units: string[] = [];
   if (scheme === 'binary') {
     for (const byte of utf8Encode(secret)) {
       let u = '';
-      for (let b = 7; b >= 0; b--)
-        u += String.fromCodePoint(((byte >> b) & 1) === 1 ? ZW_ONE : ZW_ZERO);
+      for (let b = 7; b >= 0; b--) u += String.fromCodePoint(pair[(byte >> b) & 1]!);
       units.push(u);
     }
   } else if (scheme === '330k') {

@@ -201,6 +201,7 @@ function reveal(input: string, includeSpaces: boolean): Output[] {
         .map((o) => [o.index, `${o.line}:${o.column}`, codePointLabel(o.cp), o.info.name]),
     },
   ];
+  out.push({ type: 'note', level: 'info', text: T('note.seeAlso') });
   return out;
 }
 
@@ -250,6 +251,7 @@ function decode(input: string): Output[] {
     label: T('label.visibleRemoved'),
     value: visible,
   });
+  out.push({ type: 'note', level: 'info', text: T('note.seeAlso') });
   return out;
 }
 
