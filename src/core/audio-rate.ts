@@ -82,8 +82,24 @@ interface Frame {
   key: string;
 }
 
+/** An MPEG audio frame header, with the fields a frame-by-frame walk reports. */
+export interface MpegFrame extends Frame {
+  /** 1 = MPEG-1, 2 = MPEG-2, 2.5 = MPEG-2.5. */
+  version: 1 | 2 | 2.5;
+  /** 1, 2 or 3 (Layer I, II, III). */
+  layer: 1 | 2 | 3;
+  /** Bits per second. */
+  bitrate: number;
+  /** 0 stereo, 1 joint stereo, 2 dual channel, 3 mono. */
+  channelMode: number;
+  /** True when a 16-bit CRC follows the 4 header bytes. */
+  crc: boolean;
+  /** PCM samples per channel the frame decodes to. */
+  samples: number;
+}
+
 /** Parse an MPEG audio frame header at `p` (null when it is not a plausible one). */
-function mpegFrame(b: Uint8Array, p: number): Frame | null {
+export function mpegFrame(b: Uint8Array, p: number): MpegFrame | null {
   if (p + 4 > b.length || b[p] !== 0xff || (at(b, p + 1) & 0xe0) !== 0xe0) return null;
   const version = (at(b, p + 1) >> 3) & 3; // 0 = 2.5, 1 = reserved, 2 = MPEG-2, 3 = MPEG-1
   const layerBits = (at(b, p + 1) >> 1) & 3; // 1 = III, 2 = II, 3 = I, 0 = reserved (ADTS)
@@ -113,7 +129,17 @@ function mpegFrame(b: Uint8Array, p: number): Frame | null {
     layer === 1
       ? (Math.floor((12 * bitrate) / rate) + padding) * 4
       : Math.floor(((layer === 3 && !v1 ? 72 : 144) * bitrate) / rate) + padding;
-  return { rate, length, key: `mpeg${version}/${layer}/${rate}` };
+  return {
+    rate,
+    length,
+    key: `mpeg${version}/${layer}/${rate}`,
+    version: version === 3 ? 1 : version === 2 ? 2 : 2.5,
+    layer: layer as 1 | 2 | 3,
+    bitrate,
+    channelMode: (at(b, p + 3) >> 6) & 3,
+    crc: !(at(b, p + 1) & 1),
+    samples: layer === 1 ? 384 : layer === 3 && !v1 ? 576 : 1152,
+  };
 }
 
 // ---------- AAC ADTS ----------

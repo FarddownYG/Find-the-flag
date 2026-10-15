@@ -127,7 +127,21 @@
     "UTC",
     "URL",
     "Chrome",
-    "Firefox"
+    "Firefox",
+    "AIFF",
+    "MP3",
+    "FLAC",
+    "Ogg",
+    "ID3",
+    "APIC",
+    "RIFF",
+    "PCM",
+    "Xing",
+    "Vorbis",
+    "Opus",
+    "DeepSound",
+    "SilentEye",
+    "Steghide"
   ],
   "exempt": {
     "tool.file-type.description": ["flag"],

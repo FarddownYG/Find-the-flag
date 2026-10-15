@@ -2,8 +2,8 @@ import { defineTool, number, text, toggle } from '../../core/define';
 import { ToolError } from '../../core/errors';
 import type { Output, RgbaImage } from '../../core/types';
 import { signatureName, toolT } from '../../i18n/tool-text';
-import { latin1Decode, printableRatio, toHex, u32be, u32le } from '../../lib/bytes';
-import { identify, type Signature } from '../../lib/signatures';
+import { printableRatio, toHex } from '../../lib/bytes';
+import type { Signature } from '../../lib/signatures';
 import { imageFileEnd } from './_carve';
 import {
   capacityBytes,
@@ -14,6 +14,14 @@ import {
   parseChannels,
   parsePlanes,
 } from './_lsb-core';
+import {
+  classifyStream,
+  KIND_TIER as TIER,
+  preview,
+  printableRun,
+  strongSignature,
+  type StreamKind as HitKind,
+} from './_lsb-classify';
 
 const T = toolT('lsb');
 
@@ -22,22 +30,6 @@ const CHANNEL_ORDERS = ['r', 'g', 'b', 'a', 'rgb', 'bgr', 'rgba', 'abgr'];
 const PLANE_SETS = [[0], [1], [2], [3], [0, 1], [0, 1, 2], [0, 1, 2, 3]];
 const SCAN_BYTES = 8192;
 const MAX_ROWS = 40;
-/** Stricter than the shell's flag pattern: random noise must not look like prefix{...}. */
-const FLAG_RE = /[A-Za-z][A-Za-z0-9_-]{2,24}\{[\x21-\x7a|~]{4,200}\}/;
-
-const isPrintable = (b: number) => (b >= 0x20 && b < 0x7f) || b === 9 || b === 10 || b === 13;
-
-function printableRun(b: Uint8Array, from = 0): number {
-  let n = 0;
-  while (from + n < b.length && isPrintable(b[from + n]!)) n++;
-  return n;
-}
-
-const preview = (b: Uint8Array, max = 64) =>
-  latin1Decode(b.subarray(0, max)).replace(/[^\x20-\x7e]/g, '·');
-
-type HitKind = 'flag' | 'file' | 'prefixed' | 'text' | 'inner';
-const TIER: Record<HitKind, number> = { flag: 5, file: 4, prefixed: 3, text: 2, inner: 1 };
 
 interface Hit {
   kind: HitKind;
@@ -53,92 +45,41 @@ interface Hit {
   length?: number;
 }
 
-const strongSignature = (b: Uint8Array): Signature | undefined =>
-  identify(b).find((s) => !s.weak && s.magic.filter((m) => m !== null).length >= 3);
-
 /** Decide whether an extracted prefix looks like something: file, flag, or readable text. */
 function classify(b: Uint8Array, params: LsbParams): Hit | null {
-  if (b.length < 6) return null;
-  let min = 255;
-  let max = 0;
-  for (const x of b) {
-    if (x < min) min = x;
-    if (x > max) max = x;
-  }
-  if (min === max) return null; // a constant plane carries no message
-
-  const run = printableRun(b);
-  const flagAt = latin1Decode(b).search(FLAG_RE);
-  if (flagAt >= 0) {
-    return {
-      kind: 'flag',
-      params,
-      score: (flagAt === 0 ? 10000 : 0) + run,
-      what: flagAt === 0 ? T('what.flag') : T('what.flagAt', { offset: flagAt }),
-      preview: preview(b.subarray(flagAt)),
-      start: flagAt,
-    };
-  }
-  const sig = strongSignature(b);
-  if (sig) {
-    return {
-      kind: 'file',
-      params,
-      score: sig.magic.length,
-      what: T('what.file', { name: signatureName(sig) }),
-      preview: toHex(b.subarray(0, 12), ' '),
-      start: 0,
-      sig,
-    };
-  }
-  for (const le of [false, true]) {
-    const len = le ? u32le(b, 0) : u32be(b, 0);
-    const payload = b.subarray(4);
-    if (
-      len >= 6 &&
-      len <= 0x1000000 &&
-      printableRun(payload) >= Math.min(len, 6) &&
-      printableRun(payload) >= 6
-    ) {
+  const c = classifyStream(b);
+  if (!c) return null;
+  const base = { kind: c.kind, params, score: c.score, start: c.start };
+  switch (c.kind) {
+    case 'flag':
       return {
-        kind: 'prefixed',
-        params,
-        score: Math.min(len, run),
-        what: T('what.prefixed', { endian: le ? 'u32 LE' : 'u32 BE', count: len }),
-        preview: preview(payload),
-        start: 4,
-        length: len,
+        ...base,
+        what: c.flagAt === 0 ? T('what.flag') : T('what.flagAt', { offset: c.flagAt! }),
+        preview: preview(b.subarray(c.flagAt!)),
       };
-    }
-  }
-  const distinct = new Set(b.subarray(0, run)).size;
-  if (run >= 6 && distinct >= 3) {
-    return {
-      kind: 'text',
-      params,
-      score: run,
-      what: T('what.text', { count: run }),
-      preview: preview(b),
-      start: 0,
-    };
-  }
-  // A long readable stretch after a short header or padding.
-  let i = 0;
-  while (i < b.length) {
-    const r = printableRun(b, i);
-    if (r >= 24 && new Set(b.subarray(i, i + r)).size >= 6) {
+    case 'file':
       return {
-        kind: 'inner',
-        params,
-        score: r,
-        what: T('what.inner', { offset: i, count: r }),
-        preview: preview(b.subarray(i)),
-        start: i,
+        ...base,
+        what: T('what.file', { name: signatureName(c.sig!) }),
+        preview: toHex(b.subarray(0, 12), ' '),
+        sig: c.sig,
       };
-    }
-    i += Math.max(1, r);
+    case 'prefixed':
+      return {
+        ...base,
+        what: T('what.prefixed', { endian: c.little ? 'u32 LE' : 'u32 BE', count: c.length! }),
+        preview: preview(b.subarray(4)),
+        length: c.length,
+      };
+    case 'text':
+      return { ...base, what: T('what.text', { count: c.count! }), preview: preview(b) };
+    case 'inner':
+      return {
+        ...base,
+        what: T('what.inner', { offset: c.start, count: c.count! }),
+        preview: preview(b.subarray(c.start)),
+      };
   }
-  return null;
 }
 
 function scan(img: RgbaImage): { hits: Hit[]; tried: number } {
@@ -319,6 +260,7 @@ export default defineTool({
         value: bytes,
         filename: sig ? `lsb-extract.${sig.ext}` : 'lsb-extract.bin',
       });
+      out.push({ type: 'note', level: 'info', text: T('note.seeAlso') });
       return out;
     }
 
@@ -335,6 +277,7 @@ export default defineTool({
         level: 'warn',
         text: T('note.nothing'),
       });
+      out.push({ type: 'note', level: 'info', text: T('note.seeAlso') });
       return out;
     }
     out.push({
@@ -359,6 +302,7 @@ export default defineTool({
       text: T('note.best', { params: paramsLabel(best.params), what: best.what }),
     });
     out.push({ type: 'bytes', label: T('label.best'), value: bytes, filename });
+    out.push({ type: 'note', level: 'info', text: T('note.seeAlso') });
     return out;
   },
 });
