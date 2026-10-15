@@ -1,6 +1,7 @@
 import { defineTool } from '../../core/define';
 import type { Output } from '../../core/types';
 import { formatSize, indexOfBytes, latin1Decode, printableRatio, toHex } from '../../lib/bytes';
+import { tOr } from '../../i18n';
 import { signatureName, toolT } from '../../i18n/tool-text';
 import { identify, SIGNATURES, type Signature } from '../../lib/signatures';
 
@@ -113,6 +114,14 @@ export default defineTool({
       });
     }
     if (best?.id === 'pdf') out.push({ type: 'note', level: 'info', text: T('note.pdf') });
+    // An executable has a tool of its own.
+    if (best && ['elf', 'pe', 'macho32', 'macho64'].includes(best.id)) {
+      out.push({
+        type: 'note',
+        level: 'info',
+        text: T('note.executable', { tool: tOr('tool.exe-analyzer.name', 'Executable analyzer') }),
+      });
+    }
     // Something else glued after/inside? Point at the carving tool.
     const embedded = indexOfBytes(bytes, [0x50, 0x4b, 0x03, 0x04], 1);
     if (embedded > 0 && best?.id !== 'zip') {

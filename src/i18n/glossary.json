@@ -157,6 +157,11 @@
     "tool.text-transform.kv.whitespace": ["Whitespace"],
     "tool.image-analyzer.label.strings": ["Strings"],
     "tool.strings.label.table": ["Strings"],
-    "tool.strings.label.tableFlagged": ["Strings"]
+    "tool.strings.label.tableFlagged": ["Strings"],
+    "tool.exe-analyzer.col.flags": ["flag"],
+    "tool.exe-analyzer.kv.flags": ["flag"],
+    "tool.exe-analyzer.note.execStack": ["flag"],
+    "tool.exe-analyzer.options.code.hint": ["Strings"],
+    "tool.exe-analyzer.options.section.hint": ["Strings"]
   }
 }
