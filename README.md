@@ -106,6 +106,8 @@ renders the blocks. Tools never touch the DOM, so they also run in Node for the 
 
 ## Licence
 
-[MIT](LICENSE). Third-party packages keep their own licences: `fflate`, `fast-png`, `exifr`,
+Copyright (C) 2026 Find The Flag contributors. [GNU GPL v3](LICENSE) or later (`GPL-3.0-or-later`): you may use, study, change and share
+the code; versions you distribute must stay under the same licence, with their source.
+Third-party packages keep their own licences: `fflate`, `fast-png`, `exifr`,
 `hash-wasm` (MIT), `jsqr` (Apache-2.0), `jpeg-js` (BSD-3-Clause), Leaflet (BSD-2-Clause),
 Martian Mono, Noto Sans SC and Noto Sans Devanagari (SIL Open Font License 1.1). Map tiles © OpenStreetMap contributors.

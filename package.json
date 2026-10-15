@@ -2,7 +2,7 @@
   "name": "find-the-flag",
   "version": "0.1.0",
   "description": "Open-source, 100% client-side toolbox for solving CTF challenges.",
-  "license": "MIT",
+  "license": "GPL-3.0-or-later",
   "private": true,
   "type": "module",
   "scripts": {
