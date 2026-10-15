@@ -23,6 +23,7 @@ import { base62Decode } from './base62';
 import { base85Decode } from './base85';
 import { base91Decode } from './base91';
 import { binaryDecode } from './binary';
+import { brailleToText, cellsToBytes, readCells } from './braille';
 import { BUBBLEBABBLE_SHAPE, bubbleBabbleDecode } from './bubblebabble';
 import { charcodeDecodeBytes } from './charcode';
 import { hexDecode } from './hex';
@@ -160,6 +161,7 @@ const RE_B64 = /^[A-Za-z0-9+/_-]+={0,2}$/;
 const RE_B32_UP = /^[A-Z2-7]+={0,6}$/;
 const RE_B32_LOW = /^[a-z2-7]+={0,6}$/;
 const RE_B45 = /^[0-9A-Z $%*+\-./:]{6,}$/;
+const RE_BRAILLE = /^[\u2800-\u28ff\s]+$/;
 const RE_B100 = /^(?:[\u{1F3F7}-\u{1F4F6}]|\uFE0F|\s)+$/u;
 const RE_B36_LOW = /^(?=.*\d)(?=.*[a-z])[0-9a-z]{10,20000}$/;
 const RE_B36_UP = /^(?=.*\d)(?=.*[A-Z])[0-9A-Z]{10,20000}$/;
@@ -289,6 +291,19 @@ const DECODERS: Step[] = [
   onText('charcode (octal)', (t) =>
     RE_OCT_LIST.test(t) ? charcodeDecodeBytes(t, 'oct', 'codepoint') : null,
   ),
+  onText('braille', (t) => {
+    // Six-dot cells read as English grade 1; a text full of cells that mean nothing is not braille.
+    if (!RE_BRAILLE.test(t) || /[\u2840-\u28ff]/.test(t)) return null;
+    const r = brailleToText(readCells(t));
+    if (r.cells < 3 || r.unknown.length > r.cells * 0.1) return null;
+    return utf8Encode(r.text);
+  }),
+  onText('braille (8-dot bytes)', (t) => {
+    // Cells with dot 7 or 8 are bytes: one cell, one byte
+    if (!RE_BRAILLE.test(t) || !/[\u2840-\u28ff]/.test(t)) return null;
+    const { bytes } = cellsToBytes(readCells(t));
+    return bytes.length >= 3 && plausible(bytes) ? bytes : null;
+  }),
   onText('nato', (t) => {
     // Four or more words, every one of them in the alphabet, and some letters among them.
     if (t.length < 15 || !/^[A-Za-z0-9\s,.;:\-_/|]+$/.test(t)) return null;

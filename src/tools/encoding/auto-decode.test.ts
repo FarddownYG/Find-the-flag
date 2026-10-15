@@ -9,6 +9,7 @@ import autoDecodeTool, { autoDecode, recipeName } from './auto-decode';
 import { base100Encode } from './base100';
 import { base32Encode } from './base32';
 import { base26Encode, base36Encode } from './base36';
+import { bytesToCells, cellsToString, textToBraille } from './braille';
 import { base45Encode } from './base45';
 import { base58Encode } from './base58';
 import { base62Encode } from './base62';
@@ -168,6 +169,33 @@ describe('auto-decode: Bubble Babble', () => {
   });
 });
 
+describe('auto-decode: braille', () => {
+  it('six-dot cells are read as English text, also under another layer', () => {
+    const cells = cellsToString(textToBraille('secret meeting at noon').masks, false);
+    const r = solve(cells);
+    const c = r.ranked.find((x) => recipeName(x) === 'braille');
+    expect(c && utf8Decode(c.bytes)).toBe('secret meeting at noon');
+    const layered = solve(b64(cells));
+    const l = layered.ranked.find((x) => recipeName(x) === 'base64 → braille');
+    expect(l && utf8Decode(l.bytes)).toBe('secret meeting at noon');
+  });
+
+  it('eight-dot cells are bytes: a flag, and a gzip stream behind it', () => {
+    const r = solve(bytesToCells(bytes(FLAG)));
+    expect(recipeName(r.best)).toBe('braille (8-dot bytes)');
+    expect(utf8Decode(r.best.bytes)).toBe(FLAG);
+    const z = solve(bytesToCells(gzipSync(bytes(FLAG))));
+    expect(recipeName(z.best)).toBe('braille (8-dot bytes) → gzip');
+  });
+
+  it('cells that mean nothing, or a couple of them, are left alone', () => {
+    for (const text of ['⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿', '⠁⠃', '⠿⠁⠿⠃⠿⠉⠿⠙', '⣿⣿⣿⣿⣿⣿']) {
+      const r = solve(text);
+      expect(r.ranked.some((c) => c.recipe.some((n) => n.startsWith('braille')))).toBe(false);
+    }
+  });
+});
+
 describe('auto-decode: NATO alphabet', () => {
   it('a spelled message is read, also inside another layer', () => {
     const spelled = natoEncode('secret meeting at noon').text;
@@ -304,7 +332,17 @@ describe('auto-decode: restraint', () => {
 // Ordinary text that must never be "decoded" by the newer, stricter decoders (Base45, uuencode,
 // quoted-printable, Punycode, Base36, Base100, NATO, Braille, Bubble Babble): not as the best
 // result and not even as a candidate.
-const NEW_DECODERS = ['base45', 'base100', 'bubblebabble', 'base36', 'base26', 'punycode', 'nato'];
+const NEW_DECODERS = [
+  'base45',
+  'base100',
+  'bubblebabble',
+  'base36',
+  'base26',
+  'punycode',
+  'nato',
+  'braille',
+  'braille (8-dot bytes)',
+];
 const ORDINARY = [
   'The quick brown fox jumps over the lazy dog.',
   'Hello, World!',
@@ -349,6 +387,8 @@ const ORDINARY = [
   'A1B2C3D4E5F6',
   'ZmxhZ3t3b3Jkc30=',
   'I love you 👍👏💯 so much!',
+  'Dots: 1-25-14 and 12-3-2024 are not braille',
+  '☀ ☂ ☃ ★ ✓ ✔ ✿ ♥ ♦ ♣ ♠',
   '👍👍👍👍👍👍👍',
   '👍🐶👍🐶👍🐶👍🐶',
   '👍👏💯',
