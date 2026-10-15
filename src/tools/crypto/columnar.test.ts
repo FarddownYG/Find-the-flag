@@ -422,6 +422,16 @@ describe('columnar solver', () => {
     expect(out).toContain('No result clearly reads like English');
   });
 
+  it('points an ADFGX / ADFGVX ciphertext to its own tool', () => {
+    // Wikipedia's ADFGVX example: only the six coordinate letters, no English in its columns.
+    const out = resultToText(run('DGDDDAGDDGAFADDFDADVDVFAADVX', { mode: 'solve' }));
+    expect(out).toContain('This text uses only the letters of an ADFGX / ADFGVX message');
+    // An ordinary text does not get the hint.
+    const plain = cellsOf(PROSE_B.slice(0, 200));
+    const other = resultToText(run(encryptCells(plain, 'QUILTED').join(''), { mode: 'solve' }));
+    expect(other).not.toContain('ADFGX / ADFGVX message');
+  });
+
   it('keeps identity keys as the scytale', () => {
     const cells = cellsOf(WIKI);
     const viaKey = unpermute(cells, columnarPermutation(cells.length, identityKey(5)));

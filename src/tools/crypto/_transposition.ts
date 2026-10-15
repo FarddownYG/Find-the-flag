@@ -169,6 +169,34 @@ export function gridRows(
   return { rows, total };
 }
 
+/** Display caps: a long text never turns into a page-sized table. */
+export const GRID_MAX_ROWS = 40;
+export const GRID_MAX_COLS = 40;
+
+/**
+ * A text written row by row under a key, as table columns and rows: the key symbols on top, then
+ * the reading order of each column (#), then the rows. The last row is padded with blanks.
+ */
+export function keyGridRows(
+  cells: readonly string[],
+  key: ColumnKey,
+  myszkowski: boolean,
+): { columns: string[]; rows: string[][]; truncated: { rows: number; cols: number } | null } {
+  const width = key.symbols.length;
+  const shown = Math.min(width, GRID_MAX_COLS);
+  const { rows, total } = gridRows(cells, width, GRID_MAX_ROWS);
+  const ranks = (myszkowski ? key.groupRank : key.rank).slice(0, shown).map(String);
+  const all = [['#', ...ranks], ...rows.map((r, i) => [String(i + 1), ...r.slice(0, shown)])];
+  return {
+    columns: ['', ...key.symbols.slice(0, shown)],
+    rows: all.map((r) => [...r, ...Array.from({ length: shown + 1 - r.length }, () => '')]),
+    truncated:
+      total > GRID_MAX_ROWS || width > GRID_MAX_COLS
+        ? { rows: Math.min(total, GRID_MAX_ROWS), cols: shown }
+        : null,
+  };
+}
+
 // --------------------------------------------------------------------------- routes
 
 export type RouteFamily = 'spiral' | 'snake-rows' | 'snake-columns' | 'rows' | 'columns';

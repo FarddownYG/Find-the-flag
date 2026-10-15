@@ -8,8 +8,11 @@ import {
   allRoutes,
   columnarPermutation,
   EXHAUSTIVE_MAX,
+  GRID_MAX_COLS,
+  GRID_MAX_ROWS,
   gridRows,
   identityKey,
+  keyGridRows,
   orderToDigits,
   orderToLetters,
   parseColumnKey,
@@ -57,10 +60,6 @@ const SIBLING_GAP = 0.02;
 const SCORE_SAMPLE = 4000;
 const rankScore = (plain: string): number =>
   rankText(plain.length > SCORE_SAMPLE ? plain.slice(0, SCORE_SAMPLE) : plain);
-
-/** Display caps: a long text never turns into a page-sized table. */
-const MAX_ROWS = 40;
-const MAX_COLS = 40;
 
 /** The characters the grid is made of. */
 export function toCells(input: string, chars: Chars): string[] {
@@ -131,27 +130,13 @@ interface Step {
 }
 
 function keyGrid(grid: string[], step: Step, label: string): Output[] {
-  const key = step.key!;
-  const width = key.symbols.length;
-  const shown = Math.min(width, MAX_COLS);
-  const { rows, total } = gridRows(grid, width, MAX_ROWS);
-  const ranks = step.myszkowski ? key.groupRank : key.rank;
-  const out: Output[] = [
-    {
-      type: 'table',
-      label,
-      columns: ['', ...key.symbols.slice(0, shown)],
-      rows: [
-        ['#', ...ranks.slice(0, shown).map(String)],
-        ...rows.map((r, i) => [String(i + 1), ...r.slice(0, shown)]),
-      ].map((r) => [...r, ...Array.from({ length: shown + 1 - r.length }, () => '')]),
-    },
-  ];
-  if (total > MAX_ROWS || width > MAX_COLS) {
+  const g = keyGridRows(grid, step.key!, step.myszkowski === true);
+  const out: Output[] = [{ type: 'table', label, columns: g.columns, rows: g.rows }];
+  if (g.truncated) {
     out.push({
       type: 'note',
       level: 'info',
-      text: T('note.truncated', { rows: Math.min(total, MAX_ROWS), cols: shown }),
+      text: T('note.truncated', { rows: g.truncated.rows, cols: g.truncated.cols }),
     });
   }
   return out;
@@ -159,8 +144,8 @@ function keyGrid(grid: string[], step: Step, label: string): Output[] {
 
 function routeGrids(grid: string[], step: Step, labels: { cells: string; order: string }) {
   const width = step.width;
-  const { rows, total } = gridRows(grid, width, MAX_ROWS);
-  const shown = Math.min(width, MAX_COLS);
+  const { rows, total } = gridRows(grid, width, GRID_MAX_ROWS);
+  const shown = Math.min(width, GRID_MAX_COLS);
   const header = ['', ...Array.from({ length: shown }, (_, i) => String(i + 1))];
   const pad = (r: (string | number)[]) => [
     ...r,
@@ -192,11 +177,11 @@ function routeGrids(grid: string[], step: Step, labels: { cells: string; order: 
       ),
     },
   ];
-  if (total > MAX_ROWS || width > MAX_COLS) {
+  if (total > GRID_MAX_ROWS || width > GRID_MAX_COLS) {
     out.push({
       type: 'note',
       level: 'info',
-      text: T('note.truncated', { rows: Math.min(total, MAX_ROWS), cols: shown }),
+      text: T('note.truncated', { rows: Math.min(total, GRID_MAX_ROWS), cols: shown }),
     });
   }
   return out;
@@ -409,8 +394,15 @@ function solveKey(cells: string[], o: Settings): Output[] {
       text: T('note.stopped', { reached: sol.reached || 1 }),
     });
   }
+  if (looksFractionated(cells)) out.push({ type: 'note', level: 'info', text: T('note.adfgvx') });
   out.push({ type: 'note', level: 'info', text: T('note.standardOnly') });
   return out;
+}
+
+/** Only the coordinate letters of an ADFGX / ADFGVX message, at least four of them. */
+function looksFractionated(cells: readonly string[]): boolean {
+  const used = new Set(cells.map((c) => c.toUpperCase()));
+  return used.size >= 4 && [...used].every((c) => 'ADFGVX'.includes(c));
 }
 
 /** Widths worth trying: the divisors of the length (full grid), else every width. */

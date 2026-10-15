@@ -134,3 +134,12 @@ describe('polybius errors', () => {
     expect(out).toContain('1\tS\tE\tC\tR\tT');
   });
 });
+
+describe('ADFGX hint', () => {
+  it('points to the ADFGX / ADFGVX tool for ADFGX coordinates, in both directions', () => {
+    const hint = 'The ADFGX / ADFGVX tool does both steps with your square and key.';
+    expect(resultToText(run('DF AX FA FA FG', { cipher: 'adfgx' }))).toContain(hint);
+    expect(resultToText(run('Hello', { cipher: 'adfgx', mode: 'encode' }))).toContain(hint);
+    expect(resultToText(run('23 15 31 31 34'))).not.toContain('ADFGX / ADFGVX tool');
+  });
+});

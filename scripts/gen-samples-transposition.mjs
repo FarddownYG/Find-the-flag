@@ -62,6 +62,31 @@ export function spiralEncrypt(text, width) {
     .join('');
 }
 
+/** A Polybius square: the keyword's distinct characters first, then the rest of the alphabet. */
+export function keywordSquare(keyword, alphabet) {
+  const seen = new Set();
+  let square = '';
+  for (const ch of (keyword + alphabet).toUpperCase()) {
+    if (alphabet.includes(ch) && !seen.has(ch)) {
+      seen.add(ch);
+      square += ch;
+    }
+  }
+  return square;
+}
+
+/** ADFGX / ADFGVX: two coordinate letters per character, then a columnar transposition. */
+export function adfgvx(plain, square, labels, key) {
+  const n = labels.length;
+  let stream = '';
+  for (const ch of plain.toUpperCase()) {
+    const i = square.indexOf(ch);
+    if (i >= 0) stream += labels[Math.floor(i / n)] + labels[i % n];
+  }
+  return columnar(stream, key);
+}
+
+const ABC = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 const wikipedia = 'WEAREDISCOVEREDFLEEATONCE';
 if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split('/').pop())) {
   const samples = {
@@ -87,6 +112,27 @@ if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split('/').pop()
       'nobodynoticedthelittledoorbehindthelibraryshelfuntilthenightthestormknockedouteverylightinthevillage' +
         'andtheoldcaretakerfinallytoldthechildrenwhatthekeywasforflag{key_order_found}',
       'STRANGE',
+    ),
+    // Published (Wikipedia, ADFGVX cipher): this square, key PRIVACY, "Attack at 1200AM".
+    adfgvxWikipedia: adfgvx(
+      'Attack at 1200AM',
+      'NA1C3H8TB2OME5WRPD4F6G7I9J0KLQSUVXYZ',
+      'ADFGVX',
+      'PRIVACY',
+    ),
+    // Self-made: ADFGX (5 x 5, I and J share a cell), keyword square, key NEBEL.
+    adfgx: adfgvx(
+      'THEFLAGISHIDDENINTHESQUAREGRID',
+      keywordSquare('GERMANY', ABC.replace('J', '')),
+      'ADFGX',
+      'NEBEL',
+    ),
+    // Self-made: ADFGVX with a keyword square (letters then digits) and the coordinate letters ABCDEF.
+    adfgvxCustom: adfgvx(
+      'MEETATBRIDGE12AT0900',
+      keywordSquare('ENIGMA', ABC + '0123456789'),
+      'ABCDEF',
+      'LANTERN',
     ),
     // Self-made: 6 x 6 grid read as a clockwise spiral from the top left.
     spiral: spiralEncrypt('readthisfirstflag{spiral_route_ok}go', 6),

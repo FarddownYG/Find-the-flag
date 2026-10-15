@@ -183,6 +183,12 @@ export function polybiusDecode(input: string, cipher: Cipher, keyword: string): 
   return out;
 }
 
+/** ADFGX coordinates are only half of the cipher: point to the tool that also transposes. */
+const adfgxNote = (cipher: Cipher) =>
+  cipher === 'adfgx'
+    ? [{ type: 'note' as const, level: 'info' as const, text: T('note.adfgx') }]
+    : [];
+
 export default defineTool({
   id: 'polybius',
   name: 'Polybius / Tap code',
@@ -293,6 +299,7 @@ export default defineTool({
               },
             ]
           : []),
+        ...adfgxNote(cipher),
       ];
     }
     const decoded = polybiusDecode(input, cipher, keyword);
@@ -306,6 +313,7 @@ export default defineTool({
         level: 'info',
         text: cipher === 'tap' ? T('note.tapK') : T('note.mergeIJ'),
       },
+      ...adfgxNote(cipher),
     ];
   },
 });
