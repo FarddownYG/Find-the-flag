@@ -65,8 +65,8 @@ DÉCISIONS: D1 un agent = une famille, commit dans son worktree isolé ; seul l'
            (cherry-pick + portes complètes) — rouvrir si une intégration casse main
            D2 fusion vers main = fast-forward depuis autonome/ (pas de PR, voir garde-fou e-mail)
            D3 pas de table de symboles inventée (Templar, Dancing Men) sans source vérifiable
-ARBITRAGES: A1 fast-forward de main sur autonome/2026-10-15 (= mise en prod Vercel de 25 outils) :
-           `git push origin autonome/2026-10-15:main`. Reco : oui, toutes les portes et la CI sont vertes.
+ARBITRAGES: A1 tranché (« go ») : main avancé en fast-forward sur autonome/2026-10-15 le 2026-10-15,
+           25 outils mis en production.
 PROPOSÉ (non exécuté, impact / effort / risque) :
   1. Barre du haut en russe 9 px trop large sur mobile (vue par l'agent exe-analyzer) — moyen / faible / faible
   2. qr.test.ts dépasse son budget de 15 s sous charge (vu 4 fois) — moyen / faible / faible
