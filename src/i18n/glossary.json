@@ -111,7 +111,14 @@
     "PDF417",
     "MaxiCode",
     "GS1",
-    "ECI"
+    "ECI",
+    "SSTV",
+    "VIS",
+    "VOX",
+    "Robot",
+    "Martin",
+    "Scottie",
+    "PD"
   ],
   "exempt": {
     "tool.file-type.description": ["flag"],
