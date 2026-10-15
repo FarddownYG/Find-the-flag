@@ -48,45 +48,30 @@ public : un push sur `main` est une publication immédiate et définitive.
 ## AGENCE (mode autonome — état du run)
 
 ```
-ÉTAT: RUNNING | cycle 11/14 | sans-gain 0/2 | start 2026-10-15T10:30Z | budget 12 familles d'outils, 4 vagues
-FINI: [ ] portes vertes sur HEAD de autonome/2026-10-15 (check, docs:tools sans diff, build, e2e complet)
-      [x] vague 1 intégrée : playfair, bifid, hill, adfgvx, columnar, nihilist, enigma (vecteurs publiés verts)
-      [x] vague 2 : codes-barres 1D/2D, pack d'encodages, alphabets de symboles
-      [x] vague 3 : SSTV, analyseur PDF, lecteur SQLite
-      [ ] vague 4 : stégano WAV LSB, analyseur ELF/PE, identificateur de chiffre
-      [ ] check:privacy propre, commits FarddownYG noreply sans mention d'IA
+ÉTAT: STOPPED | cycle 12/14 | sans-gain 0/2 | start 2026-10-15T10:30Z | fin : tous les critères FINI verts
+FINI: [x] portes vertes sur HEAD de autonome/2026-10-15 (check 5463 tests, docs:tools sans diff,
+          build, e2e 660 passed)
+      [x] vague 1 : playfair, bifid, hill, adfgvx, columnar, nihilist, enigma
+      [x] vague 2 : barcode (+ barcode-pattern), 9 encodages, symbol-ciphers
+      [x] vague 3 : sstv, pdf-analyzer, sqlite
+      [x] vague 4 : audio-stego, exe-analyzer, cipher-identify
+      [x] check:privacy propre, commits FarddownYG noreply sans mention d'IA
 COMMANDES: npm run check · npm run docs:tools + git diff --exit-code docs/TOOLS.md · npm run build
            · e2e : build → vite preview → playwright (worktree propre) · captures → scratchpad (hors git)
-FAIT: 072a021 base de départ — check 3730 tests verts, e2e 355 passed, CI verte
-      4f42f35 enigma — check 3801 verts, e2e 372 passed ; câblages = py-enigma 1.0.2 data.py ;
-      Barbarossa et U-264 déchiffrés (2e implémentation Python indépendante d'accord)
-      1984456 8a481f2 1ecc0f2 columnar, adfgvx, nihilist — check 3895 verts, e2e 405 passed ;
-      vecteurs Wikipedia (ZEBRAS, PRIVACY, RUSSIAN) recalculés en Python à l'identique
-      7a0baa9 278770d 6a87d10 playfair, bifid, hill — check 4040 verts, e2e 442 passed ;
-      Playfair BMODZ…, Hill POH, Bifid UAEOLWRINS recalculés en Python
-      barcode + barcode-pattern (zxing-wasm 3.1.4 MIT, wasm 416 kB gzip, servi en local) —
-      check 4148 verts, e2e 461 passed, npm ci OK sur le lockfile
-      symbol-ciphers (Pigpen, sémaphore, Braille ; Templar / Dancing Men non faits faute de table
-      vérifiable) — check 4198 verts, e2e 479 passed ; grille Pigpen relue sur capture
-      9 encodages (base45/100/36, bubblebabble, punycode, nato, braille, quoted-printable,
-      uuencode) branchés sur auto-decode — check 4615 verts, e2e 558/559 (triage Braille corrigé)
-      pdf-analyzer — check 4767 verts, e2e 576 passed ; échantillons relus par poppler pdftotext
-      (révision 1, RC4, mot de passe, xref cassée : flags identiques)
-      sstv (14 modes, échantillons faits avec PySSTV) — check 4868 verts, e2e 588 passed ;
-      codes VIS conformes, Robot 36 relu sur capture
-      sqlite (sql.js 1.14.2 MIT, carving des lignes supprimées, WAL) — check 5083 verts, e2e 606
-      passed ; échantillons relus par Python sqlite3, lockfile régénéré par npm, npm ci OK
-      audio-stego (LSB PCM, chunks, ID3, FLAC/Ogg) — check 5218 verts, e2e 618 passed ; FTF{wav_lsb} relu par
-      Python wave
-      fix(ui) removeChild sur changement de menu avec option texte focus (réentrance
-      renderOptions) — reproduit 4/4 avant, 4/4 vert après, fuzz 88 outils propre, e2e 622 passed
-EN COURS: vague 1 (polygraphiques, transpositions) + vague 2 (codes-barres) en agents
-SUIVANT: vague 2 dès qu'un slot se libère
-DÉCISIONS: D2 fusion vers main = fast-forward depuis autonome/ (pas de PR, voir garde-fou e-mail)
-           D1 un agent = une famille, commit dans son worktree isolé ; seul l'orchestrateur intègre
+FAIT: 72 → 90 outils, chacun vérifié contre une référence indépendante (vecteurs publiés recalculés
+      en Python, py-enigma, PySSTV, poppler, sqlite3, readelf / pefile, Python wave / binascii)
+      6087893 fix(ui) removeChild quand un menu change avec une option texte focus (réentrance)
+DÉCISIONS: D1 un agent = une famille, commit dans son worktree isolé ; seul l'orchestrateur intègre
            (cherry-pick + portes complètes) — rouvrir si une intégration casse main
-ARBITRAGES: A1 fusion autonome/2026-10-15 → main (= mise en prod Vercel) : le skill interdit le push
-           main en autonome, la règle « Workflow git » ci-dessus dit de pousser chaque outil fini.
-           Reco : fusionner par lots de vague, après relecture des captures.
-PROPOSÉ: (rempli en fin de run)
+           D2 fusion vers main = fast-forward depuis autonome/ (pas de PR, voir garde-fou e-mail)
+           D3 pas de table de symboles inventée (Templar, Dancing Men) sans source vérifiable
+ARBITRAGES: A1 fast-forward de main sur autonome/2026-10-15 (= mise en prod Vercel de 18 outils) :
+           `git push origin autonome/2026-10-15:main`. Reco : oui, toutes les portes et la CI sont vertes.
+PROPOSÉ (non exécuté, impact / effort / risque) :
+  1. Barre du haut en russe 9 px trop large sur mobile (vue par l'agent exe-analyzer) — moyen / faible / faible
+  2. qr.test.ts dépasse son budget de 15 s sous charge (vu 4 fois) — moyen / faible / faible
+  3. Liens croisés : symbol-ciphers → braille, frequency → cipher-identify, text-analyzer sur la
+     table confusables d'Unicode — moyen / moyen / faible
+  4. CI : actions/checkout et setup-node v4 tournent sur Node 20 déprécié → v5 — faible / faible / faible
+  5. Templar, Dancing Men, runes dès qu'une table de référence vérifiable est disponible — moyen / moyen / moyen
 ```
