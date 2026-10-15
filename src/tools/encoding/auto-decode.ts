@@ -28,6 +28,7 @@ import { charcodeDecodeBytes } from './charcode';
 import { hexDecode } from './hex';
 import { htmlDecodeBytes } from './html-entities';
 import { morseDecode } from './morse';
+import { looksLikeNato, natoDecode } from './nato';
 import { decodeAceLabels } from './punycode';
 import { hasUnicodeEscape, unicodeUnescapeBytes } from './unicode-escape';
 import { urlDecodeOnce } from './url';
@@ -288,6 +289,12 @@ const DECODERS: Step[] = [
   onText('charcode (octal)', (t) =>
     RE_OCT_LIST.test(t) ? charcodeDecodeBytes(t, 'oct', 'codepoint') : null,
   ),
+  onText('nato', (t) => {
+    // Four or more words, every one of them in the alphabet, and some letters among them.
+    if (t.length < 15 || !/^[A-Za-z0-9\s,.;:\-_/|]+$/.test(t)) return null;
+    const r = looksLikeNato(t);
+    return r && r.letters >= 3 ? utf8Encode(natoDecode(t).text) : null;
+  }),
   onText('punycode', (t) => {
     // Only real "xn--" labels that decode to something non-ASCII; a bad label is left alone.
     if (!/xn--/i.test(t)) return null;

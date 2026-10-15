@@ -18,6 +18,7 @@ import { bubbleBabbleEncode } from './bubblebabble';
 import { charcodeEncode } from './charcode';
 import { htmlEncode } from './html-entities';
 import { morseEncode } from './morse';
+import { natoEncode } from './nato';
 import { unicodeEscape } from './unicode-escape';
 import { urlEncode } from './url';
 
@@ -167,6 +168,28 @@ describe('auto-decode: Bubble Babble', () => {
   });
 });
 
+describe('auto-decode: NATO alphabet', () => {
+  it('a spelled message is read, also inside another layer', () => {
+    const spelled = natoEncode('secret meeting at noon').text;
+    const r = solve(spelled);
+    const c = r.ranked.find((x) => recipeName(x) === 'nato');
+    expect(c && utf8Decode(c.bytes)).toBe('SECRET MEETING AT NOON');
+    const layered = solve(b64(spelled));
+    const l = layered.ranked.find((x) => recipeName(x) === 'base64 → nato');
+    expect(l && utf8Decode(l.bytes)).toBe('SECRET MEETING AT NOON');
+  });
+
+  it('digits alone, or a few words, are not a spelled message', () => {
+    for (const text of [
+      'One Two Three Four Five Six Seven',
+      'Alfa Bravo Charlie',
+      '1 2 3 4 5 6 7 8',
+    ]) {
+      expect(solve(text).ranked.some((c) => c.recipe.includes('nato'))).toBe(false);
+    }
+  });
+});
+
 describe('auto-decode: Punycode', () => {
   it('xn-- labels become Unicode, also inside another layer', () => {
     const text = 'https://xn--bcher-kva.example/xn--mnchen-3ya';
@@ -281,7 +304,7 @@ describe('auto-decode: restraint', () => {
 // Ordinary text that must never be "decoded" by the newer, stricter decoders (Base45, uuencode,
 // quoted-printable, Punycode, Base36, Base100, NATO, Braille, Bubble Babble): not as the best
 // result and not even as a candidate.
-const NEW_DECODERS = ['base45', 'base100', 'bubblebabble', 'base36', 'base26', 'punycode'];
+const NEW_DECODERS = ['base45', 'base100', 'bubblebabble', 'base36', 'base26', 'punycode', 'nato'];
 const ORDINARY = [
   'The quick brown fox jumps over the lazy dog.',
   'Hello, World!',
@@ -308,6 +331,9 @@ const ORDINARY = [
   'ab12cd34ef56',
   'xerox machine at the xenon lab',
   'xylophone',
+  'Delta Echo Foxtrot',
+  'Whiskey Tango Foxtrot is a phrase, not a code.',
+  'Echo Echo Echo Echo',
   'a string like xn--zzzz is not a valid label',
   'xn-- is the IDNA prefix; foo-xn--bar is not a label',
   'https://bücher.example/straße?q=ü',
