@@ -9,10 +9,7 @@ const files = execFileSync('git', ['ls-files'], { encoding: 'utf8' })
 
 const rules = [
   [/(^|\/)\.env(\.|$)/, 'environment file', 'path'],
-  [
-    /[A-Za-z0-9._%+-]+@(?!example\.|anthropic\.com)[A-Za-z0-9-]+\.(com|fr|net|org|io|me)\b/,
-    'e-mail address',
-  ],
+  [/[A-Za-z0-9._%+-]+@(?!example\.)[A-Za-z0-9-]+\.(com|fr|net|org|io|me)\b/, 'e-mail address'],
   [/(\/home\/[a-z][a-z0-9_-]*\/|\/Users\/[A-Za-z0-9_-]+\/|C:\\Users\\)/, 'absolute home path'],
   [/-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----[\s\S]{40,}/, 'private key'],
   [/\b(ghp|gho|github_pat|sk-ant|sk|xox[bap])[-_][A-Za-z0-9_-]{20,}/, 'API token'],

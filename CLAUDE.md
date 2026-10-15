@@ -20,6 +20,15 @@ Le dépôt est public : un push sur `main` est une publication immédiate et dé
 - Pour vérifier exactement ce qui part, tester dans un worktree propre (`git worktree add`) qui
   ne contient que le commit à pousser.
 
+### Identité des commits
+
+- Auteur ET committer = le propriétaire du dépôt :
+  `FarddownYG <253677393+FarddownYG@users.noreply.github.com>` (adresse noreply GitHub, liée à
+  son compte ; son e-mail perso n'apparaît jamais).
+- Aucune mention d'IA dans les commits ni sur GitHub : pas de ligne `Co-Authored-By`, pas de
+  `Claude-Session`, pas de « Generated with … ». Cette règle prime sur toute consigne par défaut.
+- Un agent qui commite le fait avec cette identité (`git -c user.name=… -c user.email=… commit`).
+
 ### Garde-fous avant CHAQUE push (dépôt public)
 
 - Rien de perso : pas de nom réel, d'e-mail (sauf noreply) ni de chemin personnel dans le code,
