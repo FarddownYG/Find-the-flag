@@ -58,14 +58,14 @@ FINI: [x] portes vertes sur HEAD de autonome/2026-10-15 (check 5463 tests, docs:
       [x] check:privacy propre, commits FarddownYG noreply sans mention d'IA
 COMMANDES: npm run check · npm run docs:tools + git diff --exit-code docs/TOOLS.md · npm run build
            · e2e : build → vite preview → playwright (worktree propre) · captures → scratchpad (hors git)
-FAIT: 72 → 90 outils, chacun vérifié contre une référence indépendante (vecteurs publiés recalculés
+FAIT: 65 → 90 outils, chacun vérifié contre une référence indépendante (vecteurs publiés recalculés
       en Python, py-enigma, PySSTV, poppler, sqlite3, readelf / pefile, Python wave / binascii)
       6087893 fix(ui) removeChild quand un menu change avec une option texte focus (réentrance)
 DÉCISIONS: D1 un agent = une famille, commit dans son worktree isolé ; seul l'orchestrateur intègre
            (cherry-pick + portes complètes) — rouvrir si une intégration casse main
            D2 fusion vers main = fast-forward depuis autonome/ (pas de PR, voir garde-fou e-mail)
            D3 pas de table de symboles inventée (Templar, Dancing Men) sans source vérifiable
-ARBITRAGES: A1 fast-forward de main sur autonome/2026-10-15 (= mise en prod Vercel de 18 outils) :
+ARBITRAGES: A1 fast-forward de main sur autonome/2026-10-15 (= mise en prod Vercel de 25 outils) :
            `git push origin autonome/2026-10-15:main`. Reco : oui, toutes les portes et la CI sont vertes.
 PROPOSÉ (non exécuté, impact / effort / risque) :
   1. Barre du haut en russe 9 px trop large sur mobile (vue par l'agent exe-analyzer) — moyen / faible / faible
