@@ -1,0 +1,17 @@
+From: Mallory <mallory@example.org>
+To: Eve <eve@example.org>
+Subject: the picture you asked for
+Date: Tue, 08 Oct 2024 18:30:00 +0000
+
+Here is the file, uuencoded as in the old days of Usenet. Save everything
+from the "begin" line to the "end" line and run uudecode on it.
+
+begin 644 demo.png
+MB5!.1PT*&@H````-24A$4@```!`````0"`(```"0D6@V````*$E$051XVF.0
+M"UA%$F*`4/^)`-300+*3!J$&7!ZEGH;A$$JTU$`\`@#_3(F\-Z3+S`````!)
+'14Y$KD)@@@``
+`
+end
+
+-- 
+sent from a made-up mailer

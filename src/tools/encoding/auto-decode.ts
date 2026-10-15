@@ -40,6 +40,7 @@ import {
   splitMessage,
 } from './quoted-printable';
 import { hasUnicodeEscape, unicodeUnescapeBytes } from './unicode-escape';
+import { uuDecodeStrict } from './uuencode';
 import { urlDecodeOnce } from './url';
 
 const T = toolT('auto-decode');
@@ -323,6 +324,15 @@ const DECODERS: Step[] = [
     if (!/xn--/i.test(t)) return null;
     const r = decodeAceLabels(t, true);
     return r.rows.some((x) => /\P{ASCII}/u.test(x.to)) ? utf8Encode(r.text) : null;
+  }),
+  onText('uudecode', (t) => {
+    // "begin 644 name" ... "end" is proof enough; bare lines must all fit and decode to data
+    const out = uuDecodeStrict(t, 'uu');
+    return out && (/^begin/m.test(t) || plausible(out)) ? out : null;
+  }),
+  onText('xxdecode', (t) => {
+    const out = uuDecodeStrict(t, 'xx');
+    return out && (/^begin/m.test(t) || plausible(out)) ? out : null;
   }),
   onText('mime message', (t) => {
     // Headers, a blank line, then a quoted-printable body: header words and body together

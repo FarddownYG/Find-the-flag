@@ -19,6 +19,8 @@
     "Bubble Babble",
     "Punycode",
     "quoted-printable",
+    "uuencode",
+    "xxencode",
     "MIME",
     "NATO",
     "ICAO",

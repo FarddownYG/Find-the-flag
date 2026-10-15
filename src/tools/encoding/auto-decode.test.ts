@@ -22,6 +22,7 @@ import { morseEncode } from './morse';
 import { natoEncode } from './nato';
 import { qpEncode, encodeWords } from './quoted-printable';
 import { unicodeEscape } from './unicode-escape';
+import { uuEncode } from './uuencode';
 import { urlEncode } from './url';
 
 const FLAG = 'flag{auto_decode_layers}';
@@ -167,6 +168,41 @@ describe('auto-decode: Bubble Babble', () => {
         c.recipe.includes('bubblebabble'),
       ),
     ).toBe(false);
+  });
+});
+
+describe('auto-decode: uuencode and xxencode', () => {
+  const png = Uint8Array.from([
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 1,
+    0, 0, 0, 1, 8, 6, 0, 0, 0, 0x1f, 0x15, 0xc4, 0x89,
+  ]);
+
+  it('a framed file: a flag, and a PNG that Auto-decode recognises as a file', () => {
+    const r = solve(uuEncode(bytes(FLAG), { name: 'flag.txt' }));
+    expect(recipeName(r.best)).toBe('uudecode');
+    expect(utf8Decode(r.best.bytes)).toBe(FLAG);
+    const p = solve(uuEncode(png, { name: 'a.png' }));
+    expect(recipeName(p.best)).toBe('uudecode');
+    expect(toHex(p.best.bytes)).toBe(toHex(png));
+  });
+
+  it('xxencode, bare lines and layers around it', () => {
+    const xx = solve(uuEncode(bytes(FLAG), { format: 'xx', name: 'f' }));
+    expect(recipeName(xx.best)).toBe('xxdecode');
+    expect(utf8Decode(xx.best.bytes)).toBe(FLAG);
+    const bare = solve(uuEncode(bytes(FLAG), { header: false }));
+    expect(recipeName(bare.best)).toBe('uudecode');
+    const layered = solve(b64(uuEncode(gzipSync(bytes(FLAG)), { name: 'f.gz' })));
+    expect(recipeName(layered.best)).toBe('base64 → uudecode → gzip');
+    expect(utf8Decode(layered.best.bytes)).toBe(FLAG);
+  });
+
+  it('a short bare line, or a lone token, is not uuencode', () => {
+    for (const text of ['#0V%T', '#HASHTAG', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789']) {
+      expect(solve(text).ranked.some((c) => c.recipe.some((n) => /^(uu|xx)decode/.test(n)))).toBe(
+        false,
+      );
+    }
   });
 });
 
@@ -394,6 +430,8 @@ const NEW_DECODERS = [
   'quoted-printable',
   'mime words',
   'mime message',
+  'uudecode',
+  'xxdecode',
 ];
 const ORDINARY = [
   'The quick brown fox jumps over the lazy dog.',
@@ -439,6 +477,8 @@ const ORDINARY = [
   'A1B2C3D4E5F6',
   'ZmxhZ3t3b3Jkc30=',
   'I love you 👍👏💯 so much!',
+  'begin the meeting at ten, end at noon',
+  "M5&AE('%U:6-K(&)R;W=N(&9O>\"!J=6UP<R!O=F5R('1H92!L87IY(&1O9RX@ is not uuencode with this tail",
   'id=41&x=42&y=43&token=AB12',
   'x = 3D and y = 4 =',
   'key=ABCDEF&token=1A2B3C',
