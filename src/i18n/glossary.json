@@ -118,7 +118,16 @@
     "Robot",
     "Martin",
     "Scottie",
-    "PD"
+    "PD",
+    "SQLite",
+    "SQL",
+    "BLOB",
+    "WAL",
+    "PRAGMA",
+    "UTC",
+    "URL",
+    "Chrome",
+    "Firefox"
   ],
   "exempt": {
     "tool.file-type.description": ["flag"],

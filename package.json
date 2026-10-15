@@ -34,6 +34,7 @@
     "jpeg-js": "^0.4.4",
     "jsqr": "^1.4.0",
     "leaflet": "^1.9.4",
+    "sql.js": "1.14.2",
     "zxing-wasm": "3.1.4"
   },
   "devDependencies": {
@@ -41,6 +42,7 @@
     "@playwright/test": "1.56",
     "@types/leaflet": "^1.9.22",
     "@types/node": "^22.20.5",
+    "@types/sql.js": "1.4.11",
     "eslint": "^10.12.0",
     "globals": "^17.13.0",
     "prettier": "^3.9.10",
