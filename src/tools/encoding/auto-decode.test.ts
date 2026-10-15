@@ -7,6 +7,7 @@ import { toBase64, toHex, utf8Decode, utf8Encode } from '../../lib/bytes';
 import { inflateCapped } from './_inflate';
 import autoDecodeTool, { autoDecode, recipeName } from './auto-decode';
 import { base32Encode } from './base32';
+import { base45Encode } from './base45';
 import { base58Encode } from './base58';
 import { base62Encode } from './base62';
 import { base85Encode } from './base85';
@@ -36,6 +37,7 @@ describe('auto-decode: one layer', () => {
   const cases: [string, string, string, string?][] = [
     ['base64', b64(FLAG), 'base64'],
     ['base32', base32Encode(bytes(FLAG)), 'base32'],
+    ['base45', base45Encode(bytes(FLAG)), 'base45'],
     ['base58', base58Encode(bytes(FLAG)), 'base58'],
     ['base62', base62Encode(bytes(FLAG)), 'base62'],
     ['ascii85 (Adobe frame)', base85Encode(bytes(FLAG), 'ascii85', true), 'ascii85'],
@@ -123,6 +125,26 @@ describe('auto-decode: several layers', () => {
   });
 });
 
+describe('auto-decode: Base45 and the EU certificate', () => {
+  it('HC1: prefix, then Base45, then zlib', () => {
+    const r = solve(`HC1:${base45Encode(zlibSync(bytes(FLAG)))}`);
+    expect(recipeName(r.best)).toBe('base45 → zlib');
+    expect(utf8Decode(r.best.bytes)).toBe(FLAG);
+  });
+
+  it('Base45 whose payload ends in a space keeps it (spaces are data)', () => {
+    const r = solve(base45Encode(bytes('flag{ends_with_space} ')));
+    expect(utf8Decode(r.best.bytes)).toBe('flag{ends_with_space} ');
+  });
+
+  it('upper-case words and sentences are not Base45', () => {
+    for (const text of ['HELLO WORLD THIS IS A TEST', 'THE FLAG IS HIDDEN', 'MEETING AT NOON']) {
+      const r = solve(text);
+      expect(r.ranked.some((c) => c.recipe.includes('base45'))).toBe(false);
+    }
+  });
+});
+
 describe('auto-decode: restraint', () => {
   it('leaves plain text and plain flags alone', () => {
     for (const text of ['hello world this is just plain text with nothing to decode', FLAG]) {
@@ -207,6 +229,53 @@ describe('auto-decode: restraint', () => {
       ),
     ).toBeNull();
     expect(inflateCapped(new Uint8Array(), 'raw')).toBeNull();
+  });
+});
+
+// Ordinary text that must never be "decoded" by the newer, stricter decoders (Base45, uuencode,
+// quoted-printable, Punycode, Base36, Base100, NATO, Braille, Bubble Babble): not as the best
+// result and not even as a candidate.
+const NEW_DECODERS = ['base45'];
+const ORDINARY = [
+  'The quick brown fox jumps over the lazy dog.',
+  'Hello, World!',
+  'HELLO WORLD THIS IS A TEST MESSAGE',
+  'THE MEETING IS AT 10:30 IN ROOM B-204',
+  'Meeting at 10:30 in room B-204 on 2024-03-15; bring $50.',
+  'https://example.com/path/to/page.html?query=abc&x=1#frag',
+  'https://example.com/search?id=41&x=42&y=43',
+  'user.name@example.com',
+  'C:\\Users\\Public\\Documents\\report.docx',
+  '/usr/local/bin/python3.11 --version',
+  'SELECT * FROM users WHERE id = 42 AND name = "bob";',
+  'const total = items.map((x) => x.price * 1.2).reduce((a, b) => a + b, 0);',
+  '{"name":"flag","value":[1,2,3],"ok":true}',
+  'Mike and Victor went to the Hotel Lima in India with Oscar and Charlie.',
+  'one two three four five six seven eight',
+  'Alpha release 1.2.3 of the Delta project is ready, said Echo.',
+  'password123 letmein qwerty 123456 iloveyou',
+  'internationalization and localization of the user interface',
+  'The 2024 budget: $1,250.00 (approx.) + 15% tax = $1,437.50.',
+  '- first item\n- second item\n- third item\n',
+  'Dear Sir,\n\nI am writing to confirm our appointment.\n\nBest regards,\nAlice\n',
+  'commit message: fix handling of empty input && push to origin',
+  'ab12cd34ef56',
+  '3.14159265358979323846264338327950288419716939937510',
+  'lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor',
+  'A1B2C3D4E5F6',
+  'ZmxhZ3t3b3Jkc30=',
+  'I love you 👍👏💯 so much!',
+  'Voilà : un été très chaud à Paris, où l’on mange des crêpes.',
+  'Привет, мир! Это обычный текст.',
+  '你好，世界！这是普通文本。',
+];
+
+describe('auto-decode: ordinary text is left alone by the newer decoders', () => {
+  it.each(ORDINARY)('%s', (text) => {
+    const r = solve(text);
+    const used = r.ranked.flatMap((c) => c.recipe).filter((n) => NEW_DECODERS.includes(n));
+    expect(used).toEqual([]);
+    expect(r.best.recipe.some((n) => NEW_DECODERS.includes(n))).toBe(false);
   });
 });
 

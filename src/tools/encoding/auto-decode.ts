@@ -15,6 +15,7 @@ import { chiSquared, plaintextScore } from '../../lib/english';
 import { identify } from '../../lib/signatures';
 import { inflateCapped, isGzip, isZlib } from './_inflate';
 import { base32Decode } from './base32';
+import { base45DecodeText } from './base45';
 import { base58Decode } from './base58';
 import { base62Decode } from './base62';
 import { base85Decode } from './base85';
@@ -111,6 +112,8 @@ interface Ctx {
   bytes: Uint8Array;
   /** Trimmed text when the candidate is text-like, otherwise ''. */
   t: string;
+  /** The text as it is (spaces and line breaks kept) when the candidate is text-like, else ''. */
+  raw: string;
   textLike: boolean;
 }
 
@@ -128,9 +131,30 @@ const onText = (name: string, fn: (t: string) => Uint8Array | null): Step => ({
 
 const stripNl = (t: string) => t.replace(/[\r\n]/g, '');
 
+/**
+ * Decoders that answer a yes/no question about their input (Base45, Base36...) accept a payload
+ * only when it looks like something: mostly text, or a compressed stream, or a known file.
+ */
+const plausible = (b: Uint8Array): boolean =>
+  printableRatio(b) >= 0.9 || isGzip(b) || isZlib(b) || strongSignature(b) !== null;
+
+/** Try each text variant in turn; a ToolError means "not this encoding" for that variant. */
+function firstDecoded(variants: string[], fn: (s: string) => Uint8Array | null): Uint8Array | null {
+  for (const s of variants) {
+    try {
+      const out = fn(s);
+      if (out) return out;
+    } catch (e) {
+      if (!(e instanceof ToolError)) throw e;
+    }
+  }
+  return null;
+}
+
 const RE_B64 = /^[A-Za-z0-9+/_-]+={0,2}$/;
 const RE_B32_UP = /^[A-Z2-7]+={0,6}$/;
 const RE_B32_LOW = /^[a-z2-7]+={0,6}$/;
+const RE_B45 = /^[0-9A-Z $%*+\-./:]{6,}$/;
 const RE_B58 = /^[1-9A-HJ-NP-Za-km-z]{10,20000}$/;
 const RE_B62 = /^[0-9A-Za-z]{10,20000}$/;
 const RE_A85 = /^[!-u]{10,}$/;
@@ -188,6 +212,18 @@ const DECODERS: Step[] = [
     if (n < 8 || [1, 3, 6].includes(n % 8)) return null;
     return base32Decode(s);
   }),
+  {
+    // The alphabet has a space, so upper-case words fit it: only keep payloads that look like data.
+    name: 'base45',
+    run: (c) => {
+      const s = stripNl(c.raw);
+      if (!RE_B45.test(s) || /^[A-Z ]+$/.test(s)) return null;
+      return firstDecoded(s === s.trim() ? [s] : [s, s.trim()], (v) => {
+        const { bytes } = base45DecodeText(v);
+        return plausible(bytes) ? bytes : null;
+      });
+    },
+  },
   onText('base58', (t) => (RE_B58.test(t) ? base58Decode(t) : null)),
   onText('base62', (t) => (RE_B62.test(t) ? base62Decode(t, 'digitsUpper') : null)),
   onText('base62 (0-9a-zA-Z)', (t) => (RE_B62.test(t) ? base62Decode(t, 'digitsLower') : null)),
@@ -386,6 +422,7 @@ export function autoDecode(bytes: Uint8Array, opts: AutoDecodeOptions = {}): Aut
       const ctx: Ctx = {
         bytes: node.bytes,
         t: node.textLike && node.text ? node.text.trim() : '',
+        raw: node.textLike && node.text ? node.text : '',
         textLike: node.textLike,
       };
       const accept = (step: Step, requireGain: boolean) => {
