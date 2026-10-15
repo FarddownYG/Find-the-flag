@@ -22,6 +22,7 @@ import { base62Decode } from './base62';
 import { base85Decode } from './base85';
 import { base91Decode } from './base91';
 import { binaryDecode } from './binary';
+import { BUBBLEBABBLE_SHAPE, bubbleBabbleDecode } from './bubblebabble';
 import { charcodeDecodeBytes } from './charcode';
 import { hexDecode } from './hex';
 import { htmlDecodeBytes } from './html-entities';
@@ -227,6 +228,12 @@ const DECODERS: Step[] = [
     },
   },
   onText('base58', (t) => (RE_B58.test(t) ? base58Decode(t) : null)),
+  onText('bubblebabble', (t) => {
+    // The exact shape plus a checksum that runs through the whole string: nothing else passes.
+    const s = t.replace(/\s+/g, '');
+    if (s.length < 11 || !BUBBLEBABBLE_SHAPE.test(s)) return null;
+    return bubbleBabbleDecode(s).bytes;
+  }),
   onText('base100', (t) => {
     // Only the base100 emoji; a short or repetitive run of emoji is just a message, not data.
     if (!RE_B100.test(t)) return null;

@@ -13,6 +13,7 @@ import { base58Encode } from './base58';
 import { base62Encode } from './base62';
 import { base85Encode } from './base85';
 import { base91Encode } from './base91';
+import { bubbleBabbleEncode } from './bubblebabble';
 import { charcodeEncode } from './charcode';
 import { htmlEncode } from './html-entities';
 import { morseEncode } from './morse';
@@ -40,6 +41,7 @@ describe('auto-decode: one layer', () => {
     ['base32', base32Encode(bytes(FLAG)), 'base32'],
     ['base45', base45Encode(bytes(FLAG)), 'base45'],
     ['base100 (emoji)', base100Encode(bytes(FLAG)), 'base100'],
+    ['Bubble Babble', bubbleBabbleEncode(bytes(FLAG)), 'bubblebabble'],
     ['base58', base58Encode(bytes(FLAG)), 'base58'],
     ['base62', base62Encode(bytes(FLAG)), 'base62'],
     ['ascii85 (Adobe frame)', base85Encode(bytes(FLAG), 'ascii85', true), 'ascii85'],
@@ -147,6 +149,21 @@ describe('auto-decode: Base45 and the EU certificate', () => {
   });
 });
 
+describe('auto-decode: Bubble Babble', () => {
+  it('a damaged string (checksum) is not decoded; OpenSSH-style fingerprints are', () => {
+    expect(
+      solve('xesef-disof-gytuf-katof-movif-baxux').ranked.some((c) =>
+        c.recipe.includes('bubblebabble'),
+      ),
+    ).toBe(true);
+    expect(
+      solve('xesef-disof-gytuf-katof-movif-baxax').ranked.some((c) =>
+        c.recipe.includes('bubblebabble'),
+      ),
+    ).toBe(false);
+  });
+});
+
 describe('auto-decode: emoji layers', () => {
   it('base100 around base64 around hex', () => {
     const r = solve(base100Encode(bytes(b64(toHex(bytes(FLAG))))));
@@ -245,7 +262,7 @@ describe('auto-decode: restraint', () => {
 // Ordinary text that must never be "decoded" by the newer, stricter decoders (Base45, uuencode,
 // quoted-printable, Punycode, Base36, Base100, NATO, Braille, Bubble Babble): not as the best
 // result and not even as a candidate.
-const NEW_DECODERS = ['base45', 'base100'];
+const NEW_DECODERS = ['base45', 'base100', 'bubblebabble'];
 const ORDINARY = [
   'The quick brown fox jumps over the lazy dog.',
   'Hello, World!',
@@ -270,6 +287,9 @@ const ORDINARY = [
   'Dear Sir,\n\nI am writing to confirm our appointment.\n\nBest regards,\nAlice\n',
   'commit message: fix handling of empty input && push to origin',
   'ab12cd34ef56',
+  'xerox machine at the xenon lab',
+  'xylophone',
+  'xesef-disof',
   '3.14159265358979323846264338327950288419716939937510',
   'lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor',
   'A1B2C3D4E5F6',
