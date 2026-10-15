@@ -6,6 +6,7 @@ import { resultToText } from '../../core/result-text';
 import { toBase64, toHex, utf8Decode, utf8Encode } from '../../lib/bytes';
 import { inflateCapped } from './_inflate';
 import autoDecodeTool, { autoDecode, recipeName } from './auto-decode';
+import { base100Encode } from './base100';
 import { base32Encode } from './base32';
 import { base45Encode } from './base45';
 import { base58Encode } from './base58';
@@ -38,6 +39,7 @@ describe('auto-decode: one layer', () => {
     ['base64', b64(FLAG), 'base64'],
     ['base32', base32Encode(bytes(FLAG)), 'base32'],
     ['base45', base45Encode(bytes(FLAG)), 'base45'],
+    ['base100 (emoji)', base100Encode(bytes(FLAG)), 'base100'],
     ['base58', base58Encode(bytes(FLAG)), 'base58'],
     ['base62', base62Encode(bytes(FLAG)), 'base62'],
     ['ascii85 (Adobe frame)', base85Encode(bytes(FLAG), 'ascii85', true), 'ascii85'],
@@ -145,6 +147,14 @@ describe('auto-decode: Base45 and the EU certificate', () => {
   });
 });
 
+describe('auto-decode: emoji layers', () => {
+  it('base100 around base64 around hex', () => {
+    const r = solve(base100Encode(bytes(b64(toHex(bytes(FLAG))))));
+    expect(recipeName(r.best)).toBe('base100 → base64 → hex');
+    expect(utf8Decode(r.best.bytes)).toBe(FLAG);
+  });
+});
+
 describe('auto-decode: restraint', () => {
   it('leaves plain text and plain flags alone', () => {
     for (const text of ['hello world this is just plain text with nothing to decode', FLAG]) {
@@ -235,7 +245,7 @@ describe('auto-decode: restraint', () => {
 // Ordinary text that must never be "decoded" by the newer, stricter decoders (Base45, uuencode,
 // quoted-printable, Punycode, Base36, Base100, NATO, Braille, Bubble Babble): not as the best
 // result and not even as a candidate.
-const NEW_DECODERS = ['base45'];
+const NEW_DECODERS = ['base45', 'base100'];
 const ORDINARY = [
   'The quick brown fox jumps over the lazy dog.',
   'Hello, World!',
@@ -265,6 +275,9 @@ const ORDINARY = [
   'A1B2C3D4E5F6',
   'ZmxhZ3t3b3Jkc30=',
   'I love you 👍👏💯 so much!',
+  '👍👍👍👍👍👍👍',
+  '👍🐶👍🐶👍🐶👍🐶',
+  '👍👏💯',
   'Voilà : un été très chaud à Paris, où l’on mange des crêpes.',
   'Привет, мир! Это обычный текст.',
   '你好，世界！这是普通文本。',

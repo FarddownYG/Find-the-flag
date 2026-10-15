@@ -14,6 +14,7 @@ import {
 import { chiSquared, plaintextScore } from '../../lib/english';
 import { identify } from '../../lib/signatures';
 import { inflateCapped, isGzip, isZlib } from './_inflate';
+import { base100Decode } from './base100';
 import { base32Decode } from './base32';
 import { base45DecodeText } from './base45';
 import { base58Decode } from './base58';
@@ -155,6 +156,7 @@ const RE_B64 = /^[A-Za-z0-9+/_-]+={0,2}$/;
 const RE_B32_UP = /^[A-Z2-7]+={0,6}$/;
 const RE_B32_LOW = /^[a-z2-7]+={0,6}$/;
 const RE_B45 = /^[0-9A-Z $%*+\-./:]{6,}$/;
+const RE_B100 = /^(?:[\u{1F3F7}-\u{1F4F6}]|\uFE0F|\s)+$/u;
 const RE_B58 = /^[1-9A-HJ-NP-Za-km-z]{10,20000}$/;
 const RE_B62 = /^[0-9A-Za-z]{10,20000}$/;
 const RE_A85 = /^[!-u]{10,}$/;
@@ -225,6 +227,12 @@ const DECODERS: Step[] = [
     },
   },
   onText('base58', (t) => (RE_B58.test(t) ? base58Decode(t) : null)),
+  onText('base100', (t) => {
+    // Only the base100 emoji; a short or repetitive run of emoji is just a message, not data.
+    if (!RE_B100.test(t)) return null;
+    const { bytes } = base100Decode(t);
+    return bytes.length >= 5 && new Set(bytes).size >= 3 && plausible(bytes) ? bytes : null;
+  }),
   onText('base62', (t) => (RE_B62.test(t) ? base62Decode(t, 'digitsUpper') : null)),
   onText('base62 (0-9a-zA-Z)', (t) => (RE_B62.test(t) ? base62Decode(t, 'digitsLower') : null)),
   onText('ascii85', (t) => {

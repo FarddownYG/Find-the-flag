@@ -13,6 +13,7 @@
     "base64",
     "base85",
     "base91",
+    "base100",
     "hex",
     "XOR",
     "ROT13",
