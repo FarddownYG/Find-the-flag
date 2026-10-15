@@ -48,7 +48,7 @@ public : un push sur `main` est une publication immédiate et définitive.
 ## AGENCE (mode autonome — état du run)
 
 ```
-ÉTAT: RUNNING | cycle 6/14 | sans-gain 0/2 | start 2026-10-15T10:30Z | budget 12 familles d'outils, 4 vagues
+ÉTAT: RUNNING | cycle 7/14 | sans-gain 0/2 | start 2026-10-15T10:30Z | budget 12 familles d'outils, 4 vagues
 FINI: [ ] portes vertes sur HEAD de autonome/2026-10-15 (check, docs:tools sans diff, build, e2e complet)
       [x] vague 1 intégrée : playfair, bifid, hill, adfgvx, columnar, nihilist, enigma (vecteurs publiés verts)
       [x] vague 2 : codes-barres 1D/2D, pack d'encodages, alphabets de symboles
@@ -70,6 +70,8 @@ FAIT: 072a021 base de départ — check 3730 tests verts, e2e 355 passed, CI ver
       vérifiable) — check 4198 verts, e2e 479 passed ; grille Pigpen relue sur capture
       9 encodages (base45/100/36, bubblebabble, punycode, nato, braille, quoted-printable,
       uuencode) branchés sur auto-decode — check 4615 verts, e2e 558/559 (triage Braille corrigé)
+      pdf-analyzer — check 4767 verts, e2e 576 passed ; échantillons relus par poppler pdftotext
+      (révision 1, RC4, mot de passe, xref cassée : flags identiques)
 EN COURS: vague 1 (polygraphiques, transpositions) + vague 2 (codes-barres) en agents
 SUIVANT: vague 2 dès qu'un slot se libère
 DÉCISIONS: D2 fusion vers main = fast-forward depuis autonome/ (pas de PR, voir garde-fou e-mail)
