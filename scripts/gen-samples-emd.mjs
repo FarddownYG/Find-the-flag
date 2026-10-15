@@ -1,12 +1,14 @@
 // Deterministic sample files for the EMD (Exploiting Modification Direction) tool.
 // Run: node scripts/gen-samples-emd.mjs   (run it again: the bytes are identical)
 //
-//   emd-cover.png  256x128 colour gradient with seeded noise (3 low bits). Nothing is hidden in it.
-//   emd-hello.png  the same cover with "HELLO_EMD" embedded: n = 2 (base 5), red channel,
-//                  horizontal order, offset 0, 4 digits per byte, most significant digit first.
+//   emd-cover.png  256x128 colour gradient with seeded noise, every value kept within 5..250 so
+//                  that nothing ever needs the 0/255 saturation fallback. Nothing is hidden in it.
+//   emd-hello.png  the grayscale (luma) version of the cover with "HELLO_EMD_123" hidden in it:
+//                  n = 2 (base 5), k = 3 digits per character, most significant digit first,
+//                  weights 1..n, row by row, offset 0. An 8-bit grayscale PNG.
 //
-// The stego image is made with the tool's own embed code (loaded through Vite), so the sample
-// and the tool cannot drift apart. A made-up message, no real challenge file.
+// The stego image is made with the tool's own core (loaded through Vite), so the sample and the
+// tool cannot drift apart. A made-up message, no real challenge file.
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { createServer } from 'vite';
 
@@ -15,14 +17,14 @@ const vite = await createServer({
   appType: 'custom',
   logLevel: 'silent',
 });
-const { embedMessage, stegoPng } = await vite.ssrLoadModule('/src/tools/stego/_emd-run.ts');
-const { readDigits } = await vite.ssrLoadModule('/src/tools/stego/_emd-core.ts');
-const { digitsToBytes } = await vite.ssrLoadModule('/src/tools/stego/_emd-text.ts');
+const core = await vite.ssrLoadModule('/src/tools/stego/_emd.ts');
+const image = await vite.ssrLoadModule('/src/tools/stego/_emd-image.ts');
 await vite.close();
 
 const OUT = new URL('../public/samples/', import.meta.url);
 mkdirSync(OUT, { recursive: true });
 const write = (name, bytes) => {
+  if (bytes.length >= 200 * 1024) throw new Error(`${name} is ${bytes.length} bytes`);
   writeFileSync(new URL(name, OUT), bytes);
   console.log(`${name}: ${bytes.length} bytes`);
 };
@@ -45,24 +47,33 @@ const noise = () => {
 for (let y = 0; y < H; y++) {
   for (let x = 0; x < W; x++) {
     const k = (y * W + x) * 4;
-    // Stay away from 0 and 255 so that the sample never needs the saturation fallback.
-    cover.data[k] = 24 + Math.floor((x * 200) / (W - 1)) + noise();
-    cover.data[k + 1] = 24 + Math.floor((y * 200) / (H - 1)) + noise();
-    cover.data[k + 2] = 24 + Math.floor(((x + y) * 200) / (W + H - 2)) + noise();
+    cover.data[k] = 8 + Math.floor((x * 232) / (W - 1)) + noise();
+    cover.data[k + 1] = 8 + Math.floor((y * 232) / (H - 1)) + noise();
+    cover.data[k + 2] = 8 + Math.floor(((x + y) * 232) / (W + H - 2)) + noise();
     cover.data[k + 3] = 255;
   }
 }
-write('emd-cover.png', stegoPng(cover));
+for (let i = 0; i < cover.data.length; i++) {
+  const v = cover.data[i];
+  if (i % 4 !== 3 && (v < 5 || v > 250)) throw new Error(`cover value ${v} out of 5..250`);
+}
+write('emd-cover.png', image.rgbaPng(cover));
 
-// ---------- stego: "HELLO_EMD" ----------
+// ---------- stego: "HELLO_EMD_123" in the luma of the cover ----------
 
-const params = { n: 2, channel: 'r', traversal: 'horizontal', offset: 0 };
-const conv = { grouping: 'fixed', order: 'msd' };
-const message = new TextEncoder().encode('HELLO_EMD');
-const { stego } = embedMessage(cover, params, conv, message);
-write('emd-hello.png', stegoPng(stego));
+const MESSAGE = 'HELLO_EMD_123';
+const params = { ...core.DEFAULTS, length: MESSAGE.length };
+const gray = image.rgbaToGray(cover, 'gray');
+const before = Uint8Array.from(gray.data);
+const overflow = core.encodeEmd(gray, MESSAGE, params);
+if (overflow !== 0) throw new Error(`${overflow} groups overflowed`);
+for (let i = 0; i < before.length; i++) {
+  if (Math.abs(gray.data[i] - before[i]) > 1) throw new Error('a pixel moved by more than 1');
+}
+const png = image.grayPng(gray);
+write('emd-hello.png', png);
 
-// Prove it before saving anything else: read it back with the extractor.
-const back = digitsToBytes(readDigits(stego, params, 36), 5, conv, message.length);
-if (new TextDecoder().decode(back) !== 'HELLO_EMD') throw new Error('round trip failed');
-console.log('round trip: HELLO_EMD');
+// Prove it before finishing: read the file back the way the tool reads an uploaded one.
+const back = core.decodeEmd(image.rgbaToGray(image.readBackPng(png), 'gray'), params);
+if (back.text !== MESSAGE) throw new Error(`round trip failed: ${back.text}`);
+console.log(`round trip: ${back.text}`);

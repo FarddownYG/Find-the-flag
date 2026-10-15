@@ -24,6 +24,7 @@
     "ICC",
     "GPS",
     "LSB",
+    "MSB",
     "MD5",
     "SHA-1",
     "SHA-256",
