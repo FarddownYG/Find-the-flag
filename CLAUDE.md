@@ -40,6 +40,10 @@ public : un push sur `main` est une publication immédiate et définitive.
   challenges restent dans `notes/` ou `local/` (ignorés par git). Exemples et tests utilisent
   des fichiers fabriqués par les scripts de `scripts/`.
 - Relire `git diff --cached --stat` et la liste des fichiers ajoutés avant le commit.
+- Pas de pull request ni de fusion par l'interface GitHub tant que l'e-mail du compte n'est pas
+  privé (Settings → Emails → « Keep my email addresses private ») : GitHub signe alors ses
+  commits de fusion avec l'e-mail perso (constaté sur refs/pull/1/merge, PR fermée). Une branche
+  rejoint `main` par fast-forward (`git push origin <branche>:main`), jamais par un commit GitHub.
 
 ## AGENCE (mode autonome — état du run)
 
@@ -64,7 +68,8 @@ FAIT: 072a021 base de départ — check 3730 tests verts, e2e 355 passed, CI ver
       check 4148 verts, e2e 461 passed, npm ci OK sur le lockfile
 EN COURS: vague 1 (polygraphiques, transpositions) + vague 2 (codes-barres) en agents
 SUIVANT: vague 2 dès qu'un slot se libère
-DÉCISIONS: D1 un agent = une famille, commit dans son worktree isolé ; seul l'orchestrateur intègre
+DÉCISIONS: D2 fusion vers main = fast-forward depuis autonome/ (pas de PR, voir garde-fou e-mail)
+           D1 un agent = une famille, commit dans son worktree isolé ; seul l'orchestrateur intègre
            (cherry-pick + portes complètes) — rouvrir si une intégration casse main
 ARBITRAGES: A1 fusion autonome/2026-10-15 → main (= mise en prod Vercel) : le skill interdit le push
            main en autonome, la règle « Workflow git » ci-dessus dit de pousser chaque outil fini.
