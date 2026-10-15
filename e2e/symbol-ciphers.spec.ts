@@ -328,12 +328,14 @@ test('semaphore can be drawn mirrored', async ({ page, baseURL }) => {
   await expect.poll(async () => (await download()) === normal).toBe(true);
 });
 
-test('Braille cells pasted on the home page are read by this tool', async ({ page }) => {
+test('Braille cells pasted on the home page are also offered to this tool', async ({ page }) => {
   await page.goto('./');
   await page.getByLabel('Paste data to identify').fill('⠋⠞⠋ ⠃⠗⠁⠊⠇⠇⠑ ⠼⠁⠃⠉');
-  const first = page.locator('.guess').first();
-  await expect(first).toContainText('Symbol ciphers');
-  await first.click();
+  // The Braille text tool comes first for pasted cells; this one (pictures) is offered too.
+  await expect(page.locator('.guess').first()).toContainText('Braille');
+  const guess = page.locator('.guess', { hasText: 'Symbol ciphers' });
+  await expect(guess).toHaveCount(1);
+  await guess.click();
   await expect(page.locator('.options select')).toHaveValue('braille');
   await expect(out(page).locator('.out-text').first()).toContainText('ftf braille 123');
 });
