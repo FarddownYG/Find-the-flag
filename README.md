@@ -101,7 +101,8 @@ public/samples small generated files used by the examples
 
 Tools are pure functions `(input, options) → output blocks`. The shell builds the form from
 the tool's declaration, runs it in a Web Worker (typing cancels the previous run), and
-renders the blocks. Tools never touch the DOM, so they also run in Node for the tests.
+renders the blocks. Big inputs never block the page: audio is decoded in the worker and kept
+there between runs, files read on demand reach it as a handle only. Tools never touch the DOM, so they also run in Node for the tests.
 
 ## Licence
 

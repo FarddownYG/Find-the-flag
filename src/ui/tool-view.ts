@@ -13,7 +13,13 @@ import {
 } from '../i18n/tool-text';
 import { selectFlags } from '../core/flags';
 import { resultToText } from '../core/result-text';
-import { exampleToRaw, prepareInput, resolveExampleOptions, type RawInput } from '../core/prepare';
+import {
+  audioFile,
+  exampleToRaw,
+  prepareInput,
+  resolveExampleOptions,
+  type RawInput,
+} from '../core/prepare';
 import { defaultOptions, getTool } from '../core/registry';
 import { CancelledError, Runner } from '../core/runner';
 import type { AnyTool, OptionSpec } from '../core/types';
@@ -46,7 +52,10 @@ interface DemoState {
 interface ToolState {
   text: string;
   pasteAs: PasteAs;
-  /** bytes for tools that need the whole file; blob (a handle, nothing read) for input 'file'. */
+  /**
+   * bytes for tools that need the whole file; blob (a handle, nothing read) for inputs 'file'
+   * and 'audio' (audio is read and decoded in the tool worker, never on this thread).
+   */
   file: { bytes?: Uint8Array; blob?: Blob; name: string; size: number } | null;
   values: Record<string, unknown>;
   demo: DemoState | null;
@@ -104,6 +113,11 @@ export function renderTool(
     demo: null,
   };
   memory.set(tool.id, state);
+  /**
+   * Inputs handed to the runner as a Blob handle (see ToolState.file). Declared before the
+   * pending input below, which applyRaw reads it for.
+   */
+  const byHandle = tool.input === 'file' || tool.input === 'audio';
   if (pending?.toolId === tool.id) {
     // New data from triage or "Send to…": whatever example was on screen is gone.
     endDemo(tool, state, true);
@@ -119,8 +133,12 @@ export function renderTool(
 
   function applyRaw(raw: RawInput) {
     state.file = null;
-    if (raw.file && (tool.input === 'file' || !raw.bytes)) {
+    if (raw.file && (byHandle || !raw.bytes)) {
       state.file = { blob: raw.file, name: raw.name ?? 'input.bin', size: raw.file.size };
+    } else if (raw.bytes && tool.input === 'audio') {
+      // One copy into a Blob now, instead of one to the worker on every run.
+      const blob = new Blob([raw.bytes as BlobPart]);
+      state.file = { blob, name: raw.name ?? 'input.bin', size: blob.size };
     } else if (raw.bytes && (tool.input !== 'text' || raw.bytes.length > FILE_TEXT_LIMIT)) {
       state.file = { bytes: raw.bytes, name: raw.name ?? 'input.bin', size: raw.bytes.length };
     } else if (raw.bytes) {
@@ -508,7 +526,8 @@ export function renderTool(
     leaveDemo(true);
     showAnalysing(f.name);
     // Tools reading on demand get the handle only: a 4 GB disk image is never loaded whole.
-    if (tool.input === 'file') applyRaw({ file: f, name: f.name });
+    // Audio too: the worker reads and decodes it, so a long recording never blocks this thread.
+    if (byHandle) applyRaw({ file: f, name: f.name });
     else {
       const bytes = new Uint8Array(await f.arrayBuffer());
       if (seq !== inputSeq) return; // a newer input replaced this one while it was read
@@ -690,6 +709,7 @@ export function renderTool(
                 (state.file = null),
                 (prepared = null),
                 (inputSeq += 1),
+                runner.release(),
                 renderInput(),
                 showEmpty()
               ),
@@ -753,7 +773,12 @@ export function renderTool(
     try {
       const key = raw.bytes ?? raw.file ?? raw.text;
       if (!prepared || prepared.key !== key) {
-        prepared = { key, value: await prepareInput(tool.input, raw) };
+        // Audio is decoded by the runner's worker (and kept there between runs), not here.
+        const value =
+          tool.input === 'audio'
+            ? audioFile(raw.file ?? new Blob([(raw.bytes ?? raw.text ?? '') as BlobPart]), raw.name)
+            : await prepareInput(tool.input, raw);
+        prepared = { key, value };
       }
       const t0 = performance.now();
       const result = await runner.run(tool.id, prepared.value, { ...state.values });

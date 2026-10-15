@@ -51,6 +51,11 @@ big (disk images, captures, dumps): only the Blob handle reaches the worker and 
 the slices it needs (`await input.read(offset, 65536)`), so a multi-gigabyte file never sits in
 memory. Scan in chunks with a small overlap, and cap what you render.
 
+`audio` inputs are decoded off the page's thread: WAV in the tool worker, everything else (MP3,
+OGG, FLAC, AAC...) by the browser's decoder, which also runs off the main thread. The decoded samples are kept in the worker and reused by every run of
+the same file, so changing an option sends only the options. Never modify `channels` in place:
+the next run gets the same arrays.
+
 ## 3. Options
 
 Import the builders from `core/define`. Values arrive typed in `run`.

@@ -1,9 +1,10 @@
-import { decodeAudioInBrowser, decodeWav } from './decode-audio';
+import { decodeAudioInBrowser, decodeBufferInBrowser, decodeWav } from './decode-audio';
 import { decodeImageExact, decodeImageInBrowser } from './decode-image';
 import { ToolError } from './errors';
 import { t } from '../i18n';
-import type { AnyTool, ExampleInput, InputKind, LazyFile } from './types';
+import type { AnyTool, AudioInput, ExampleInput, InputKind, LazyFile } from './types';
 import { fromHex, utf8Decode, utf8Encode } from '../lib/bytes';
+import { isRiffWave } from './wav';
 
 /** What the input panel holds before it is shaped for a tool. */
 export interface RawInput {
@@ -52,6 +53,54 @@ export async function prepareInput(kind: InputKind, raw: RawInput): Promise<unkn
   const audio = decodeWav(bytes) ?? (inBrowser ? await decodeAudioInBrowser(bytes) : null);
   if (!audio) throw new ToolError(t('core.input.audioFormat'));
   return { ...base, ...audio };
+}
+
+// ---------- audio decoded off the page's thread ----------
+
+/**
+ * An audio input not decoded yet: what the page hands the runner for an 'audio' tool. The tool
+ * worker reads the Blob and decodes it there (WAV: see `decodeAudioFile`); only what Web Audio
+ * alone can decode (MP3, OGG, FLAC, AAC...) is decoded by the page, whose `decodeAudioData`
+ * runs off the main thread too (see `decodeAudioFileInPage`).
+ */
+export interface AudioFile {
+  readonly __audioFile: true;
+  blob: Blob;
+  name?: string;
+}
+
+export const audioFile = (blob: Blob, name?: string): AudioFile => ({
+  __audioFile: true,
+  blob,
+  name,
+});
+
+export const isAudioFile = (v: unknown): v is AudioFile =>
+  typeof v === 'object' && v !== null && (v as { __audioFile?: unknown }).__audioFile === true;
+
+/**
+ * Decode an AudioFile where Web Audio does not exist (the tool worker, Node): WAV, decoded in
+ * JavaScript. Null when only the browser decoder can read it (not a WAV): the page must decode it.
+ */
+export async function decodeAudioFile(f: AudioFile): Promise<AudioInput | null> {
+  if (!f.blob.size) throw new ToolError(t('core.input.needAudio'));
+  const head = new Uint8Array(await f.blob.slice(0, 12).arrayBuffer());
+  if (!isRiffWave(head)) return null;
+  const bytes = new Uint8Array(await f.blob.arrayBuffer());
+  const audio = decodeWav(bytes);
+  return audio ? { bytes, name: f.name, ...audio } : null;
+}
+
+/**
+ * Decode an AudioFile with the browser decoder (page only). The Blob is read twice rather than
+ * copied: one buffer becomes `bytes`, the other is handed to (and detached by) the decoder, so
+ * nothing the size of the file is copied on the page's thread.
+ */
+export async function decodeAudioFileInPage(f: AudioFile): Promise<AudioInput> {
+  if (!f.blob.size) throw new ToolError(t('core.input.needAudio'));
+  const [kept, forDecoder] = await Promise.all([f.blob.arrayBuffer(), f.blob.arrayBuffer()]);
+  const bytes = new Uint8Array(kept);
+  return { bytes, name: f.name, ...(await decodeBufferInBrowser(bytes, forDecoder)) };
 }
 
 export async function exampleToRaw(
