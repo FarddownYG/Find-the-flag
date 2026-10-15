@@ -188,6 +188,7 @@ function analysePdf(bytes: Uint8Array): Output[] {
   for (const [i, p] of xmpPackets(bytes).entries()) {
     out.push({ type: 'text', label: T('label.xmpPacket', { n: i + 1 }), value: p });
   }
+  out.push({ type: 'note', level: 'info', text: T('note.pdfAnalyzer') });
   return out;
 }
 

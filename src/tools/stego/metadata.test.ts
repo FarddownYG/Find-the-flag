@@ -201,3 +201,15 @@ describe('triage', () => {
     expect(tool.detect!({ text: 'abc', bytes: utf8Encode('abc') })).toBeNull();
   });
 });
+
+describe('EXIF / metadata: PDF cross-link', () => {
+  it('points at the PDF analyzer after the document information', async () => {
+    const pdf = latin1Encode('%PDF-1.7\n1 0 obj << /Title (A title) >> endobj\n%%EOF\n');
+    const out = await run(pdf, 'a.pdf');
+    expect(kv(out, 'PDF document information').get('Title')).toBe('A title');
+    const last = out[out.length - 1];
+    expect(last?.type === 'note' && last.text).toBe(
+      'To see every object, earlier revision, script and embedded file, and the decoded streams, open the file in the PDF analyzer.',
+    );
+  });
+});

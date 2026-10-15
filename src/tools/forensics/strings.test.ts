@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { ToolError } from '../../core/errors';
-import { concatBytes, utf8Encode } from '../../lib/bytes';
+import { concatBytes, latin1Encode, utf8Encode } from '../../lib/bytes';
 import strings, { findStrings } from './strings';
 import { noise } from './_fixtures';
 
@@ -163,5 +163,19 @@ describe('strings: tool output', () => {
       score: 0.3,
     });
     expect(strings.detect?.({ text: 'hello', bytes: utf8Encode('hello') })).toBeNull();
+  });
+});
+
+describe('strings: PDF cross-link', () => {
+  it('says that the text of a PDF is in streams Strings cannot read', async () => {
+    const out = await run(
+      latin1Encode('%PDF-1.7\n1 0 obj << /Length 5 >> stream\nxxxxx\nendstream endobj\n'),
+    );
+    const notes = out.flatMap((o) => (o.type === 'note' ? [o.text] : []));
+    expect(notes[0]).toBe(
+      'This is a PDF: most of its text sits in compressed streams that Strings cannot read. The PDF analyzer decodes them.',
+    );
+    const plain = await run(latin1Encode('just some text, not a PDF at all'));
+    expect(plain.some((o) => o.type === 'note' && o.text.includes('PDF analyzer'))).toBe(false);
   });
 });

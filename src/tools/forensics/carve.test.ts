@@ -569,3 +569,17 @@ describe('carve: translations', () => {
     }
   });
 });
+
+describe('carve: PDF cross-link', () => {
+  const noteTexts = (out: Awaited<ReturnType<typeof run>>) =>
+    out.flatMap((o) => (o.type === 'note' ? [o.text] : []));
+
+  it('points at the PDF analyzer when a PDF is found, and only then', async () => {
+    const withPdf = await run(bury(buildPdf(2)).data);
+    expect(noteTexts(withPdf)).toContain(
+      'A PDF was found. Send it to the PDF analyzer to read its objects, revisions, hidden text and embedded files.',
+    );
+    const withoutPdf = await run(bury(buildPng()).data);
+    expect(noteTexts(withoutPdf).some((n) => n.includes('PDF analyzer'))).toBe(false);
+  });
+});

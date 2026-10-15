@@ -112,6 +112,7 @@ export default defineTool({
         rows: matches.map((m) => [signatureName(m), m.ext, m.magic.length]),
       });
     }
+    if (best?.id === 'pdf') out.push({ type: 'note', level: 'info', text: T('note.pdf') });
     // Something else glued after/inside? Point at the carving tool.
     const embedded = indexOfBytes(bytes, [0x50, 0x4b, 0x03, 0x04], 1);
     if (embedded > 0 && best?.id !== 'zip') {

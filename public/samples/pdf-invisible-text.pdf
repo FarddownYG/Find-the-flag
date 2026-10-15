@@ -1,0 +1,40 @@
+%PDF-1.7
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R  >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>
+endobj
+4 0 obj
+<<  /Length 414 >>
+stream
+BT /F1 16 Tf 0 g 20 170 Td (Public page: nothing to see) Tj ET
+BT /F1 12 Tf 3 Tr 20 140 Td (FTF{invisible_text}) Tj ET
+BT /F1 12 Tf 0 Tr 1 g 20 120 Td (FTF{white_text}) Tj ET
+BT /F1 0.8 Tf 0 g 20 100 Td (FTF{tiny_text}) Tj ET
+BT /F1 12 Tf 0 g 20 -400 Td (FTF{offpage_text}) Tj ET
+BT /F1 12 Tf 0 g 20 60 Td (FTF{covered_text}) Tj ET
+0 g 15 55 150 20 re f
+BT /F1 12 Tf 0 g 20 30 Td (The box above hides a line) Tj ET
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000015 00000 n 
+0000000065 00000 n 
+0000000122 00000 n 
+0000000248 00000 n 
+0000000714 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R /ID [<00112233445566778899aabbccddeeff> <00112233445566778899aabbccddeeff>] >>
+startxref
+784
+%%EOF

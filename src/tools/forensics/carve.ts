@@ -296,6 +296,9 @@ export default defineTool({
       });
     }
     if (files.length > 0) out.push({ type: 'files', label: T('label.carvedFiles'), files });
+    if (found.some((f) => f.sig.id === 'pdf') || first?.sig.id === 'pdf') {
+      out.push({ type: 'note', level: 'info', text: T('note.pdf') });
+    }
     if (found.length === 0 && files.length === 0) {
       out.push({
         type: 'note',

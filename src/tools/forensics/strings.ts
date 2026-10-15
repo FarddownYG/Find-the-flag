@@ -3,7 +3,7 @@ import { ToolError } from '../../core/errors';
 import { DEFAULT_FLAG_PATTERN } from '../../core/flags';
 import type { Output } from '../../core/types';
 import { toolT } from '../../i18n/tool-text';
-import { latin1Decode, printableRatio } from '../../lib/bytes';
+import { indexOfBytes, latin1Decode, printableRatio } from '../../lib/bytes';
 
 const T = toolT('strings');
 
@@ -128,6 +128,10 @@ function makeFilter(raw: string): ((s: string) => boolean) | null {
 const hexOffset = (n: number) => `0x${n.toString(16)}`;
 const shorten = (s: string, n = 400) => (s.length > n ? `${s.slice(0, n)}…` : s);
 
+/** %PDF- within the first kilobyte, as readers accept it. */
+const startsWithPdf = (b: Uint8Array): boolean =>
+  indexOfBytes(b.subarray(0, 1032), [0x25, 0x50, 0x44, 0x46, 0x2d]) >= 0;
+
 export default defineTool({
   id: 'strings',
   name: 'Strings',
@@ -201,6 +205,7 @@ export default defineTool({
     const shown = ordered.slice(0, MAX_RESULTS);
 
     const out: Output[] = [];
+    if (startsWithPdf(bytes)) out.push({ type: 'note', level: 'info', text: T('note.pdf') });
     if (shown.length === 0) {
       out.push({
         type: 'note',
