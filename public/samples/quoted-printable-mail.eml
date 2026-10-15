@@ -1,0 +1,17 @@
+From: Alice <alice@example.org>
+To: Bob <bob@example.org>
+Subject: =?UTF-8?B?UsOpc3Vtw6kgZHUgZHJhcGVhdSDinJM=?=
+Date: Mon, 07 Oct 2024 09:12:00 +0000
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+
+Salut Bob,
+
+Voil=C3=A0 le drapeau que tu cherchais : FTF{qp_in_an_email}=20
+Il se cache dans un message envoy=C3=A9 =C3=A0 la va-vite, avec des lignes =
+trop longues coup=C3=A9es par des "soft line breaks" (le signe =3D en fin d=
+e ligne).
+
+=C3=80 bient=C3=B4t,
+Alice

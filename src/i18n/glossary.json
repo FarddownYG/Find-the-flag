@@ -18,6 +18,8 @@
     "base100",
     "Bubble Babble",
     "Punycode",
+    "quoted-printable",
+    "MIME",
     "NATO",
     "ICAO",
     "IDN",

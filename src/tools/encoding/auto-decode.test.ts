@@ -20,6 +20,7 @@ import { charcodeEncode } from './charcode';
 import { htmlEncode } from './html-entities';
 import { morseEncode } from './morse';
 import { natoEncode } from './nato';
+import { qpEncode, encodeWords } from './quoted-printable';
 import { unicodeEscape } from './unicode-escape';
 import { urlEncode } from './url';
 
@@ -166,6 +167,54 @@ describe('auto-decode: Bubble Babble', () => {
         c.recipe.includes('bubblebabble'),
       ),
     ).toBe(false);
+  });
+});
+
+describe('auto-decode: quoted-printable and MIME words', () => {
+  const qpOf = (s: string) => qpEncode(bytes(s), { eol: '\n' });
+
+  it('a quoted-printable body is decoded, also inside other layers', () => {
+    const text =
+      'Café crème à 5€ : FTF{qp} = vrai, et une ligne assez longue pour être coupée en plusieurs morceaux.';
+    const r = solve(qpOf(text));
+    const c = r.ranked.find((x) => recipeName(x) === 'quoted-printable');
+    expect(c && utf8Decode(c.bytes)).toBe(text);
+    const layered = solve(b64(qpOf(text)));
+    const l = layered.ranked.find((x) => recipeName(x) === 'base64 → quoted-printable');
+    expect(l && utf8Decode(l.bytes)).toBe(text);
+  });
+
+  it('a fully escaped flag is decoded', () => {
+    const escaped = [...bytes(FLAG)]
+      .map((b) => `=${b.toString(16).toUpperCase().padStart(2, '0')}`)
+      .join('');
+    const r = solve(escaped);
+    expect(recipeName(r.best)).toBe('quoted-printable');
+    expect(utf8Decode(r.best.bytes)).toBe(FLAG);
+  });
+
+  it('MIME words: a subject, and under base64', () => {
+    const subject = `Subject: ${encodeWords('Voilà le drapeau ✓', 'B', 'UTF-8', (ch) => bytes(ch))}`;
+    const r = solve(subject);
+    const c = r.ranked.find((x) => recipeName(x) === 'mime words');
+    expect(c && utf8Decode(c.bytes)).toBe('Subject: Voilà le drapeau ✓');
+    const l = solve(b64(subject)).ranked.find((x) => recipeName(x) === 'base64 → mime words');
+    expect(l && utf8Decode(l.bytes)).toBe('Subject: Voilà le drapeau ✓');
+  });
+
+  it('a whole e-mail: header words and body in the declared charset', () => {
+    const mail = [
+      'From: a@example.org',
+      'Subject: =?UTF-8?B?UsOpc3Vtw6k=?=',
+      'Content-Type: text/plain; charset="iso-8859-1"',
+      'Content-Transfer-Encoding: quoted-printable',
+      '',
+      'Caf=E9 FTF{mail}',
+    ].join('\n');
+    const r = solve(mail);
+    const c = r.ranked.find((x) => recipeName(x) === 'mime message');
+    expect(c && utf8Decode(c.bytes)).toContain('Subject: Résumé');
+    expect(c && utf8Decode(c.bytes)).toContain('Café FTF{mail}');
   });
 });
 
@@ -342,6 +391,9 @@ const NEW_DECODERS = [
   'nato',
   'braille',
   'braille (8-dot bytes)',
+  'quoted-printable',
+  'mime words',
+  'mime message',
 ];
 const ORDINARY = [
   'The quick brown fox jumps over the lazy dog.',
@@ -387,6 +439,11 @@ const ORDINARY = [
   'A1B2C3D4E5F6',
   'ZmxhZ3t3b3Jkc30=',
   'I love you 👍👏💯 so much!',
+  'id=41&x=42&y=43&token=AB12',
+  'x = 3D and y = 4 =',
+  'key=ABCDEF&token=1A2B3C',
+  'Hello: this is a note\n\nSecond paragraph, no mail headers',
+  'See =?not an encoded word? at all',
   'Dots: 1-25-14 and 12-3-2024 are not braille',
   '☀ ☂ ☃ ★ ✓ ✔ ✿ ♥ ♦ ♣ ♠',
   '👍👍👍👍👍👍👍',

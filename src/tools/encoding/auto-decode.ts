@@ -31,6 +31,14 @@ import { htmlDecodeBytes } from './html-entities';
 import { morseDecode } from './morse';
 import { looksLikeNato, natoDecode } from './nato';
 import { decodeAceLabels } from './punycode';
+import {
+  decodeEncodedWords,
+  decodeMessage,
+  hasEncodedWords,
+  looksLikeQp,
+  qpDecode,
+  splitMessage,
+} from './quoted-printable';
 import { hasUnicodeEscape, unicodeUnescapeBytes } from './unicode-escape';
 import { urlDecodeOnce } from './url';
 
@@ -316,6 +324,23 @@ const DECODERS: Step[] = [
     const r = decodeAceLabels(t, true);
     return r.rows.some((x) => /\P{ASCII}/u.test(x.to)) ? utf8Encode(r.text) : null;
   }),
+  onText('mime message', (t) => {
+    // Headers, a blank line, then a quoted-printable body: header words and body together
+    const msg = splitMessage(t);
+    if (!msg) return null;
+    const qpBody =
+      /^content-transfer-encoding:\s*quoted-printable/im.test(msg.head) || looksLikeQp(msg.body);
+    if (!qpBody && !hasEncodedWords(msg.head)) return null;
+    const r = decodeMessage(msg, false, 'auto');
+    return r.text === t ? null : utf8Encode(r.text);
+  }),
+  onText('mime words', (t) => {
+    // =?charset?Q?…?= and =?charset?B?…?= words, wherever they are in the text
+    if (!hasEncodedWords(t)) return null;
+    const r = decodeEncodedWords(t);
+    return r.words.some((w) => w.text !== null) ? utf8Encode(r.text) : null;
+  }),
+  onText('quoted-printable', (t) => (looksLikeQp(t) ? qpDecode(t).bytes : null)),
   onText('url', (t) => (/%[0-9a-fA-F]{2}/.test(t) ? urlDecodeOnce(t) : null)),
   onText('html entities', (t) =>
     /&(?:#\d+|#[xX][0-9a-fA-F]+|[A-Za-z][A-Za-z0-9]*);/.test(t) ? htmlDecodeBytes(t) : null,
