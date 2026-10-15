@@ -23,6 +23,7 @@ try {
     square: await vite.ssrLoadModule('/src/tools/crypto/_square.ts'),
     playfair: await vite.ssrLoadModule('/src/tools/crypto/_playfair.ts'),
     bifid: await vite.ssrLoadModule('/src/tools/crypto/_bifid.ts'),
+    hill: await vite.ssrLoadModule('/src/tools/crypto/_hill.ts'),
   };
 } finally {
   await vite.close();
@@ -89,4 +90,36 @@ if (!only || only === 'bifid') {
     'had sent it. Three short flashes, a pause, then two long ones: the fishermen said it meant ' +
     'that the storm would turn before dawn, and for once they were right.';
   print('bifid-period  key LIGHTHOUSE, period 7', bifid(english, 'lighthouse', 7));
+}
+
+if (!only || only === 'hill') {
+  const { HILL_ALPHABETS, applyBlocks, parseKey, readText, writeText } = mods.hill;
+  const alphabet = HILL_ALPHABETS.az;
+
+  /** Hill encryption of the letters of a text (padded with X), letters only. */
+  const hill = (plain, key) => {
+    const { matrix, n } = parseKey(key, alphabet);
+    const { values } = readText(plain.replace(/[^A-Za-z]/g, ''), alphabet);
+    while (values.length % n) values.push(alphabet.symbols.indexOf('X'));
+    const out = applyBlocks(values, matrix, 26).flatMap((s) => s.output);
+    return writeText([], out, alphabet, false);
+  };
+
+  const signal =
+    'Every night the keeper of the old lighthouse raises a flag at dawn, but only he knows what ' +
+    'the signal means, and he has never told anyone. Three nights in a row the same pattern came ' +
+    'across the water, and on the fourth the lamp finally answered.';
+  print('hill-known  3x3 key GYBNQKURP (known start EVERYNIGH)', hill(signal, 'GYBNQKURP'));
+  // The first blocks of this start (THE SIG NAL) are linearly dependent mod 26 and mod 13.
+  const dependent =
+    'The signal flag is raised at dawn, but only the keeper of the old lighthouse knows what it means.';
+  print(
+    'hill-dependent  3x3 key GYBNQKURP (known start THESIGNAL)',
+    hill(dependent, 'GYBNQKURP').slice(0, 66),
+  );
+  const crack =
+    'Nobody remembers who built the bridge, but every spring the villagers repaint its railings ' +
+    'and hang lanterns along the arches. On the first night the whole valley is lit, and travellers ' +
+    'say that from the hill above it looks like a river of small stars flowing slowly toward the sea.';
+  print('hill-crack  2x2 key 5 17 4 15 (FRE P)', hill(crack, '5 17 4 15'));
 }
