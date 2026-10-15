@@ -167,6 +167,22 @@ describe('auto-decode: Bubble Babble', () => {
   });
 });
 
+describe('auto-decode: Punycode', () => {
+  it('xn-- labels become Unicode, also inside another layer', () => {
+    const text = 'https://xn--bcher-kva.example/xn--mnchen-3ya';
+    const r = solve(text);
+    const c = r.ranked.find((x) => recipeName(x) === 'punycode');
+    expect(c && utf8Decode(c.bytes)).toBe('https://bücher.example/münchen');
+    const layered = solve(b64('xn--bcher-kva.example'));
+    const l = layered.ranked.find((x) => recipeName(x) === 'base64 → punycode');
+    expect(l && utf8Decode(l.bytes)).toBe('bücher.example');
+  });
+
+  it('a decoded label that is only ASCII is not a result', () => {
+    expect(solve('xn--abc-').ranked.some((c) => c.recipe.includes('punycode'))).toBe(false);
+  });
+});
+
 describe('auto-decode: emoji layers', () => {
   it('base100 around base64 around hex', () => {
     const r = solve(base100Encode(bytes(b64(toHex(bytes(FLAG))))));
@@ -265,7 +281,7 @@ describe('auto-decode: restraint', () => {
 // Ordinary text that must never be "decoded" by the newer, stricter decoders (Base45, uuencode,
 // quoted-printable, Punycode, Base36, Base100, NATO, Braille, Bubble Babble): not as the best
 // result and not even as a candidate.
-const NEW_DECODERS = ['base45', 'base100', 'bubblebabble', 'base36', 'base26'];
+const NEW_DECODERS = ['base45', 'base100', 'bubblebabble', 'base36', 'base26', 'punycode'];
 const ORDINARY = [
   'The quick brown fox jumps over the lazy dog.',
   'Hello, World!',
@@ -292,6 +308,9 @@ const ORDINARY = [
   'ab12cd34ef56',
   'xerox machine at the xenon lab',
   'xylophone',
+  'a string like xn--zzzz is not a valid label',
+  'xn-- is the IDNA prefix; foo-xn--bar is not a label',
+  'https://bücher.example/straße?q=ü',
   'internationalization',
   'supercalifragilisticexpialidocious',
   'ELECTROENCEPHALOGRAPHICALLY',

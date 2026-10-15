@@ -28,6 +28,7 @@ import { charcodeDecodeBytes } from './charcode';
 import { hexDecode } from './hex';
 import { htmlDecodeBytes } from './html-entities';
 import { morseDecode } from './morse';
+import { decodeAceLabels } from './punycode';
 import { hasUnicodeEscape, unicodeUnescapeBytes } from './unicode-escape';
 import { urlDecodeOnce } from './url';
 
@@ -287,6 +288,12 @@ const DECODERS: Step[] = [
   onText('charcode (octal)', (t) =>
     RE_OCT_LIST.test(t) ? charcodeDecodeBytes(t, 'oct', 'codepoint') : null,
   ),
+  onText('punycode', (t) => {
+    // Only real "xn--" labels that decode to something non-ASCII; a bad label is left alone.
+    if (!/xn--/i.test(t)) return null;
+    const r = decodeAceLabels(t, true);
+    return r.rows.some((x) => /\P{ASCII}/u.test(x.to)) ? utf8Encode(r.text) : null;
+  }),
   onText('url', (t) => (/%[0-9a-fA-F]{2}/.test(t) ? urlDecodeOnce(t) : null)),
   onText('html entities', (t) =>
     /&(?:#\d+|#[xX][0-9a-fA-F]+|[A-Za-z][A-Za-z0-9]*);/.test(t) ? htmlDecodeBytes(t) : null,

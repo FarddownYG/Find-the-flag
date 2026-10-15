@@ -17,6 +17,8 @@
     "base91",
     "base100",
     "Bubble Babble",
+    "Punycode",
+    "IDN",
     "hex",
     "XOR",
     "ROT13",
