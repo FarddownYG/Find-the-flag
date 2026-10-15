@@ -2,9 +2,10 @@
 
 ## Workflow git
 
-**`main` = la dernière version qui marche du site en ligne.** Chaque push sur `main` lance la
-CI (`.github/workflows/ci.yml`), qui publie le site sur GitHub Pages seulement si tout est vert.
-Le dépôt est public : un push sur `main` est une publication immédiate et définitive.
+**`main` = la dernière version qui marche du site en ligne.** Vercel déploie chaque push sur
+`main` en production immédiatement, SANS attendre la CI (`.github/workflows/ci.yml`, qui ne fait
+que vérifier) : les vérifications locales ci-dessous sont donc le vrai garde-fou. Le dépôt est
+public : un push sur `main` est une publication immédiate et définitive.
 
 - Dès qu'une fonctionnalité est terminée ET fonctionnelle : commit atomique (un par outil ou
   feature) → push sur `main`.

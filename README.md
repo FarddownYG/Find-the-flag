@@ -62,9 +62,8 @@ npm run build      # static site in dist/ — host it anywhere (relative paths)
 ```
 
 The build is plain static files: GitHub Pages, any web server, or `npx vite preview`.
-The CI workflow (`.github/workflows/ci.yml`) publishes the build to GitHub Pages from `main`,
-only after every check has passed; enable it once in _Settings → Pages → Source: GitHub
-Actions_.
+The live site is deployed by Vercel from `main`; the CI workflow (`.github/workflows/ci.yml`)
+runs every check on each push and pull request.
 
 ## Add a tool
 
