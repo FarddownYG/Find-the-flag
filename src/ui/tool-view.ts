@@ -920,11 +920,11 @@ export function renderTool(
       outBody.append(
         ...renderResult(result, {
           highlight: flags,
-          pipe: (id, r) => (
+          pipe: (id, r, options) => (
             setPending(
               id,
               r,
-              undefined,
+              options,
               state.demo
                 ? { toolId: state.demo.toolId, label: state.demo.label, from: tool.id }
                 : undefined,

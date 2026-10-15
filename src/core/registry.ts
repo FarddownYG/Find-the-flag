@@ -1,3 +1,4 @@
+import { setRegisteredTools } from './tool-list';
 import { CATEGORIES, type AnyTool } from './types';
 
 /**
@@ -38,6 +39,8 @@ const order = new Map(CATEGORIES.map((c, i) => [c.id, i]));
 export const TOOLS: readonly AnyTool[] = entries
   .map(([, t]) => t)
   .sort((a, b) => order.get(a.category)! - order.get(b.category)! || a.name.localeCompare(b.name));
+
+setRegisteredTools(TOOLS);
 
 const byId = new Map(TOOLS.map((t) => [t.id, t]));
 export const getTool = (id: string): AnyTool | undefined => byId.get(id);

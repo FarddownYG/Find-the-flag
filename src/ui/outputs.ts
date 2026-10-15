@@ -11,8 +11,8 @@ import { flagSettings } from './settings';
 import { mapBlock } from './map';
 
 export interface OutputContext {
-  /** Open another tool with this data as its input. */
-  pipe: (toolId: string, raw: RawInput) => void;
+  /** Open another tool with this data as its input (and, when given, these option values). */
+  pipe: (toolId: string, raw: RawInput, options?: Record<string, unknown>) => void;
   /** Flag candidates worth highlighting in this result (see selectFlags). */
   highlight: Set<string>;
   /** Merge option values and re-run the tool (actions and reorder blocks). */
@@ -532,7 +532,15 @@ function actionsBlock(o: Extract<Output, { type: 'actions' }>, ctx: OutputContex
       'div',
       { class: 'action-row' },
       ...o.actions.map((a) =>
-        button(a.label, () => ctx.setOptions?.(a.options), a.primary ? 'btn-run' : 'btn-ghost'),
+        button(
+          a.label,
+          () => {
+            const open = a.open;
+            if (open) ctx.pipe(open.tool, { text: open.text }, a.options);
+            else ctx.setOptions?.(a.options);
+          },
+          a.primary ? 'btn-run' : 'btn-ghost',
+        ),
       ),
     ),
   );

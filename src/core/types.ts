@@ -167,12 +167,19 @@ export type Output =
   | { type: 'map'; label?: string; lat: number; lon: number; zoom?: number }
   /**
    * Buttons that set option values and re-run the tool ("Apply this order", "Use height 480").
-   * This is how a tool proposes a fix the user can accept in one click.
+   * This is how a tool proposes a fix the user can accept in one click. With `open`, the button
+   * opens another tool instead: `text` becomes its input and `options` its option values
+   * ("Open in Playfair" from the cipher identifier).
    */
   | {
       type: 'actions';
       label?: string;
-      actions: { label: string; options: Record<string, unknown>; primary?: boolean }[];
+      actions: {
+        label: string;
+        options: Record<string, unknown>;
+        primary?: boolean;
+        open?: { tool: string; text: string };
+      }[];
     }
   /**
    * A list the user reorders (drag, or the ↑/↓ buttons). Every change writes the item ids,
