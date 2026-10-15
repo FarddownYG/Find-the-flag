@@ -129,6 +129,10 @@ export default defineTool({
           .map((r) => [r.rails, r.offset, r.score.toFixed(1), preview(r.out, 120)]),
         highlight: [0],
       },
+      // A zigzag that fits scores far above 80; below that the text is probably another transposition.
+      ...(best.score < 80
+        ? [{ type: 'note' as const, level: 'info' as const, text: T('note.other') }]
+        : []),
     ];
   },
 });

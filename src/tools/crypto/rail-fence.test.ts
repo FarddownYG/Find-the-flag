@@ -64,6 +64,18 @@ describe('rail fence', () => {
     expect(out).toContain('flag{rail_fence_changes_the_order}');
   });
 
+  it('points to the Columnar transposition tool only when no zigzag reads', () => {
+    const zigzag = resultToText(run(railFenceEncrypt(PROSE_A, 4), {}));
+    expect(zigzag).not.toContain('Columnar transposition');
+    // A columnar transposition (key 3 1 4 2) of the same text is no zigzag.
+    const letters = [...PROSE_A.slice(0, 300).replace(/[^A-Za-z]/g, '')];
+    const columns = [1, 3, 0, 2].flatMap((c) => letters.filter((_, i) => i % 4 === c)).join('');
+    const other = resultToText(run(columns, {}));
+    expect(other).toContain(
+      'Columnar transposition covers columns, routes, spirals and the scytale.',
+    );
+  });
+
   it('rejects bad parameters and tiny input', () => {
     expect(() => run('abcdef', { mode: 'decrypt', rails: 1 })).toThrow(ToolError);
     expect(() => run('abcdef', { mode: 'encrypt', rails: 2.5 })).toThrow(ToolError);
