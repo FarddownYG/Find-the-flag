@@ -44,9 +44,9 @@ public : un push sur `main` est une publication immédiate et définitive.
 ## AGENCE (mode autonome — état du run)
 
 ```
-ÉTAT: RUNNING | cycle 2/14 | sans-gain 0/2 | start 2026-10-15T10:30Z | budget 12 familles d'outils, 4 vagues
+ÉTAT: RUNNING | cycle 3/14 | sans-gain 0/2 | start 2026-10-15T10:30Z | budget 12 familles d'outils, 4 vagues
 FINI: [ ] portes vertes sur HEAD de autonome/2026-10-15 (check, docs:tools sans diff, build, e2e complet)
-      [ ] vague 1 intégrée : playfair, bifid, hill, adfgvx, columnar, nihilist, enigma (vecteurs publiés verts)
+      [x] vague 1 intégrée : playfair, bifid, hill, adfgvx, columnar, nihilist, enigma (vecteurs publiés verts)
       [ ] vague 2 : codes-barres 1D/2D, pack d'encodages, alphabets de symboles
       [ ] vague 3 : SSTV, analyseur PDF, lecteur SQLite
       [ ] vague 4 : stégano WAV LSB, analyseur ELF/PE, identificateur de chiffre
@@ -58,6 +58,8 @@ FAIT: 072a021 base de départ — check 3730 tests verts, e2e 355 passed, CI ver
       Barbarossa et U-264 déchiffrés (2e implémentation Python indépendante d'accord)
       1984456 8a481f2 1ecc0f2 columnar, adfgvx, nihilist — check 3895 verts, e2e 405 passed ;
       vecteurs Wikipedia (ZEBRAS, PRIVACY, RUSSIAN) recalculés en Python à l'identique
+      7a0baa9 278770d 6a87d10 playfair, bifid, hill — check 4040 verts, e2e 442 passed ;
+      Playfair BMODZ…, Hill POH, Bifid UAEOLWRINS recalculés en Python
 EN COURS: vague 1 (polygraphiques, transpositions) + vague 2 (codes-barres) en agents
 SUIVANT: vague 2 dès qu'un slot se libère
 DÉCISIONS: D1 un agent = une famille, commit dans son worktree isolé ; seul l'orchestrateur intègre
