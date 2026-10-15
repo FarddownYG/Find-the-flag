@@ -21,7 +21,7 @@ export default defineTool({
   name: 'QR code reader',
   category: 'stego',
   description:
-    'Decode QR codes in an image, even inverted, tiny, noisy or missing their quiet zone; shows text and raw bytes.',
+    'Decode QR codes in an image, even inverted, tiny, noisy or missing their quiet zone; shows text and raw bytes. Other barcodes (1D, Data Matrix, Aztec, PDF417): Barcode reader.',
   tags: ['qr', 'qrcode', 'barcode', 'scan', 'decode', 'jsqr', 'zxing', 'mobile'],
   input: 'image',
   placeholder: 'Drop an image that contains a QR code',
@@ -43,6 +43,7 @@ export default defineTool({
           level: 'warn',
           text: T('note.none', { count: tried }),
         },
+        { type: 'note', level: 'info', text: T('note.otherCodes') },
       ];
     }
     const out: Output[] = [];
