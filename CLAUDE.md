@@ -44,7 +44,7 @@ public : un push sur `main` est une publication immédiate et définitive.
 ## AGENCE (mode autonome — état du run)
 
 ```
-ÉTAT: RUNNING | cycle 0/14 | sans-gain 0/2 | start 2026-10-15T10:30Z | budget 12 familles d'outils, 4 vagues
+ÉTAT: RUNNING | cycle 1/14 | sans-gain 0/2 | start 2026-10-15T10:30Z | budget 12 familles d'outils, 4 vagues
 FINI: [ ] portes vertes sur HEAD de autonome/2026-10-15 (check, docs:tools sans diff, build, e2e complet)
       [ ] vague 1 intégrée : playfair, bifid, hill, adfgvx, columnar, nihilist, enigma (vecteurs publiés verts)
       [ ] vague 2 : codes-barres 1D/2D, pack d'encodages, alphabets de symboles
@@ -54,7 +54,9 @@ FINI: [ ] portes vertes sur HEAD de autonome/2026-10-15 (check, docs:tools sans 
 COMMANDES: npm run check · npm run docs:tools + git diff --exit-code docs/TOOLS.md · npm run build
            · e2e : build → vite preview → playwright (worktree propre) · captures → scratchpad (hors git)
 FAIT: 072a021 base de départ — check 3730 tests verts, e2e 355 passed, CI verte
-EN COURS: vague 1 (3 agents en worktree isolé, chacun commite dans sa branche, intégration par moi)
+      4f42f35 enigma — check 3801 verts, e2e 372 passed ; câblages = py-enigma 1.0.2 data.py ;
+      Barbarossa et U-264 déchiffrés (2e implémentation Python indépendante d'accord)
+EN COURS: vague 1 (polygraphiques, transpositions) + vague 2 (codes-barres) en agents
 SUIVANT: vague 2 dès qu'un slot se libère
 DÉCISIONS: D1 un agent = une famille, commit dans son worktree isolé ; seul l'orchestrateur intègre
            (cherry-pick + portes complètes) — rouvrir si une intégration casse main
