@@ -7,8 +7,9 @@
  * Pure functions on bytes: no DOM, no Web Audio, testable in Node.
  */
 import { bytesEqualAt, indexOfBytes, u16be, u32be, u32le } from '../lib/bytes';
+import { scanWav } from './wav';
 
-export type AudioFormat = 'mp3' | 'aac' | 'flac' | 'vorbis' | 'opus' | 'mp4' | 'webm';
+export type AudioFormat = 'mp3' | 'aac' | 'flac' | 'vorbis' | 'opus' | 'mp4' | 'webm' | 'wav';
 
 export interface RateProbe {
   format: AudioFormat;
@@ -370,11 +371,14 @@ function probeMp4(b: Uint8Array): RateProbe | null {
 const MP4_TOP_LEVEL = ['ftyp', 'moov', 'mdat', 'wide', 'free', 'skip', 'styp'];
 
 /**
- * Sample rate stored in the header of an MP3, AAC (ADTS), FLAC, Ogg (Vorbis, Opus, FLAC), WebM
- * (Opus, Vorbis) or MP4/M4A file, or null when the container is unknown or has no readable
- * header. WAV is not handled here: it is decoded exactly in pure JavaScript.
+ * Sample rate stored in the header of a WAV, MP3, AAC (ADTS), FLAC, Ogg (Vorbis, Opus, FLAC),
+ * WebM (Opus, Vorbis) or MP4/M4A file, or null when the container is unknown or has no readable
+ * header. Most WAVs are decoded exactly in pure JavaScript; the rate matters for the codecs left
+ * to the browser (MP3 in WAV, ...), which must decode at the rate the "fmt " chunk declares.
  */
 export function probeSampleRate(b: Uint8Array): RateProbe | null {
+  const wav = scanWav(b);
+  if (wav) return wav.fmt && wav.fmt.rate > 0 ? { format: 'wav', decodeRate: wav.fmt.rate } : null;
   const start = skipId3(b);
   if (start + 8 > b.length) return null;
   if (tag(b, start, 'fLaC')) return probeFlac(b, start);

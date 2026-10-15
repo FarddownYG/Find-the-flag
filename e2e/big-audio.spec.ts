@@ -1,4 +1,5 @@
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { expect, test, type Page } from '@playwright/test';
 
 /**
@@ -9,6 +10,9 @@ import { expect, test, type Page } from '@playwright/test';
 const LONG_TASK_MS = 100;
 const RATE = 44100;
 const SECONDS = 240;
+
+const sample = (name: string) =>
+  fileURLToPath(new URL(`../public/samples/${name}`, import.meta.url));
 
 /** RIFF/WAVE file: a "fmt " chunk body and the data. */
 function riff(fmt: Buffer, data: Buffer): Buffer {
@@ -169,5 +173,64 @@ test.describe('big audio files', () => {
       expect(await blockingTasks(page), `long tasks after “${preset}”`).toEqual([]);
     }
     await expect(out).toContainText('Output: 44100 Hz · mono · 4:00.00');
+  });
+});
+
+test.describe('WAV codecs', () => {
+  const open = async (page: Page, name: string, buffer: Buffer, tool = 'spectrogram') => {
+    await page.goto(`./#/tool/${tool}`);
+    await page
+      .locator('.input-box input[type=file]')
+      .setInputFiles({ name, mimeType: 'audio/wav', buffer });
+    return page.locator('.pane-out');
+  };
+
+  test('A-law and µ-law are decoded exactly', async ({ page }) => {
+    // 1000 Hz square waves at the loudest codes, 4 samples per half period:
+    // A-law 0xAA / 0x2A = ±32256 (-0.1 dBFS), µ-law 0x80 / 0x00 = ±32124 (-0.2 dBFS).
+    const square = (hi: number, lo: number) =>
+      Buffer.from(Array.from({ length: 8000 }, (_, i) => ((i >> 2) & 1 ? lo : hi)));
+    for (const [codec, hi, lo, peak] of [
+      [6, 0xaa, 0x2a, '-0.1 dBFS'],
+      [7, 0x80, 0x00, '-0.2 dBFS'],
+    ] as const) {
+      const wav = riff(fmtChunk(codec, 1, 8000, 8), square(hi, lo));
+      const lab = await open(page, `g711-${codec}.wav`, wav, 'audio-lab');
+      await expect(lab).toContainText('Input: 8000 Hz · mono · 1.00 s', { timeout: 15_000 });
+      await expect(lab).toContainText(`Output peak: ${peak}`);
+      const spectrogram = await open(page, `g711-${codec}.wav`, wav);
+      await expect(spectrogram).toContainText('Sample rate: 8000 Hz (from the file)', {
+        timeout: 15_000,
+      });
+      await expect(spectrogram).toContainText(/Strongest on average: (999|1000|1001)\.\d Hz/);
+      await expect(spectrogram.locator('.note-error')).toHaveCount(0);
+    }
+  });
+
+  test('MP3 in WAV goes to the browser decoder, at the rate of the WAV header', async ({
+    page,
+  }) => {
+    const mp3 = readFileSync(sample('audio-spectrogram-22k.mp3'));
+    // Raw MP3 frames: drop the ID3v2 tag (10-byte header + synchsafe size).
+    const id3 = 10 + ((mp3[6]! << 21) | (mp3[7]! << 14) | (mp3[8]! << 7) | mp3[9]!);
+    // MPEGLAYER3WAVEFORMAT extra bytes, as ffmpeg writes them.
+    const extra = Buffer.from([0x0c, 0, 1, 0, 2, 0, 0, 0, 0x80, 0x04, 1, 0, 0x71, 0x05]);
+    const wav = riff(fmtChunk(0x55, 1, 22050, 0, extra), mp3.subarray(id3));
+    const out = await open(page, 'mp3-in.wav', wav);
+    await expect(out).toContainText('Sample rate: 22050 Hz (from the file)', { timeout: 15_000 });
+    await expect(out).toContainText('Frequencies shown: 0 – 11025 Hz (linear)');
+    await expect(out.locator('.note-error')).toHaveCount(0);
+  });
+
+  test('a codec the browser lacks is named', async ({ page }) => {
+    // IMA ADPCM, stereo: 1024-byte blocks of silence (predictor 0, step index 0).
+    const extra = Buffer.from([2, 0, 0xf9, 0x03]); // cbSize, samples per block (1017)
+    const fmt = fmtChunk(0x11, 2, 22050, 4, extra);
+    fmt.writeUInt16LE(1024, 12); // block align
+    const out = await open(page, 'ima.wav', riff(fmt, Buffer.alloc(4096)));
+    await expect(out.locator('.note-error')).toContainText(
+      'WAV codec 0x0011 (IMA ADPCM) is not supported by this browser.',
+      { timeout: 15_000 },
+    );
   });
 });

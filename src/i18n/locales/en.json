@@ -25,6 +25,8 @@
   "core.input.needImage": "Drop or open an image.",
   "core.png.failed": "PNG decode failed: {message}",
   "core.unknownTool": "Unknown tool \"{id}\".",
+  "core.wav.codec": "WAV codec {codec} ({name}) is not supported by this browser. Convert the file to PCM WAV (Audacity, or ffmpeg -i in.wav -c:a pcm_s16le out.wav) and open it again.",
+  "core.wav.codecUnknown": "WAV codec {codec} is not supported by this browser. Convert the file to PCM WAV (Audacity, or ffmpeg -i in.wav -c:a pcm_s16le out.wav) and open it again.",
   "core.wav.dataBeforeFmt": "WAV \"data\" chunk before \"fmt \" chunk.",
   "core.wav.layout": "Unsupported WAV layout ({bits} bits, {channels} channels).",
   "core.wav.noData": "WAV file has no \"data\" chunk.",

@@ -25,6 +25,8 @@
   "core.input.needImage": "请拖入或打开一张图片。",
   "core.png.failed": "PNG 解码失败：{message}",
   "core.unknownTool": "未知工具“{id}”。",
+  "core.wav.codec": "此浏览器不支持 WAV 编解码器 {codec}（{name}）。请将文件转换为 PCM WAV（Audacity，或 ffmpeg -i in.wav -c:a pcm_s16le out.wav）后重新打开。",
+  "core.wav.codecUnknown": "此浏览器不支持 WAV 编解码器 {codec}。请将文件转换为 PCM WAV（Audacity，或 ffmpeg -i in.wav -c:a pcm_s16le out.wav）后重新打开。",
   "core.wav.dataBeforeFmt": "WAV 的“data”块位于“fmt ”块之前。",
   "core.wav.layout": "不支持的 WAV 结构（{bits} 位，{channels} 个声道）。",
   "core.wav.noData": "WAV 文件没有“data”块。",

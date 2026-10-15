@@ -392,13 +392,23 @@ describe('probeSampleRate: MP4 / M4A', () => {
 // ---------- not audio / not probed ----------
 
 describe('probeSampleRate: nothing to read', () => {
-  it('returns null for unknown data, WAV and tiny input', () => {
+  it('returns null for unknown data, a WAV without a rate and tiny input', () => {
     expect(probeSampleRate(new Uint8Array(0))).toBeNull();
     expect(probeSampleRate(ascii('hello, this is a text file with no audio in it'))).toBeNull();
     expect(
       probeSampleRate(bytes(ascii('RIFF'), u32le(36), ascii('WAVEfmt '), zeros(64))),
     ).toBeNull();
     expect(probeSampleRate(zeros(5000))).toBeNull();
+  });
+
+  it('reads the rate of a WAV "fmt " chunk, whatever its codec', () => {
+    const fmt = (codec: number, rate: number) =>
+      bytes(ascii('RIFF'), u32le(36), ascii('WAVEfmt '), u32le(16), [codec, 0, 1, 0], u32le(rate));
+    expect(probeSampleRate(bytes(fmt(0x55, 22050), zeros(8)))).toEqual({
+      format: 'wav',
+      decodeRate: 22050,
+    });
+    expect(probeSampleRate(bytes(fmt(0x11, 8000), zeros(8)))?.decodeRate).toBe(8000);
   });
 
   it('survives truncated headers of every kind', () => {

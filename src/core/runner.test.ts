@@ -222,6 +222,14 @@ describe('runner: codecs only the browser decodes', () => {
     expect(sent!.channels[0]!.length).toBe(0); // detached by the transfer
     expect(sent!.bytes.length).toBe(0);
   });
+
+  it('reports the page decoder error (e.g. the WAV codec it lacks)', async () => {
+    const { runner } = setup();
+    const ima = audioFile(wavFile(8000, 1, 0x11), 'ima.wav');
+    await expect(runner.run('spectrogram', ima, spectrogramOptions())).rejects.toThrow(
+      'no page decoder in this test',
+    );
+  });
 });
 
 describe('runner without workers', () => {

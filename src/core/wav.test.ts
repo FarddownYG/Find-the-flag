@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { concatBytes } from '../lib/bytes';
-import { decodeWav } from './decode-audio';
-import { audioFile, decodeAudioFile } from './prepare';
-import { scanWav } from './wav';
+import { decodeWav, wavCodecError } from './decode-audio';
+import { probeSampleRate } from './audio-rate';
+import { audioFile, decodeAudioFile, prepareInput } from './prepare';
+import { alawToLinear, codecHex, mulawToLinear, scanWav } from './wav';
 
 const ascii = (s: string) => Uint8Array.from([...s].map((c) => c.charCodeAt(0)));
 const u16 = (n: number) => Uint8Array.from([n & 255, (n >>> 8) & 255]);
@@ -46,6 +47,84 @@ function wav(s: WavSpec): Uint8Array {
   );
   return concatBytes(ascii('RIFF'), u32(body.length), body);
 }
+
+describe('G.711 (A-law, µ-law)', () => {
+  // Reference values: ITU-T G.711 as implemented by Sun's g711.c (and ffmpeg's pcm_alaw/mulaw).
+  it.each([
+    ['d5', 8],
+    ['55', -8],
+    ['ff', 848],
+    ['7f', -848],
+    ['80', 5504],
+    ['00', -5504],
+    ['aa', 32256],
+    ['2a', -32256],
+  ])('A-law 0x%s -> %i', (hex, linear) => {
+    expect(alawToLinear(parseInt(hex, 16))).toBe(linear);
+  });
+
+  it.each([
+    ['ff', 0],
+    ['7f', 0],
+    ['d5', 716],
+    ['55', -716],
+    ['aa', 5372],
+    ['2a', -5372],
+    ['80', 32124],
+    ['00', -32124],
+  ])('µ-law 0x%s -> %i', (hex, linear) => {
+    expect(mulawToLinear(parseInt(hex, 16))).toBe(linear);
+  });
+
+  it('is symmetric around the sign bit and covers the 16-bit range', () => {
+    for (let c = 0; c < 256; c++) {
+      expect(alawToLinear(c ^ 0x80)).toBe(-alawToLinear(c));
+      // µ-law has two zeros (0x7F and 0xFF), so its negation is exact for every code.
+      expect(mulawToLinear(c ^ 0x80) + mulawToLinear(c)).toBe(0);
+    }
+    const a = Array.from({ length: 256 }, (_, c) => alawToLinear(c));
+    const u = Array.from({ length: 256 }, (_, c) => mulawToLinear(c));
+    expect(new Set(a).size).toBe(256);
+    expect(new Set(u).size).toBe(255); // +0 and -0 are one value
+    expect(Math.max(...a.map(Math.abs))).toBe(32256);
+    expect(Math.max(...u.map(Math.abs))).toBe(32124);
+  });
+
+  it('decodes A-law and µ-law WAV files exactly in JavaScript', () => {
+    const alaw = decodeWav(
+      wav({ codec: 6, channels: 1, rate: 8000, bits: 8, data: Uint8Array.of(0xd5, 0x55, 0xaa) }),
+    );
+    expect(alaw?.sampleRate).toBe(8000);
+    expect(alaw?.rateSource).toBe('file');
+    expect([...alaw!.channels[0]!]).toEqual([8 / 32768, -8 / 32768, 32256 / 32768]);
+
+    const mulaw = decodeWav(
+      wav({
+        codec: 7,
+        channels: 2,
+        rate: 11025,
+        bits: 8,
+        data: Uint8Array.of(0x80, 0, 0xff, 0x7f),
+      }),
+    );
+    expect(mulaw?.channels.map((c) => [...c])).toEqual([
+      [32124 / 32768, 0],
+      [-32124 / 32768, 0],
+    ]);
+    // Extensible header with the A-law sub-format.
+    const ext = decodeWav(
+      wav({
+        codec: 6,
+        channels: 1,
+        rate: 8000,
+        bits: 8,
+        data: Uint8Array.of(0x2a),
+        extensible: true,
+      }),
+    );
+    expect([...ext!.channels[0]!]).toEqual([-32256 / 32768]);
+  });
+});
 
 describe('PCM and float decoding', () => {
   /** Interleaved values -> bytes, and the floats any correct decoder must produce. */
@@ -131,6 +210,38 @@ describe('PCM and float decoding', () => {
   });
 });
 
+describe('WAV codecs left to the browser', () => {
+  const ima = wav({ codec: 0x11, channels: 2, rate: 22050, bits: 4, data: new Uint8Array(2048) });
+  const mp3 = wav({ codec: 0x55, channels: 1, rate: 22050, bits: 0, data: new Uint8Array(512) });
+
+  it('are detected, not decoded as PCM', () => {
+    expect(decodeWav(ima)).toBeNull();
+    expect(decodeWav(mp3)).toBeNull();
+    expect(codecHex(0x11)).toBe('0x0011');
+  });
+
+  it('name the codec when nothing can decode them', () => {
+    expect(wavCodecError(ima)?.message).toMatch(
+      /^WAV codec 0x0011 \(IMA ADPCM\) is not supported by this browser\. /,
+    );
+    expect(wavCodecError(mp3)?.message).toMatch(/^WAV codec 0x0055 \(MP3\) is not supported/);
+    const odd = wav({ codec: 0x4242, channels: 1, rate: 8000, bits: 8, data: new Uint8Array(8) });
+    expect(wavCodecError(odd)?.message).toMatch(/^WAV codec 0x4242 is not supported/);
+    expect(wavCodecError(ascii('ID3 and not a wav'))).toBeNull();
+  });
+
+  it('give the browser decoder the rate of the "fmt " chunk', () => {
+    expect(probeSampleRate(mp3)).toEqual({ format: 'wav', decodeRate: 22050 });
+    expect(probeSampleRate(ima.subarray(0, 60))).toEqual({ format: 'wav', decodeRate: 22050 });
+  });
+
+  it('fail with that message where there is no browser decoder (Node)', async () => {
+    await expect(prepareInput('audio', { bytes: ima, name: 'x.wav' })).rejects.toThrow(
+      /WAV codec 0x0011 \(IMA ADPCM\)/,
+    );
+  });
+});
+
 describe('decoding an audio file in the worker', () => {
   const pcm16 = wav({
     codec: 1,
@@ -152,6 +263,8 @@ describe('decoding an audio file in the worker', () => {
   });
 
   it('hands to the page what only the browser can decode', async () => {
+    const ima = wav({ codec: 0x11, channels: 1, rate: 8000, bits: 4, data: new Uint8Array(256) });
+    expect(await decodeAudioFile(audioFile(new Blob([ima as BlobPart])))).toBeNull();
     const mp3ish = Uint8Array.of(0x49, 0x44, 0x33, 3, 0, 0, 0, 0, 0, 0, 0xff, 0xfb, 0x90, 0x64);
     expect(await decodeAudioFile(audioFile(new Blob([mp3ish as BlobPart])))).toBeNull();
     await expect(decodeAudioFile(audioFile(new Blob([])))).rejects.toThrow(

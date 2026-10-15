@@ -1,11 +1,54 @@
 /**
- * WAV (RIFF/WAVE): chunk scanning and sample decoding (PCM 8/16/24/32-bit, IEEE float 32/64).
- * Pure functions on bytes: they run in the page, in the tool worker and in Node.
+ * WAV (RIFF/WAVE): chunk scanning, codec names, and the codecs decoded exactly in pure
+ * JavaScript: PCM 8/16/24/32-bit, IEEE float 32/64, G.711 A-law and µ-law. Other codecs (ADPCM,
+ * MP3 in WAV, GSM...) are left to the browser decoder. Pure functions on bytes: they run in the
+ * page, in the tool worker and in Node.
  */
 import { u16le, u32le } from '../lib/bytes';
 
+export const WAV_PCM = 0x0001;
 export const WAV_FLOAT = 0x0003;
+export const WAV_ALAW = 0x0006;
+export const WAV_MULAW = 0x0007;
 const WAV_EXTENSIBLE = 0xfffe;
+
+/** wFormatTag values met in the wild (mmreg.h), named in messages. */
+const CODEC_NAMES: Readonly<Record<number, string>> = {
+  0x0001: 'PCM',
+  0x0002: 'MS ADPCM',
+  0x0003: 'IEEE float',
+  0x0006: 'A-law',
+  0x0007: 'µ-law',
+  0x0010: 'OKI ADPCM',
+  0x0011: 'IMA ADPCM',
+  0x0014: 'G.723 ADPCM',
+  0x0020: 'Yamaha ADPCM',
+  0x0022: 'TrueSpeech',
+  0x0031: 'GSM 6.10',
+  0x0040: 'G.721 ADPCM',
+  0x0045: 'G.726 ADPCM',
+  0x0050: 'MPEG audio',
+  0x0055: 'MP3',
+  0x0064: 'G.726 ADPCM',
+  0x00ff: 'AAC',
+  0x0160: 'WMA',
+  0x0161: 'WMA',
+  0x0162: 'WMA Pro',
+  0x0163: 'WMA Lossless',
+  0x1600: 'AAC',
+  0x1610: 'AAC',
+  0x2000: 'AC-3',
+  0x2001: 'DTS',
+  0xf1ac: 'FLAC',
+};
+
+/** "0x0011" */
+export const codecHex = (codec: number): string => `0x${codec.toString(16).padStart(4, '0')}`;
+export const codecName = (codec: number): string | undefined => CODEC_NAMES[codec];
+
+/** Codecs this module decodes; the others need the browser decoder. */
+export const decodableInJs = (codec: number): boolean =>
+  codec === WAV_PCM || codec === WAV_FLOAT || codec === WAV_ALAW || codec === WAV_MULAW;
 
 export interface WavFormat {
   /** wFormatTag, or the sub-format of WAVE_FORMAT_EXTENSIBLE. */
@@ -64,12 +107,46 @@ export function scanWav(b: Uint8Array): WavScan | null {
   return { fmt, data: null };
 }
 
+// ---------- G.711 ----------
+
+/** ITU-T G.711 A-law code to 16-bit linear (the classic Sun g711.c, also ffmpeg's). */
+export function alawToLinear(code: number): number {
+  const a = (code & 0xff) ^ 0x55;
+  const seg = (a & 0x70) >> 4;
+  let v = (a & 0x0f) << 4;
+  v += seg === 0 ? 8 : 0x108;
+  if (seg > 1) v <<= seg - 1;
+  return a & 0x80 ? v : -v;
+}
+
+/** ITU-T G.711 µ-law code to 16-bit linear. */
+export function mulawToLinear(code: number): number {
+  const u = ~code & 0xff;
+  const v = (((u & 0x0f) << 3) + 0x84) << ((u & 0x70) >> 4);
+  return u & 0x80 ? 0x84 - v : v - 0x84;
+}
+
+const g711Tables = new Map<number, Float32Array>();
+function g711Table(codec: number): Float32Array {
+  let table = g711Tables.get(codec);
+  if (!table) {
+    const f = codec === WAV_ALAW ? alawToLinear : mulawToLinear;
+    table = Float32Array.from({ length: 256 }, (_, i) => f(i) / 32768);
+    g711Tables.set(codec, table);
+  }
+  return table;
+}
+
 // ---------- samples ----------
 
 const LITTLE_ENDIAN = new Uint8Array(new Uint16Array([1]).buffer)[0] === 1;
 
-/** Bytes per sample, or 0 when the layout is not one decoded here (e.g. 12-bit PCM). */
+/**
+ * Bytes per sample of a codec decoded here, or 0 when the layout is not one (e.g. 12-bit PCM).
+ * G.711 is always one byte per sample, whatever the header says.
+ */
 export function sampleBytes(f: WavFormat): number {
+  if (f.codec === WAV_ALAW || f.codec === WAV_MULAW) return 1;
   const n = f.bits / 8;
   if (!Number.isInteger(n)) return 0;
   if (f.codec === WAV_FLOAT) return n === 4 || n === 8 ? n : 0;
@@ -88,9 +165,8 @@ function view<T>(
 }
 
 /**
- * De-interleave the "data" bytes into one Float32Array per channel, in [-1, 1): IEEE float when
- * the codec says so, integer PCM otherwise. The caller checks `sampleBytes(f) > 0` and
- * `f.channels > 0`.
+ * De-interleave the "data" bytes of a codec decoded here into one Float32Array per channel, in
+ * [-1, 1). The caller checks `sampleBytes(f) > 0` and `f.channels > 0`.
  */
 export function decodeSamples(d: Uint8Array, f: WavFormat): Float32Array[] {
   const per = sampleBytes(f);
@@ -100,7 +176,10 @@ export function decodeSamples(d: Uint8Array, f: WavFormat): Float32Array[] {
   const out = Array.from({ length: nCh }, () => new Float32Array(frames));
   // Interleaved source values for one sample index; `at(k)` reads value k as a float.
   let at: (k: number) => number;
-  if (per === 1) {
+  if (f.codec === WAV_ALAW || f.codec === WAV_MULAW) {
+    const table = g711Table(f.codec);
+    at = (k) => table[d[k]!]!;
+  } else if (per === 1) {
     at = (k) => (d[k]! - 128) / 128;
   } else if (per === 3) {
     at = (k) => {

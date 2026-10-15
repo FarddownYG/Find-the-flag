@@ -25,6 +25,8 @@
   "core.input.needImage": "Dépose ou ouvre une image.",
   "core.png.failed": "Échec du décodage PNG : {message}",
   "core.unknownTool": "Outil inconnu « {id} ».",
+  "core.wav.codec": "Le codec WAV {codec} ({name}) n’est pas pris en charge par ce navigateur. Convertissez le fichier en WAV PCM (Audacity, ou ffmpeg -i in.wav -c:a pcm_s16le out.wav) puis rouvrez-le.",
+  "core.wav.codecUnknown": "Le codec WAV {codec} n’est pas pris en charge par ce navigateur. Convertissez le fichier en WAV PCM (Audacity, ou ffmpeg -i in.wav -c:a pcm_s16le out.wav) puis rouvrez-le.",
   "core.wav.dataBeforeFmt": "Chunk WAV « data » placé avant le chunk « fmt ».",
   "core.wav.layout": "Structure WAV non prise en charge ({bits} bits, {channels} canaux).",
   "core.wav.noData": "Le fichier WAV n’a pas de chunk « data ».",

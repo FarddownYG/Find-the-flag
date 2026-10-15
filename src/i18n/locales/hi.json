@@ -25,6 +25,8 @@
   "core.input.needImage": "कोई इमेज खींचकर छोड़ें या खोलें।",
   "core.png.failed": "PNG डिकोड विफल: {message}",
   "core.unknownTool": "अज्ञात टूल \"{id}\"।",
+  "core.wav.codec": "यह ब्राउज़र WAV कोडेक {codec} ({name}) का समर्थन नहीं करता। फ़ाइल को PCM WAV में बदलें (Audacity, या ffmpeg -i in.wav -c:a pcm_s16le out.wav) और फिर से खोलें।",
+  "core.wav.codecUnknown": "यह ब्राउज़र WAV कोडेक {codec} का समर्थन नहीं करता। फ़ाइल को PCM WAV में बदलें (Audacity, या ffmpeg -i in.wav -c:a pcm_s16le out.wav) और फिर से खोलें।",
   "core.wav.dataBeforeFmt": "WAV का \"data\" चंक \"fmt \" चंक से पहले है।",
   "core.wav.layout": "यह WAV संरचना समर्थित नहीं है ({bits} बिट, {channels} चैनल)।",
   "core.wav.noData": "WAV फ़ाइल में \"data\" चंक नहीं है।",

@@ -25,6 +25,8 @@
   "core.input.needImage": "Перетащите или откройте изображение.",
   "core.png.failed": "Ошибка декодирования PNG: {message}",
   "core.unknownTool": "Неизвестный инструмент «{id}».",
+  "core.wav.codec": "Кодек WAV {codec} ({name}) не поддерживается этим браузером. Преобразуйте файл в WAV PCM (Audacity или ffmpeg -i in.wav -c:a pcm_s16le out.wav) и откройте его снова.",
+  "core.wav.codecUnknown": "Кодек WAV {codec} не поддерживается этим браузером. Преобразуйте файл в WAV PCM (Audacity или ffmpeg -i in.wav -c:a pcm_s16le out.wav) и откройте его снова.",
   "core.wav.dataBeforeFmt": "Чанк WAV «data» стоит перед чанком «fmt ».",
   "core.wav.layout": "Неподдерживаемая структура WAV ({bits} бит, каналов: {channels}).",
   "core.wav.noData": "В файле WAV нет чанка «data».",
