@@ -57,6 +57,9 @@ export function resultToText(result: ToolResult): string {
       case 'reorder':
         parts.push(...o.items.map((i) => `${i.label}${i.detail ? ` ${i.detail}` : ''}`));
         break;
+      case 'sandbox':
+        parts.push(o.payload);
+        break;
     }
   }
   return parts.join('\n');

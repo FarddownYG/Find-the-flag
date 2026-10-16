@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!--
+      Find The Flag — XSS sandbox harness.
+
+      This page runs an XSS payload so the user can SEE it fire, while guaranteeing that
+      nothing leaves the browser. It is loaded ONLY by the "XSS workshop" tool, inside an
+      <iframe sandbox="allow-scripts"> with NO allow-same-origin, so:
+        - it is a REAL same-origin response URL (not blob:/srcdoc), so it runs under its own
+          response headers, not the site's strict meta-CSP: inline scripts and handlers execute;
+        - the sandbox attribute gives it a null (opaque) origin, so it cannot read the parent
+          page's cookies, storage or DOM;
+        - its OWN meta-CSP below forbids every network destination, so no payload can exfiltrate
+          anything — attempts are recorded (stubbed sinks + CSP violations) but never sent.
+
+      Self-gate: if this page is ever opened top-level or framed WITHOUT that sandbox (origin is
+      then the real site, not "null"), it refuses to wire up the sink. That stops anyone turning
+      this file into a DOM-XSS vector on the live site.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'"
+    />
+    <title>XSS sandbox</title>
+    <style>
+      html {
+        color-scheme: light dark;
+        font:
+          14px/1.5 system-ui,
+          sans-serif;
+      }
+      body {
+        margin: 0;
+        padding: 10px;
+      }
+      #gate {
+        color: #a00;
+      }
+      #sink {
+        min-height: 1.5em;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="gate" hidden>This page runs only inside the Find The Flag XSS sandbox.</div>
+    <div id="sink" aria-live="off"></div>
+    <script>
+      (function () {
+        'use strict';
+
+        // 1. Self-gate: only proceed when we are a null-origin sandbox (allow-scripts, no
+        //    allow-same-origin). In any other embedding our origin is the real site.
+        var sandboxed = false;
+        try {
+          sandboxed = window.origin === 'null' || String(location.origin) === 'null';
+        } catch (e) {
+          sandboxed = true; // accessing origin threw => opaque origin => sandboxed
+        }
+        if (!sandboxed) {
+          var g = document.getElementById('gate');
+          if (g) g.hidden = false;
+          return;
+        }
+
+        // 2. Record exfil attempts without performing them. Two independent nets:
+        //    (a) JS sink stubs capture the exact target string and do nothing;
+        //    (b) a CSP that blocks EVERY network destination, so even raw <img src>,
+        //        <script src>, CSS url()… inserted via innerHTML are stopped and reported.
+        var wouldSend = [];
+        var signals = [];
+        var seen = Object.create(null);
+        function record(kind, detail) {
+          var line = detail ? kind + ' ' + detail : kind;
+          if (!seen[line]) {
+            seen[line] = true;
+            wouldSend.push(line);
+          }
+        }
+        function signal(s) {
+          if (signals.indexOf(s) === -1) signals.push(s);
+        }
+
+        document.addEventListener('securitypolicyviolation', function (e) {
+          // A network destination the payload tried to reach; the browser blocked it.
+          if (e.blockedURI && e.blockedURI !== 'inline' && e.blockedURI !== 'eval') {
+            record('blocked', e.effectiveDirective + ' ' + e.blockedURI);
+            signal('network');
+          }
+        });
+
+        // Inert network sinks — capture the intended target, never call through.
+        try {
+          window.fetch = function (u) {
+            record('fetch', String(u));
+            signal('network');
+            return new Promise(function () {});
+          };
+        } catch (e) {}
+        try {
+          var RealXHR = window.XMLHttpRequest;
+          window.XMLHttpRequest = function () {
+            var method = '';
+            var url = '';
+            return {
+              open: function (m, u) {
+                method = m;
+                url = u;
+              },
+              setRequestHeader: function () {},
+              send: function (body) {
+                record('XMLHttpRequest', method + ' ' + url + (body ? ' ' + body : ''));
+                signal('network');
+              },
+              abort: function () {},
+              addEventListener: function () {},
+              setAttribute: function () {},
+            };
+          };
+          void RealXHR;
+        } catch (e) {}
+        try {
+          navigator.sendBeacon = function (u, data) {
+            record('sendBeacon', String(u) + (data ? ' ' + data : ''));
+            signal('network');
+            return true;
+          };
+        } catch (e) {}
+        try {
+          window.WebSocket = function (u) {
+            record('WebSocket', String(u));
+            signal('network');
+            return {
+              send: function () {},
+              close: function () {},
+              addEventListener: function () {},
+            };
+          };
+        } catch (e) {}
+        try {
+          window.EventSource = function (u) {
+            record('EventSource', String(u));
+            signal('network');
+            return { close: function () {}, addEventListener: function () {} };
+          };
+        } catch (e) {}
+        // new Image().src = "…" is the classic cookie-exfil vector: capture the src.
+        window.Image = function () {
+          var el = {};
+          Object.defineProperty(el, 'src', {
+            set: function (v) {
+              record('Image.src', String(v));
+              signal('network');
+            },
+            get: function () {
+              return '';
+            },
+          });
+          return el;
+        };
+
+        // Dialogs: record instead of interrupting the page.
+        ['alert', 'prompt', 'confirm'].forEach(function (name) {
+          try {
+            window[name] = function (msg) {
+              signal(name + (msg === undefined ? '' : ':' + String(msg)));
+              return name === 'confirm' ? true : name === 'prompt' ? '' : undefined;
+            };
+          } catch (e) {}
+        });
+
+        // Explicit hook the tool's own demo payloads can call to prove execution unambiguously.
+        window.__ftfFired = function (tag) {
+          signal('fired' + (tag === undefined ? '' : ':' + String(tag)));
+        };
+
+        // A clearly-fake, local cookie so a cookie-exfil payload visibly carries SOMETHING without
+        // any real session being involved. Null-origin document.cookie is otherwise empty.
+        try {
+          Object.defineProperty(Document.prototype, 'cookie', {
+            configurable: true,
+            get: function () {
+              return 'demo=FTF_SANDBOX_FAKE_COOKIE';
+            },
+            set: function () {},
+          });
+        } catch (e) {}
+
+        // 3. Run the payload on request from the parent (our embedder only).
+        var sink = document.getElementById('sink');
+        function execScripts(root) {
+          // Scripts inserted via innerHTML never run; re-create them so <script> payloads also fire.
+          var scripts = root.querySelectorAll('script');
+          for (var i = 0; i < scripts.length; i++) {
+            var old = scripts[i];
+            var s = document.createElement('script');
+            for (var j = 0; j < old.attributes.length; j++) {
+              s.setAttribute(old.attributes[j].name, old.attributes[j].value);
+            }
+            s.textContent = old.textContent;
+            old.parentNode.replaceChild(s, old);
+          }
+        }
+
+        function report(executed) {
+          try {
+            window.parent.postMessage(
+              {
+                ftf: 'xss-sandbox-result',
+                executed: executed,
+                wouldSend: wouldSend.slice(0, 50),
+                signals: signals.slice(0, 50),
+              },
+              '*',
+            );
+          } catch (e) {}
+        }
+
+        var ran = false;
+        window.addEventListener('message', function (ev) {
+          // Only our embedder, only once.
+          if (ran || ev.source !== window.parent) return;
+          var data = ev.data;
+          if (!data || data.ftf !== 'xss-sandbox-run' || typeof data.payload !== 'string') return;
+          ran = true;
+          var titleBefore = document.title;
+          try {
+            sink.innerHTML = data.payload;
+            execScripts(sink);
+          } catch (e) {
+            signal('error:' + (e && e.message ? e.message : e));
+          }
+          // Give async handlers (img onerror, timers) a moment, then report.
+          setTimeout(function () {
+            if (document.title !== titleBefore) signal('title:' + document.title);
+            var executed = signals.length > 0;
+            report(executed);
+          }, 250);
+        });
+
+        // Tell the parent we are ready for a payload.
+        try {
+          window.parent.postMessage({ ftf: 'xss-sandbox-ready' }, '*');
+        } catch (e) {}
+      })();
+    </script>
+  </body>
+</html>

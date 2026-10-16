@@ -191,6 +191,13 @@ export type Output =
       option: string;
       items: { id: string; label: string; detail?: string }[];
     }
+  /**
+   * Runs an HTML/JS payload in an isolated iframe (public/xss-sandbox.html) so the user can see
+   * whether it executes, while a null origin and the frame's own strict CSP guarantee it reads no
+   * real cookie and reaches no network. Only the XSS workshop emits this; the page builds the
+   * iframe and nothing runs until the user clicks. See src/ui/xss-sandbox.ts.
+   */
+  | { type: 'sandbox'; label?: string; payload: string }
   | { type: 'note'; level: 'info' | 'warn' | 'error' | 'success'; text: string };
 
 export type ToolResult = Output[];

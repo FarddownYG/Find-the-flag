@@ -9,6 +9,7 @@ import { t } from '../i18n';
 import { categoryName, toolName } from '../i18n/tool-text';
 import { flagSettings } from './settings';
 import { mapBlock } from './map';
+import { sandboxBlock } from './xss-sandbox';
 
 export interface OutputContext {
   /** Open another tool with this data as its input (and, when given, these option values). */
@@ -728,6 +729,8 @@ export function renderResult(result: ToolResult, ctx: OutputContext): HTMLElemen
         return actionsBlock(o, ctx);
       case 'reorder':
         return reorderBlock(o, ctx);
+      case 'sandbox':
+        return sandboxBlock(o);
     }
   });
 }
