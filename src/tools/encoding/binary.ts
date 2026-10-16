@@ -63,7 +63,7 @@ export default defineTool({
   name: 'Binary (0/1)',
   category: 'encoding',
   description: 'Convert text or bytes to a string of 0 and 1 and back (8-bit or 7-bit groups).',
-  tags: ['bits', 'base2', 'base-2', 'ascii binary', '01', 'From Binary', 'To Binary'],
+  tags: ['bits', 'base2', 'base-2', 'ascii binary', '01', 'From Binary', 'To Binary', 'binaire'],
   input: 'bytes',
   placeholder: '01100110 01101100 01100001 01100111',
   live: true,

@@ -47,7 +47,7 @@ export default defineTool({
   category: 'encoding',
   description:
     'Convert text or bytes to hexadecimal and back; separators and 0x / \\x prefixes are ignored.',
-  tags: ['hexadecimal', 'base16', 'from hex', 'to hex', 'xxd', 'bytes', '0x', '\\x'],
+  tags: ['hexadecimal', 'base16', 'from hex', 'to hex', 'xxd', 'bytes', '0x', '\\x', 'hexa'],
   input: 'bytes',
   placeholder: '66 6c 61 67 7b 68 65 78 7d   (or 666c61677b6865787d, \\x66\\x6c, 0x66,0x6c ...)',
   live: true,

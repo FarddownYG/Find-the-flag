@@ -35,6 +35,14 @@ export default defineTool({
 
 That is all. `npm run dev`, open `#/tool/reverse`.
 
+**Search aliases.** The sidebar search (`src/ui/search.ts`) matches the id, the name (English and
+translated), `tags` and the description. Tags are English only: there are no per-locale aliases, so
+add the words other languages type as extra tags (`'binaire'`, `'convertisseur'`). An exact tag
+beats a prefix, which beats a mention; ties follow the registry order. Accents on Latin letters
+are ignored (`décimal` = `decimal`), and `base 8`, `base-8` and `base8` are the same word that only
+matches base 8 (never Base85). Do not give a tool the exact name of another one as a tag (`hex`,
+`binary`): it would tie with the tool people mean.
+
 ## 2. Inputs
 
 | `input` | `run` receives                                                       | UI                                                    |

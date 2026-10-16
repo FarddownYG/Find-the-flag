@@ -5,35 +5,9 @@ import { getLocale, LOCALES, isLocale, onLocaleChange, setLocale, t } from '../i
 import { categoryBlurb, categoryName, toolDescription, toolName } from '../i18n/tool-text';
 import { isValidUtf8, printableRatio, utf8Decode, utf8Encode } from '../lib/bytes';
 import { clear, copyText, debounce, h } from './dom';
+import { search } from './search';
 import { flagSettings } from './settings';
 import { renderTool, setPending } from './tool-view';
-
-/** Rank tools for a query: exact names/aliases first, then prefixes, then any mention. */
-function matchScore(tool: AnyTool, w: string): number {
-  // Both the English name and the translated one match, so aliases keep working in any language.
-  const names = [tool.name, toolName(tool)].map((x) => x.toLowerCase());
-  const tags = (tool.tags ?? []).map((x) => x.toLowerCase());
-  const desc = `${tool.description} ${toolDescription(tool)}`.toLowerCase();
-  if (tool.id === w || names.includes(w) || tags.includes(w)) return 100;
-  if (names.some((n) => n.startsWith(w)) || tool.id.startsWith(w)) return 80;
-  if (tags.some((x) => x.startsWith(w))) return 70;
-  if (names.some((n) => n.includes(w))) return 60;
-  if (tags.some((x) => x.includes(w))) return 50;
-  if (desc.includes(w)) return 20;
-  return 0;
-}
-
-const search = (q: string): AnyTool[] => {
-  const words = q.toLowerCase().split(/\s+/).filter(Boolean);
-  if (!words.length) return [...TOOLS];
-  return TOOLS.map((t, i) => {
-    const scores = words.map((w) => matchScore(t, w));
-    return { t, i, score: Math.min(...scores) && scores.reduce((a, b) => a + b, 0) };
-  })
-    .filter((r) => r.score > 0)
-    .sort((a, b) => b.score - a.score || a.i - b.i)
-    .map((r) => r.t);
-};
 
 export function mountApp(root: HTMLElement): void {
   const main = h('main', { class: 'main', id: 'main', tabindex: '-1' });
@@ -110,9 +84,10 @@ export function mountApp(root: HTMLElement): void {
 
   function renderNav() {
     clear(nav);
-    const found = new Set(search(searchBox.value).map((x) => x.id));
+    // Best match first within each category (the registry order when nothing is typed).
+    const results = search(searchBox.value);
     for (const cat of CATEGORIES) {
-      const tools = TOOLS.filter((x) => x.category === cat.id && found.has(x.id));
+      const tools = results.filter((x) => x.category === cat.id);
       if (!tools.length) continue;
       nav.append(
         h(
@@ -142,7 +117,7 @@ export function mountApp(root: HTMLElement): void {
         ),
       );
     }
-    if (!found.size) nav.append(h('p', { class: 'nav-empty' }, t('ui.search.none')));
+    if (!results.length) nav.append(h('p', { class: 'nav-empty' }, t('ui.search.none')));
   }
 
   let teardown: (() => void) | null = null;
