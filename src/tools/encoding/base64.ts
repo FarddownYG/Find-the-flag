@@ -40,6 +40,8 @@ export default defineTool({
   detect({ text }) {
     const t = text?.trim() ?? '';
     if (t.length < 8 || !/^[A-Za-z0-9+/_-]+={0,2}$/.test(t.replace(/\s+/g, ''))) return null;
+    // Digits only (char codes in decimal or octal, 0/1 binary, a big number) are not Base64.
+    if (/^[\d\s]+$/.test(t)) return null;
     const len = t.replace(/\s+/g, '').length;
     const score = len % 4 === 0 || !t.includes('=') ? 0.8 : 0.5;
     return { score, options: { mode: 'decode' }, reason: T('detect.charset') };
