@@ -1,4 +1,4 @@
-import { defineTool, select, text, toggle } from '../../core/define';
+import { defineTool, select, text } from '../../core/define';
 import type { Output } from '../../core/types';
 import { toolT } from '../../i18n/tool-text';
 import { breakoutChar, detectContexts, type Occurrence, type XssContext } from './_xss-contexts';
@@ -156,13 +156,19 @@ export default defineTool({
   live: false,
   placeholder: 'Paste the response source with your marker, e.g. <input value="xMARKERx">',
   options: {
-    mode: toggle('Mode', [
-      { value: 'context', label: 'Context' },
-      { value: 'payloads', label: 'Payloads' },
-      { value: 'exfil', label: 'Exfil' },
-      { value: 'sandbox', label: 'Sandbox' },
-      { value: 'help', label: 'Help' },
-    ]),
+    // A select, not a segmented toggle: five options overflow the toggle on a phone.
+    mode: select(
+      'Mode',
+      [
+        { value: 'context', label: 'Context' },
+        { value: 'payloads', label: 'Payloads' },
+        { value: 'exfil', label: 'Exfil' },
+        { value: 'sandbox', label: 'Sandbox' },
+        { value: 'help', label: 'Help' },
+      ],
+      'context',
+      { segmented: false },
+    ),
     marker: text('Marker', DEFAULT_MARKER, {
       hint: 'Inject this where your input is reflected, ideally with a probe: xMARKERx\'"<>',
       showIf: (v) => v.mode === 'context',

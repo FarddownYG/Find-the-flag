@@ -8,7 +8,7 @@ import { expect, test, type Page } from '@playwright/test';
 const out = (page: Page) => page.locator('.pane-out');
 const runBtn = (page: Page) => page.getByRole('button', { name: 'Run', exact: true });
 const mode = (page: Page, name: string) =>
-  page.locator('.options').getByRole('button', { name, exact: true }).click();
+  page.locator('#opt-xss-workshop-mode').selectOption({ label: name });
 
 /** Open the tool, recording page errors and every request that tries to leave the app's origin. */
 async function open(page: Page, baseURL: string | undefined) {
@@ -69,6 +69,8 @@ test('exfil mode builds a cookie stealer for your own collector, and sends nothi
 }) => {
   const w = await open(page, baseURL);
   await mode(page, 'Exfil');
+  // Like every tool here, it runs on the main input; exfil reads the collector from its option.
+  await page.locator('.input-text').fill('x');
   await page.locator('#opt-xss-workshop-collector').fill('https://abcd1234.webhook.site');
   await runBtn(page).click();
   await expect(out(page)).toContainText('https://abcd1234.webhook.site');
@@ -130,6 +132,7 @@ test('a raw <img src> exfil is blocked by the frame CSP, never reaching the netw
 test('help mode gives the webhook.site walkthrough', async ({ page, baseURL }) => {
   await open(page, baseURL);
   await mode(page, 'Help');
+  await page.locator('.input-text').fill('x');
   await runBtn(page).click();
   await expect(out(page)).toContainText('webhook.site');
   await expect(out(page)).toContainText('document.cookie');
