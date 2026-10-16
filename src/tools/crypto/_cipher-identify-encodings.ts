@@ -44,7 +44,11 @@ const SAME_FAMILY: Record<string, FamilyId> = {
   atbash: 'atbash',
 };
 
-const SKIP = new Set(['cipher-identify', 'auto-decode']);
+/**
+ * Not asked: the identifier itself, the chain finder, and the base converter, which shows the same
+ * codes as the Binary, Hex and Char codes tools it would tie with.
+ */
+const SKIP = new Set(['cipher-identify', 'auto-decode', 'base-convert']);
 
 /**
  * Size of the alphabet of the encodings that are only recognised by their characters. A text of

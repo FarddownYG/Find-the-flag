@@ -58,7 +58,7 @@ interface Parsed {
   token: string;
 }
 
-function parseNumber(raw: string, choice: number | 'auto'): Parsed {
+export function parseNumber(raw: string, choice: number | 'auto'): Parsed {
   let s = raw.replace(/_/g, '');
   let negative = false;
   if (s[0] === '-' || s[0] === '+') {
@@ -102,7 +102,7 @@ function toBase(n: bigint, base: number): string {
 }
 
 /** Python's long_to_bytes: big-endian, no leading zero byte (zero is one 0x00 byte). */
-function bigintToBytes(n: bigint): Uint8Array {
+export function bigintToBytes(n: bigint): Uint8Array {
   let hex = n.toString(16);
   if (hex.length % 2) hex = `0${hex}`;
   const out = new Uint8Array(hex.length / 2);
