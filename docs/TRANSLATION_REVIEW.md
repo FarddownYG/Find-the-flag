@@ -19,6 +19,7 @@ Noted by the translators:
 - text stego (tool.text-analyzer, zero-width, whitespace): note.shouted, note.binaryData, pass.tapCode, note.hillClimb, pass.railFence, examples.musset-to-sand
 - misc + esolangs: tool.whitespace-lang.value.desc.* (+ note.auto / note.readFrom), text.betweenMarkers/textStart/textEnd, tool.piet.value.slid, value.stoppedInWhite
 - image analyzer, channel reveal, docucolor, printer dots: "noun: N" phrasing (image-analyzer.problem.ifd-cut, problem.value-outside, problem.thumb-outside, note.capped; printer-dots.value.threshold-*, value.blobs, warn.inliers); "плитка" for tile;…
+- web source analyzer (tool.web-source): note.shell ("the shell of a JavaScript app" as «оболочка»), kind.assign («Присвоение, похожее на секрет»), col.found («Найдено»), note.related (the deobfuscator is cited by its id js-deobfuscate: its Russian name is not known yet), «бандл» and «продакшен-сборки» as developer jargon; counts are written "noun: N" so that no number agreement is needed
 
 Noted by the proofreaders:
 
@@ -57,6 +58,7 @@ Noted by the translators:
 - text stego (tool.text-analyzer, zero-width, whitespace): pass.atbash, pass.boustrophedon, pass.multitap, note.sentenceStarts, note.shorter
 - misc + esolangs: tool.whitespace-lang.note.hidden (+ text.coverAdded/coverCleaned), tool.piet.value.pushed/popped/read/printed
 - image analyzer, channel reveal, docucolor, printer dots: value.parity-of.* (奇/偶 + 校验); 图块 for tile
+- web source analyzer (tool.web-source): note.shell (外壳), kind.assign (疑似机密的赋值), col.found (找到的内容), 机密信息 for "secrets", 分段 for the sections of an indexed map; source map, sourcesContent and bundle stay in Latin script
 
 Noted by the proofreaders:
 
@@ -93,6 +95,7 @@ Noted by the translators:
 - text stego (tool.text-analyzer, zero-width, whitespace): pass.nthWordOfLine, pass.nthLetterOfLine, pass.everyNthChar, note.fromLetter/fromChar, note.iocFlat, pass.combining, examples.musset-to-sand
 - misc + esolangs: tool.whitespace-lang.note.hidden, text.coverLines, text.coverAdded, value.desc.markersOwn, tool.esolang.text.bytesPrinted/stepsExecuted
 - image analyzer, channel reveal, docucolor, printer dots: image-analyzer.value.region._; docucolor.value.orientation-short._
+- web source analyzer (tool.web-source): kv.origin (उद्गम), col.found (जो मिला), note.shell (खोल), सीक्रेट for "secret", निष्कर्ष for "findings" (as in the image analyzer); source map, sourcesContent and bundle stay in Latin script
 
 Noted by the proofreaders:
 

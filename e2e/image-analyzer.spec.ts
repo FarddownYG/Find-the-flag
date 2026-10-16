@@ -253,7 +253,7 @@ test('image analyzer: real file inputs, second file, links, and no trace left', 
   expect(errors).toEqual([]);
 });
 
-test('image analyzer: the page CSP allows only OpenStreetMap tiles off-site, and enforces it', async ({
+test('image analyzer: the page CSP allows only OpenStreetMap tiles and the three URL-mode proxies off-site, and enforces it', async ({
   page,
 }) => {
   const { errors } = await watch(page);
@@ -284,10 +284,17 @@ test('image analyzer: the page CSP allows only OpenStreetMap tiles off-site, and
           v,
         ),
     );
-  expect(remote).toEqual(['https://tile.openstreetmap.org']);
+  // The map tiles (img-src) and, in connect-src, the three public proxies the Web source
+  // analyzer's URL mode uses when the user runs it: nothing else, no wildcard.
+  const proxies = [
+    'https://api.allorigins.win',
+    'https://corsproxy.io',
+    'https://api.codetabs.com',
+  ];
+  expect(remote).toEqual(['https://tile.openstreetmap.org', ...proxies]);
   expect(directives['img-src']).toContain('https://tile.openstreetmap.org');
   expect(directives['default-src']).toEqual(["'self'"]);
-  expect(directives['connect-src']).toEqual(["'self'"]);
+  expect(directives['connect-src']).toEqual(["'self'", ...proxies]);
   expect(directives['object-src']).toEqual(["'none'"]);
   // The meta comes before any script.
   expect(

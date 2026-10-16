@@ -218,6 +218,10 @@ are not registered as tools).
 ## 10. Rules
 
 - **Client-side only.** No network requests, no server, no telemetry. Libraries are bundled.
+  The only exception is the Web source analyzer's URL mode (`_web-source-fetch.ts`): it starts
+  only from the Run button, fetches the one address the user typed through three public CORS
+  proxies whose origins are the only extra `connect-src` entries in `index.html`, and says so
+  in the tool. A new tool does not get one.
 - **Analysis of user-provided data only.** No scanners, no requests to third-party targets,
   no online brute-force. This is what keeps the site legal to host publicly.
 - Never use `innerHTML`; tools never touch the DOM anyway.

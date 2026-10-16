@@ -8,9 +8,10 @@
       content="Open-source CTF toolbox that runs entirely in your browser: decoders, classical ciphers, steganography and forensics."
     />
     <meta name="referrer" content="no-referrer" />
+    <!-- connect-src lists exactly the three public CORS proxies that the Web source analyzer's URL mode contacts, and only when the user runs that mode (src/tools/forensics/_web-source-fetch.ts). -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data: https://tile.openstreetmap.org; media-src 'self' blob:; font-src 'self'; worker-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'"
+      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data: https://tile.openstreetmap.org; media-src 'self' blob:; font-src 'self'; worker-src 'self' blob:; connect-src 'self' https://api.allorigins.win https://corsproxy.io https://api.codetabs.com; object-src 'none'; base-uri 'none'; form-action 'none'"
     />
     <meta name="color-scheme" content="dark" />
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />

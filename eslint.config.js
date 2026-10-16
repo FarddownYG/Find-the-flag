@@ -3,7 +3,18 @@ import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['dist', 'node_modules', 'coverage', 'playwright-report', 'test-results'] },
+  {
+    // public/samples holds the data the "Try" buttons load (some are .js files made to look like
+    // real minified bundles); Prettier skips it too (.prettierignore).
+    ignores: [
+      'dist',
+      'node_modules',
+      'coverage',
+      'playwright-report',
+      'test-results',
+      'public/samples',
+    ],
+  },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
