@@ -18,7 +18,18 @@ const T = toolT('text-analyzer');
 // ---------------------------------------------------------------------------------------------
 // Homoglyphs
 
-/** Lookalikes of Latin letters: code point -> [Latin letter, Unicode name]. */
+/**
+ * Lookalikes of Latin letters: code point -> [the Latin letter it imitates, Unicode name].
+ *
+ * This small curated set is kept apart from the "Hidden Unicode text" tool's confusables on
+ * purpose, not by accident. That tool loads the full generated UTS #39 table (~1600 entries,
+ * each mapping a non-ASCII character to an ASCII *skeleton*) lazily, kept out of the first
+ * bundle (see _unicode-lookup.ts). Here the text analyzer needs the opposite: the specific
+ * Latin letter a character imitates inside a Latin word, chosen for high precision so ordinary
+ * text is not flagged, and bundled eagerly with the other passes. Reusing the skeleton table
+ * would change the meaning, flood the precision and pull that large data into this path — so the
+ * two stay separate.
+ */
 const CONFUSABLES: Record<number, [string, string]> = {
   0x0430: ['a', 'CYRILLIC SMALL LETTER A'],
   0x0435: ['e', 'CYRILLIC SMALL LETTER IE'],
