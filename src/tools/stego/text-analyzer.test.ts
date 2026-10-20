@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { ToolError } from '../../core/errors';
 import { resultToText } from '../../core/result-text';
-import type { Output } from '../../core/types';
+import { registeredTools, setRegisteredTools } from '../../core/tool-list';
+import type { AnyTool, Output } from '../../core/types';
 import { foldAccents } from '../../lib/readability';
 import { affineEncrypt } from '../crypto/affine';
 import { atbash } from '../crypto/atbash';
@@ -31,6 +32,7 @@ import { findHomoglyphs } from './_text-analyzer-hidden';
 import { charName, repeats, spacing } from './_text-analyzer-meta';
 import { embedPayload, encodePayload } from './_zerowidth';
 import tool, { analyze } from './text-analyzer';
+import unicodeHidden from './unicode-hidden';
 import { encodeBinary, encodeSnow } from './whitespace';
 
 const run = (text: string) => tool.run(text, {}) as Output[];
@@ -756,5 +758,18 @@ describe('round-2 verification fixes', () => {
       text: 'Nothing stands out; every pass is listed below',
     });
     expect(out[1]!.type).not.toBe('text');
+  });
+});
+
+describe('text-analyzer cross-link', () => {
+  it('offers the hidden-Unicode tool when non-ASCII characters appear', () => {
+    const prev = registeredTools();
+    setRegisteredTools([unicodeHidden] as AnyTool[]);
+    try {
+      expect(resultToText(run('Hello аbc world test here'))).toContain('Open in');
+      expect(resultToText(run('Hello world plain ascii only here'))).not.toContain('Open in');
+    } finally {
+      setRegisteredTools(prev);
+    }
   });
 });

@@ -1,8 +1,9 @@
 import { defineTool } from '../../core/define';
 import { ToolError } from '../../core/errors';
+import { registeredTools } from '../../core/tool-list';
 import type { Output } from '../../core/types';
 import { getLocale } from '../../i18n/index';
-import { toolT } from '../../i18n/tool-text';
+import { toolName, toolT } from '../../i18n/tool-text';
 import { chainedPasses, chainSources, cipherPasses } from './_text-analyzer-ciphers';
 import {
   baselineOf,
@@ -288,6 +289,21 @@ function render(a: Analysis, raw: string): Output[] {
         }
       : { type: 'note', level: 'info', text: T('text.noRepeats') },
   );
+  if (nonAscii.rows.length) {
+    const uhid = registeredTools().find((t) => t.id === 'unicode-hidden');
+    if (uhid) {
+      out.push({
+        type: 'actions',
+        actions: [
+          {
+            label: T('open', { tool: toolName(uhid) }),
+            options: {},
+            open: { tool: uhid.id, text: raw },
+          },
+        ],
+      });
+    }
+  }
   return out;
 }
 

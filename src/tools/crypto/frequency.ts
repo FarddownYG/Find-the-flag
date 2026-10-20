@@ -1,10 +1,32 @@
 import { bool, defineTool, number } from '../../core/define';
 import { ToolError } from '../../core/errors';
-import { toolT } from '../../i18n/tool-text';
+import { registeredTools } from '../../core/tool-list';
+import type { Output } from '../../core/types';
+import { toolName, toolT } from '../../i18n/tool-text';
 import { chiSquared, indexOfCoincidence } from '../../lib/english';
 import { ALPHABET, ENGLISH_FREQ, averageColumnIoc, letterCounts } from './_classical';
 
 const T = toolT('frequency');
+
+/** Offer the cipher identifier for text with enough letters (the identifier links back here). */
+function identifyLink(text: string, letters: number): Output[] {
+  const tool =
+    letters >= 20 ? registeredTools().find((t) => t.id === 'cipher-identify') : undefined;
+  return tool
+    ? [
+        {
+          type: 'actions',
+          actions: [
+            {
+              label: T('open', { tool: toolName(tool) }),
+              options: {},
+              open: { tool: tool.id, text },
+            },
+          ],
+        },
+      ]
+    : [];
+}
 
 const ENGLISH_ORDER = 'ETAOINSHRDLCUMWFGYPBVKJXQZ';
 const COMMON_BIGRAMS = 'TH HE IN ER AN RE ON AT EN ND TI ES OR TE OF ED IS IT AL AR ST TO NT NG';
@@ -251,6 +273,7 @@ export default defineTool({
         columns: [T('col.pair'), T('col.count'), '%'],
         rows: ngramRows(doubles(words, top), 2),
       },
+      ...identifyLink(text, total),
     ];
   },
 });

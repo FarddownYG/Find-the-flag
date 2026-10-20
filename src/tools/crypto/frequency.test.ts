@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { ToolError } from '../../core/errors';
 import { resultToText } from '../../core/result-text';
-import type { ToolResult } from '../../core/types';
+import { registeredTools, setRegisteredTools } from '../../core/tool-list';
+import type { AnyTool, ToolResult } from '../../core/types';
 import { parseLetterKey } from './_classical';
 import { PROSE_A, PROSE_B } from './_sample-text';
+import cipherIdentify from './cipher-identify';
 import tool, { analyse } from './frequency';
 import { vigenereTransform } from './vigenere';
 
@@ -86,5 +88,18 @@ describe('frequency', () => {
   it('rejects text without letters', () => {
     expect(() => run('1234 !?')).toThrow(ToolError);
     expect(() => run('')).toThrow(/No letters/);
+  });
+});
+
+describe('frequency cross-link', () => {
+  it('offers the cipher identifier for a real block of text, not a few letters', () => {
+    const prev = registeredTools();
+    setRegisteredTools([tool, cipherIdentify] as AnyTool[]);
+    try {
+      expect(resultToText(run(PROSE_A))).toContain('Open in');
+      expect(resultToText(run('AB CD'))).not.toContain('Open in');
+    } finally {
+      setRegisteredTools(prev);
+    }
   });
 });

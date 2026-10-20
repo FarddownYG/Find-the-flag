@@ -1,7 +1,8 @@
 import { bool, defineTool, number, select } from '../../core/define';
 import { ToolError } from '../../core/errors';
+import { registeredTools } from '../../core/tool-list';
 import type { KeypadKey, Output } from '../../core/types';
-import { toolT } from '../../i18n/tool-text';
+import { toolName, toolT } from '../../i18n/tool-text';
 import { utf8Encode } from '../../lib/bytes';
 import { ALPHABETS, type AlphabetId, type SymbolKey, type Token } from './_symbols';
 import { renderRow, renderSheet } from './_symbols-svg';
@@ -185,6 +186,21 @@ export default defineTool({
       mime: 'image/svg+xml',
       filename: `${id}-reference.svg`,
     });
+    if (id === 'braille') {
+      const braille = registeredTools().find((t) => t.id === 'braille');
+      if (braille) {
+        out.push({
+          type: 'actions',
+          actions: [
+            {
+              label: T('open', { tool: toolName(braille) }),
+              options: {},
+              open: { tool: braille.id, text },
+            },
+          ],
+        });
+      }
+    }
     return out;
   },
 });

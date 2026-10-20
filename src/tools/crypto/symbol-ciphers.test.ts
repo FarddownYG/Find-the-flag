@@ -2,8 +2,10 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { ToolError } from '../../core/errors';
 import { resultToText } from '../../core/result-text';
-import type { Glyph, Output } from '../../core/types';
+import { registeredTools, setRegisteredTools } from '../../core/tool-list';
+import type { AnyTool, Glyph, Output } from '../../core/types';
 import { utf8Decode } from '../../lib/bytes';
+import braille from '../encoding/braille';
 import { brailleDecode } from '../stego/_text-analyzer-decode';
 import {
   ALPHABET_IDS,
@@ -594,5 +596,18 @@ describe('the sample pictures', () => {
     expect(count('symbols-pigpen-flag.svg')).toBe(9); // FTF PIGPEN
     expect(count('symbols-semaphore-line.svg')).toBe(8); // FTF FLAGS
     expect(count('symbols-braille-line.svg')).toBe(10); // ftf braille
+  });
+});
+
+describe('symbol-ciphers cross-link', () => {
+  it('offers the Braille tool only for the Braille alphabet', () => {
+    const prev = registeredTools();
+    setRegisteredTools([braille] as AnyTool[]);
+    try {
+      expect(resultToText(run('ftf', { alphabet: 'braille' }))).toContain('Open in');
+      expect(resultToText(run('ftf', { alphabet: 'pigpen' }))).not.toContain('Open in');
+    } finally {
+      setRegisteredTools(prev);
+    }
   });
 });
