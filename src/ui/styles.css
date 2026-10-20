@@ -1076,7 +1076,9 @@ tr.is-hl td:first-child {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 12px 16px;
+    /* Tight gutters: at 390px the brand, language picker and menu button are a close fit, and
+       longer translations (Russian "Инструменты") overflowed the row by a few px. */
+    padding: 12px 10px;
     border-bottom: 1px solid var(--line);
     position: sticky;
     top: 0;
@@ -1087,7 +1089,16 @@ tr.is-hl td:first-child {
     border: 1px solid var(--line-strong);
     background: transparent;
     border-radius: var(--radius);
-    padding: 5px 12px;
+    padding: 5px 8px;
+    white-space: nowrap;
+  }
+  /* Keep the language picker compact so the row has margin for longer translations. */
+  .topbar-actions {
+    gap: 6px;
+  }
+  .topbar .lang {
+    max-width: 9ch;
+    padding: 3px 2px;
   }
   .sidebar {
     display: none;
