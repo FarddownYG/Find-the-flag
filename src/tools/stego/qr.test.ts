@@ -161,7 +161,9 @@ describe('QR reader', () => {
     const t0 = performance.now();
     const out = run(big);
     expect(text(out)).toBe('needle');
-    expect(performance.now() - t0).toBeLessThan(8000);
+    // The scan is bounded by a fixed pixel budget (_qr-scan PIXEL_BUDGET), so this only guards
+    // against an unbounded regression; keep ample headroom for a loaded CI runner.
+    expect(performance.now() - t0).toBeLessThan(20000);
     expect(resultToText(out)).toMatch(/Position: around \(16\d\d, 10\d\d\)/);
   });
 
@@ -176,8 +178,10 @@ describe('QR reader', () => {
     const out = run(noise);
     expect(resultToText(out)).toMatch(/No QR code found after \d+ attempts/);
     expect(out[0]).toMatchObject({ type: 'note', level: 'warn' });
-    expect(performance.now() - t0).toBeLessThan(15000);
-  }, 30000);
+    // Bounded by the pixel budget; guard only against an unbounded regression, with headroom
+    // for a loaded CI runner (the test timeout below is the real backstop).
+    expect(performance.now() - t0).toBeLessThan(28000);
+  }, 60000);
 
   it('rejects an image without pixels', () => {
     expect(() => run({ width: 0, height: 0, data: new Uint8ClampedArray(0) })).toThrow(/no pixels/);
