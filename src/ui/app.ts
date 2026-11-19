@@ -5,6 +5,7 @@ import { getLocale, LOCALES, isLocale, onLocaleChange, setLocale, t } from '../i
 import { categoryBlurb, categoryName, toolDescription, toolName } from '../i18n/tool-text';
 import { isValidUtf8, printableRatio, utf8Decode, utf8Encode } from '../lib/bytes';
 import { clear, copyText, debounce, h } from './dom';
+import { renderResources } from './resources';
 import { search } from './search';
 import { flagSettings } from './settings';
 import { renderTool, setPending } from './tool-view';
@@ -14,6 +15,7 @@ export function mountApp(root: HTMLElement): void {
   let nav = h('nav');
   let searchBox = h('input');
   let menuBtn = h('button');
+  let resLink = h('a');
   let current = '';
 
   /** Everything around <main>; rebuilt when the language changes. */
@@ -39,6 +41,15 @@ export function mountApp(root: HTMLElement): void {
         }
       },
     });
+    resLink = h(
+      'a',
+      {
+        class: 'side-link',
+        href: '#/resources',
+        'aria-current': current === 'resources' ? 'page' : undefined,
+      },
+      t('ui.resources.navLink'),
+    );
     const brand = () =>
       h(
         'a',
@@ -56,6 +67,7 @@ export function mountApp(root: HTMLElement): void {
         searchBox,
         h('kbd', { class: 'search-kbd', 'aria-hidden': 'true' }, '/'),
       ),
+      resLink,
       nav,
       settingsPanel(),
     );
@@ -129,10 +141,16 @@ export function mountApp(root: HTMLElement): void {
     menuBtn.setAttribute('aria-expanded', 'false');
     const m = location.hash.match(/^#\/tool\/([a-z0-9-]+)/);
     const tool = m ? getTool(m[1]!) : undefined;
-    current = tool?.id ?? '';
+    const onResources = /^#\/resources\b/.test(location.hash);
+    current = tool?.id ?? (onResources ? 'resources' : '');
+    if (onResources) resLink.setAttribute('aria-current', 'page');
+    else resLink.removeAttribute('aria-current');
     if (tool) {
       document.title = `${toolName(tool)} · Find The Flag`;
       teardown = renderTool(tool, main, (id) => (location.hash = `#/tool/${id}`));
+    } else if (onResources) {
+      document.title = `${t('ui.resources.title')} · Find The Flag`;
+      renderResources(main);
     } else {
       document.title = t('ui.title');
       renderHome(main);
@@ -385,6 +403,11 @@ function renderHome(main: HTMLElement) {
       { class: 'home' },
       h('h1', { class: 'home-title' }, t('ui.home.title')),
       h('p', { class: 'home-lede' }, t('ui.home.lede', { count: TOOLS.length })),
+      h(
+        'p',
+        { class: 'home-links' },
+        h('a', { class: 'side-link', href: '#/resources' }, t('ui.resources.navLink')),
+      ),
       drop,
       results,
       h(
