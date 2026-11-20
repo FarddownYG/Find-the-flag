@@ -337,3 +337,18 @@ describe('Script Encoder routing', () => {
     expect(resultToText(r)).not.toMatch(/SyntaxError/i); // the sandbox never tried to run it
   });
 });
+
+describe('invisible control characters', () => {
+  it('flags and reveals a control byte hidden in the source', async () => {
+    // A 0x7f (DEL) buried in a string literal is invisible on screen but changes the comparison.
+    const src = 'if (x == "a\x7fb") win();';
+    const r = await run(src);
+    expect(notes(r).join('\n')).toMatch(/control character/i);
+    expect(resultToText(r)).toContain('\\x7f'); // shown so it is visible and copyable
+  });
+
+  it('stays quiet on ordinary source (tabs and newlines are not flagged)', async () => {
+    const r = await run('function f(){\n\treturn 1;\n}');
+    expect(notes(r).join('\n')).not.toMatch(/control character/i);
+  });
+});

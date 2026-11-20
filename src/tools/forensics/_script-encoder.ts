@@ -127,11 +127,11 @@ export type Checksum = 'ok' | 'bad' | 'unknown';
 export interface ScriptBlock {
   /** The decoded script text. */
   script: string;
-  /** Decoded length declared in the header. */
+  /** Length of the decoded script (characters). */
   length: number;
   /** Whether the trailing checksum matched the decoded bytes. */
   checksum: Checksum;
-  /** The input ran out before the declared length (the block is cut off). */
+  /** The input ran out before the end of the body (the block is cut off). */
   truncated: boolean;
 }
 
@@ -146,15 +146,24 @@ function u32le(b64: string): number | null {
   }
 }
 
-/** Decode one `#@~^…^#~@` block that starts at `start`; null if the header is not usable. */
+/**
+ * Decode one `#@~^…^#~@` block that starts at `start`; null if the header is not usable.
+ *
+ * The header's length field counts the ENCODED body bytes (between the header and the 8-byte
+ * checksum), not the decoded characters: with `@`-escapes two encoded bytes become one decoded
+ * char, so the two differ. Decoding must therefore stop at `bodyEnd` — stopping after N decoded
+ * characters over-runs the body and decodes the checksum and trailer into garbage.
+ */
 function decodeOne(input: string, start: number): { block: ScriptBlock; end: number } | null {
-  const length = u32le(input.slice(start + 4, start + 12));
-  if (length === null || length > input.length) return null;
+  const bodyBytes = u32le(input.slice(start + 4, start + 12));
+  if (bodyBytes === null || bodyBytes > input.length) return null;
+  const bodyEnd = start + 12 + bodyBytes;
   let i = start + 12;
+  let n = 0; // decoded-character counter — drives the rotating column
   let out = '';
   let sum = 0;
   let truncated = false;
-  for (let n = 0; n < length; n++) {
+  while (i < bodyEnd) {
     if (i >= input.length) {
       truncated = true;
       break;
@@ -180,13 +189,14 @@ function decodeOne(input: string, start: number): { block: ScriptBlock; end: num
     }
     sum = (sum + ch.charCodeAt(0)) >>> 0;
     out += ch;
+    n++;
   }
-  const want = truncated ? null : u32le(input.slice(i, i + 8));
+  // The checksum sits right after the body, at bodyEnd (unless the input was cut off first).
+  const want = truncated ? null : u32le(input.slice(bodyEnd, bodyEnd + 8));
   const checksum: Checksum = want === null ? 'unknown' : want === sum ? 'ok' : 'bad';
-  let end = i + 8;
+  let end = truncated ? i : bodyEnd + 8;
   if (input.startsWith('^#~@', end)) end += 4;
-  else if (!truncated) end = i; // trailer not where expected; resume scanning after the body
-  return { block: { script: out, length, checksum, truncated }, end };
+  return { block: { script: out, length: out.length, checksum, truncated }, end };
 }
 
 /** Decode every Script Encoder block found in the text (a page may hold several). */

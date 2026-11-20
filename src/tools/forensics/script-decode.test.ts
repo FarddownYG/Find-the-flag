@@ -50,6 +50,20 @@ describe('Script Encoder decoding', () => {
     expect(b!.checksum).toBe('bad');
   });
 
+  it('reads the header length as encoded-body bytes, so @-escapes do not over-run the trailer', () => {
+    // Body carries @-escapes (one '<' and two newlines), so the decoded length (23) is less than
+    // the encoded body length (26). Treating the header as a decoded-char count would keep decoding
+    // past the body into the checksum and trailer, producing a garbage tail.
+    const block = new TextDecoder().decode(
+      fromBase64('I0B+XkdnQUFBQT09cjZQY21QQCFQNCpQUEAmUCxvR2BYI0lAJil4UVVBQUE9PV4jfkA='),
+    );
+    const [b] = decodeScriptEncoder(block);
+    expect(b!.script).toBe('if (a < b) {\n  go(x);\n}');
+    expect(b!.length).toBe(23);
+    expect(b!.checksum).toBe('ok');
+    expect(b!.truncated).toBe(false);
+  });
+
   it('decodes best-effort and marks truncation when bytes are missing', () => {
     const cut = JS.slice(0, JS.length - 20); // drop the trailer and several body chars
     const [b] = decodeScriptEncoder(cut);

@@ -117,7 +117,7 @@ export default defineTool({
         out.push({
           type: 'note',
           level: 'warn',
-          text: T('note.truncated', { got: b.script.length, len: b.length }),
+          text: T('note.truncated', { got: b.script.length }),
         });
       } else {
         out.push(sumNote(b));

@@ -52,6 +52,30 @@ function clip(s: string): { value: string; cut: number } {
     : { value: s, cut: 0 };
 }
 
+/** An invisible control byte: C0/C1 range or DEL, but not tab/LF/CR, which are normal in source. */
+const isControl = (code: number): boolean =>
+  (code < 0x20 && code !== 0x09 && code !== 0x0a && code !== 0x0d) || code === 0x7f;
+
+/**
+ * Invisible control characters in the source — e.g. a stray `\x7f` hidden inside a string literal —
+ * are a genuine obfuscation trick: they change what the code does but are lost when you read or copy
+ * it. Flag how many there are and show a copy where each is written as `\xXX`.
+ */
+function controlCharHint(text: string): Output[] {
+  let n = 0;
+  for (let k = 0; k < text.length; k++) if (isControl(text.charCodeAt(k))) n++;
+  if (n === 0) return [];
+  let shown = '';
+  for (let k = 0; k < text.length; k++) {
+    const code = text.charCodeAt(k);
+    shown += isControl(code) ? `\\x${code.toString(16).padStart(2, '0')}` : text[k];
+  }
+  return [
+    { type: 'note', level: 'warn', text: T('note.control', { n }) },
+    ...codeBlock(T('label.control'), shown, false),
+  ];
+}
+
 /** Long code on few lines: the kind a minifier or an obfuscator makes. */
 const looksMinified = (code: string): boolean =>
   code.length > 120 && code.split('\n').length < code.length / 100;
@@ -497,8 +521,12 @@ export default defineTool({
     // (the sandbox would just throw a SyntaxError). Route it to its decoder in either mode.
     const encoder = scriptEncoderHint(text);
     if (encoder.length) return encoder;
-    return mode === 'sandbox'
-      ? sandboxReport(text, Number(timeout), pretty)
-      : staticReport(text, pretty);
+    const body =
+      mode === 'sandbox'
+        ? await sandboxReport(text, Number(timeout), pretty)
+        : staticReport(text, pretty);
+    // Invisible control bytes change what the code means while hiding from every plain view — a
+    // real obfuscation trick. Surface them first, above the analysis.
+    return [...controlCharHint(text), ...body];
   },
 });
