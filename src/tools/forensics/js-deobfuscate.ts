@@ -173,11 +173,6 @@ function scriptEncoderHint(text: string): Output[] {
 function staticReport(text: string, pretty: boolean): Output[] {
   const r: PeelResult = peel(text);
   const out: Output[] = [{ type: 'note', level: 'info', text: T('note.static') }];
-  const encoder = scriptEncoderHint(text);
-  if (encoder.length) {
-    out.push(...encoder);
-    return out;
-  }
   if (!r.changed) {
     out.push({ type: 'note', level: 'warn', text: T('note.nothingToPeel') });
     out.push(...cipherHint(text));
@@ -498,6 +493,10 @@ export default defineTool({
     if (text.length > MAX_INPUT) {
       throw new ToolError(T('error.tooBig', { size: text.length, max: MAX_INPUT }));
     }
+    // A Script Encoder block is not JavaScript — neither the peel nor the sandbox can read it
+    // (the sandbox would just throw a SyntaxError). Route it to its decoder in either mode.
+    const encoder = scriptEncoderHint(text);
+    if (encoder.length) return encoder;
     return mode === 'sandbox'
       ? sandboxReport(text, Number(timeout), pretty)
       : staticReport(text, pretty);

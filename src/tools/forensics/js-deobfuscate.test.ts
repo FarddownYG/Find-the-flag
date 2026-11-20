@@ -328,4 +328,12 @@ describe('Script Encoder routing', () => {
     const n = notes(await run(block)).join('\n');
     expect(n).toMatch(/Script Encoder/i);
   });
+
+  it('routes a #@~^ block in sandbox mode too, instead of running it as JS', async () => {
+    // The block is not JavaScript: running it would throw SyntaxError. Route it, do not run it.
+    const block = '#@~^FAAAAA==\x09Um.bwDR21tK~J4+sVKJ8QYAAA==^#~@';
+    const r = await sandbox(block);
+    expect(notes(r).join('\n')).toMatch(/Script Encoder/i);
+    expect(resultToText(r)).not.toMatch(/SyntaxError/i); // the sandbox never tried to run it
+  });
 });
