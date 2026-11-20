@@ -1,27 +1,65 @@
 import { defineTool } from '../../core/define';
 import { ToolError } from '../../core/errors';
 import { registeredTools } from '../../core/tool-list';
-import type { Output } from '../../core/types';
+import type { Output, Sample } from '../../core/types';
 import { toolName, toolT } from '../../i18n/tool-text';
+import { utf8Encode } from '../../lib/bytes';
 import { decodeScriptEncoder, hasScriptEncoder, type ScriptBlock } from './_script-encoder';
 
 const T = toolT('script-decode');
 
-/** Links to the tools that read the decoded script further. */
-function related(firstScript: string): Output[] {
-  const tools = registeredTools();
-  const actions: Extract<Output, { type: 'actions' }>['actions'] = [];
-  for (const id of ['js-deobfuscate', 'web-source', 'strings']) {
-    const tool = tools.find((t) => t.id === id);
-    if (tool) {
-      actions.push({
-        label: T('action.open', { tool: toolName(tool) }),
+const DETECT_LIMIT = 200_000;
+
+/**
+ * What to do with the decoded script: run every tool's own detector over it (the same vote the
+ * home page uses) and offer the ones that recognise it, best first, carrying their preselected
+ * options. This is how the decoder points at the next tool — a base64 blob, more obfuscated JS, a
+ * source map, hidden characters — instead of guessing.
+ */
+function suggestNext(decoded: string): Output[] {
+  const sample: Sample = { text: decoded, bytes: utf8Encode(decoded.slice(0, DETECT_LIMIT)) };
+  const hits = registeredTools()
+    .filter((t) => t.id !== 'script-decode' && typeof t.detect === 'function')
+    .map((t) => {
+      try {
+        const d = t.detect!(sample);
+        return d && d.score >= 0.3 ? { tool: t, d } : null;
+      } catch {
+        return null;
+      }
+    })
+    .filter((x): x is NonNullable<typeof x> => x !== null)
+    .sort((a, b) => b.d.score - a.d.score)
+    .slice(0, 5);
+
+  // Fall back to the tools that simply read any script, when no detector fired.
+  if (!hits.length) {
+    const tools = registeredTools();
+    const actions = ['js-deobfuscate', 'web-source', 'strings']
+      .map((id) => tools.find((t) => t.id === id))
+      .filter((t): t is NonNullable<typeof t> => !!t)
+      .map((t) => ({
+        label: T('action.open', { tool: toolName(t) }),
         options: {},
-        open: { tool: id, text: firstScript },
-      });
-    }
+        open: { tool: t.id, text: decoded },
+      }));
+    return actions.length ? [{ type: 'actions', label: T('label.related'), actions }] : [];
   }
-  return actions.length ? [{ type: 'actions', label: T('label.related'), actions }] : [];
+
+  return [
+    { type: 'note', level: 'info', text: T('note.next') },
+    {
+      type: 'actions',
+      label: T('label.next'),
+      actions: hits.map(({ tool, d }) => ({
+        label: d.reason
+          ? T('action.openWhy', { tool: toolName(tool), why: d.reason })
+          : T('action.open', { tool: toolName(tool) }),
+        options: (d.options ?? {}) as Record<string, unknown>,
+        open: { tool: tool.id, text: decoded },
+      })),
+    },
+  ];
 }
 
 export default defineTool({
@@ -90,7 +128,7 @@ export default defineTool({
         value: b.script,
       });
     });
-    out.push(...related(blocks[0]!.script));
+    out.push(...suggestNext(blocks[0]!.script));
     out.push({ type: 'note', level: 'info', text: T('note.static') });
     return out;
   },
