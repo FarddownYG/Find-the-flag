@@ -111,6 +111,46 @@ function analyzers(): Output[] {
   ];
 }
 
+/**
+ * A script that reads a key at runtime (prompt) or runs its own character cipher has nothing to
+ * peel statically: the secret is the key, not the code. Say so, and point at the tools that decode
+ * the operation once it is known. Only a hint — it fires when the usual char-cipher shapes appear.
+ */
+function cipherHint(text: string): Output[] {
+  const charOps = /\.charCodeAt\s*\(/.test(text) && /fromCharCode/.test(text);
+  if (!charOps) return [];
+  const rotates = /<</.test(text) && />>/.test(text);
+  const xor = /[\w$)\]]\s*\^\s*[\w$(]/.test(text); // a ^ b, not ^= or a caret in a regex
+  if (!xor && !rotates) return [];
+  const interactive = /\bprompt\s*\(/.test(text);
+  const byId = new Map(registeredTools().map((t) => [t.id, t] as const));
+  const xorTool = byId.get('xor');
+  const cc = byId.get('charcode');
+  const names = {
+    xor: xorTool ? toolName(xorTool) : 'XOR',
+    charcode: cc ? toolName(cc) : 'Char codes',
+  };
+  const out: Output[] = [
+    {
+      type: 'note',
+      level: 'info',
+      text: interactive ? T('note.keyedCipher', names) : T('note.customCipher', names),
+    },
+  ];
+  const tools = [xorTool, cc].filter((t): t is NonNullable<typeof t> => !!t);
+  if (tools.length) {
+    out.push({
+      type: 'actions',
+      actions: tools.map((tool) => ({
+        label: T('open', { tool: toolName(tool) }),
+        options: {},
+        open: { tool: tool.id, text: '' },
+      })),
+    });
+  }
+  return out;
+}
+
 // ---------- static ----------
 
 function staticReport(text: string, pretty: boolean): Output[] {
@@ -118,6 +158,7 @@ function staticReport(text: string, pretty: boolean): Output[] {
   const out: Output[] = [{ type: 'note', level: 'info', text: T('note.static') }];
   if (!r.changed) {
     out.push({ type: 'note', level: 'warn', text: T('note.nothingToPeel') });
+    out.push(...cipherHint(text));
     out.push(...codeBlock(T('label.input'), text, pretty));
     out.push(nextSteps(text, 'sandbox'));
     out.push(...analyzers());
@@ -155,6 +196,7 @@ function staticReport(text: string, pretty: boolean): Output[] {
   if (/\b(?:eval|Function)\s*\(/.test(r.code)) {
     out.push({ type: 'note', level: 'warn', text: T('note.dynamicLeft') });
   }
+  out.push(...cipherHint(r.code));
   out.push(nextSteps(r.code, 'sandbox'));
   out.push(...analyzers());
   return out;

@@ -288,3 +288,36 @@ describe('detect', () => {
     }
   });
 });
+
+describe('keyed / custom cipher hint', () => {
+  const KEYED =
+    'var d="\\x71\\x11\\x24";function x(a,b){return a^b;}' +
+    'function t(s,k){var o="";for(var i=0;i<s.length;i++){o+=String.fromCharCode(x(s.charCodeAt(i),k.charCodeAt(i%k.length)));}return o;}' +
+    'alert(t(d,prompt("Password?")));';
+  const HARDCODED =
+    'var d="\\x71\\x11";var k="key";var o="";' +
+    'for(var i=0;i<d.length;i++){o+=String.fromCharCode(d.charCodeAt(i)^k.charCodeAt(i%k.length));}document.write(o);';
+
+  it('explains that a prompt-keyed cipher has nothing to peel statically', async () => {
+    const n = notes(await run(KEYED)).join('\n');
+    expect(n).toMatch(/nothing to peel statically/i);
+    expect(n).toMatch(/password/i);
+  });
+
+  it('flags a hard-coded custom character cipher', async () => {
+    const n = notes(await run(HARDCODED)).join('\n');
+    expect(n).toMatch(/custom character cipher/i);
+  });
+
+  it('does not fire on standard obfuscation (no char cipher)', async () => {
+    const n = notes(await run('eval(atob("YWxlcnQoMSk="));')).join('\n');
+    expect(n).not.toMatch(/cipher/i);
+  });
+
+  it('does not fire on charCodeAt without an xor or rotation', async () => {
+    const n = notes(
+      await run('var s="abc";var o="";for(var i=0;i<s.length;i++)o+=s.charCodeAt(i)+",";alert(o);'),
+    ).join('\n');
+    expect(n).not.toMatch(/cipher/i);
+  });
+});
