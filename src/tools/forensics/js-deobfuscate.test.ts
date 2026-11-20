@@ -321,3 +321,11 @@ describe('keyed / custom cipher hint', () => {
     expect(n).not.toMatch(/cipher/i);
   });
 });
+
+describe('Script Encoder routing', () => {
+  it('points a #@~^ block at the Script Encoder decoder instead of peeling', async () => {
+    const block = '#@~^FAAAAA==\x09Um.bwDR21tK~J4+sVKJ8QYAAA==^#~@';
+    const n = notes(await run(block)).join('\n');
+    expect(n).toMatch(/Script Encoder/i);
+  });
+});

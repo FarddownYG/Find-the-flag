@@ -7,6 +7,7 @@ import { beautify } from './_js-deobf-beautify';
 import { COMPILE_TYPES } from './_js-deobf-hooks';
 import { runSandbox, type SandboxResult } from './_js-deobf-run';
 import { peel, type PeelResult, type PeelRule } from './_js-deobf-static';
+import { hasScriptEncoder } from './_script-encoder';
 
 const T = toolT('js-deobfuscate');
 
@@ -153,9 +154,30 @@ function cipherHint(text: string): Output[] {
 
 // ---------- static ----------
 
+/** A Microsoft Script Encoder block is not JavaScript the peel can read: route to its decoder. */
+function scriptEncoderHint(text: string): Output[] {
+  if (!hasScriptEncoder(text)) return [];
+  const tool = registeredTools().find((t) => t.id === 'script-decode');
+  if (!tool) return [];
+  return [
+    { type: 'note', level: 'warn', text: T('note.scriptEncoder', { tool: toolName(tool) }) },
+    {
+      type: 'actions',
+      actions: [
+        { label: T('open', { tool: toolName(tool) }), options: {}, open: { tool: tool.id, text } },
+      ],
+    },
+  ];
+}
+
 function staticReport(text: string, pretty: boolean): Output[] {
   const r: PeelResult = peel(text);
   const out: Output[] = [{ type: 'note', level: 'info', text: T('note.static') }];
+  const encoder = scriptEncoderHint(text);
+  if (encoder.length) {
+    out.push(...encoder);
+    return out;
+  }
   if (!r.changed) {
     out.push({ type: 'note', level: 'warn', text: T('note.nothingToPeel') });
     out.push(...cipherHint(text));
