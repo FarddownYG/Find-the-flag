@@ -17,6 +17,14 @@ import {
   type SurgeryOptions,
   type TextInfo,
 } from './_png-surgeon-core';
+import {
+  apngFrames,
+  decodeActl,
+  decodeFctl,
+  type Fctl,
+  hiddenChannels,
+  isApng,
+} from './_png-surgeon-apng';
 import { findHints, otherReading, type Reading, type SequenceProblem } from './_png-surgeon-order';
 import { looksLikePng, parseTolerant, type SurgeonChunk } from './_png-surgeon-parse';
 import { tailStrings, type TailPart } from './_png-surgeon-tail';
@@ -33,6 +41,13 @@ const T = toolT('png-surgeon');
 
 const MAX_TABLE_ROWS = 400;
 const MAX_REORDER_ITEMS = 200;
+/** Frames rebuilt (all are downloadable) and how many get an inline preview. */
+const APNG_MAX_FRAMES = 512;
+const APNG_MAX_PREVIEW = 24;
+/** Per-frame values shown in the hidden-channel table before it is cut. */
+const APNG_MAX_VALUES = 48;
+const showText = (s: string) => s.replace(/[^\x20-\x7e]/g, '·').slice(0, 80);
+const playsText = (plays: number) => (plays === 0 ? T('val.loopForever') : String(plays));
 const hex = (n: number, width = 8) => `0x${n.toString(16).toUpperCase().padStart(width, '0')}`;
 const off = (n: number) => `0x${n.toString(16).toUpperCase()}`;
 const hexBytes = (b: ArrayLike<number>) => toHex(Uint8Array.from(b), ' ').toUpperCase();
@@ -344,6 +359,23 @@ function chunkInfo(s: Surgery, c: SurgeonChunk, idatNo: Map<SurgeonChunk, number
       );
       if (s.hints.some((h) => h.text === ti)) bits.push(T('info.hint'));
     }
+  } else if (c.type === 'acTL') {
+    const a = decodeActl(c.data);
+    if (a) bits.push(T('info.actl', { frames: a.numFrames, plays: playsText(a.numPlays) }));
+  } else if (c.type === 'fcTL') {
+    const fr = decodeFctl(c.data);
+    if (fr)
+      bits.push(
+        T('info.fctl', {
+          seq: fr.sequence,
+          w: fr.width,
+          h: fr.height,
+          x: fr.xOffset,
+          y: fr.yOffset,
+          num: fr.delayNum,
+          den: fr.delayDen,
+        }),
+      );
   } else if (!(c.type in KNOWN_CHUNKS) || !c.validType) {
     bits.push(chunkKind({ ...c, crcStored: c.crcStored ?? 0 }).description);
   }
@@ -444,6 +476,98 @@ function chunkSection(s: Surgery): Output[] {
 }
 
 const printableType = (t: string) => t.replace(/[^\x20-\x7e]/g, '·');
+
+/**
+ * APNG view: what the animation says, whether a per-frame numeric field spells a hidden message,
+ * and each frame as a standalone PNG. Empty for a plain PNG (no acTL).
+ */
+function apngSection(s: Surgery, stem: string): Output[] {
+  const chunks = s.parse.chunks;
+  if (!isApng(chunks)) return [];
+  const out: Output[] = [];
+
+  const actlChunk = chunks.find((c) => c.type === 'acTL' && !c.afterIend);
+  const actl = actlChunk ? decodeActl(actlChunk.data) : null;
+  out.push({
+    type: 'note',
+    level: 'info',
+    text: actl
+      ? T('apng.detected', { frames: actl.numFrames, plays: playsText(actl.numPlays) })
+      : T('apng.detectedBare'),
+  });
+
+  // Hidden channels: read every per-frame fcTL field as a possible message carrier.
+  const fctls = chunks
+    .filter((c) => c.type === 'fcTL' && !c.afterIend)
+    .map((c) => decodeFctl(c.data))
+    .filter((f): f is Fctl => f !== null);
+  const channels = hiddenChannels(fctls);
+  for (const c of channels) {
+    if (!c.lead) continue;
+    out.push({
+      type: 'note',
+      level: 'success',
+      text: T('apng.lead', {
+        field: T(`apng.field.${c.field}`),
+        how: T(`apng.kind.${c.lead.kind}`),
+        text: c.lead.text,
+      }),
+    });
+  }
+  if (channels.length) {
+    out.push({
+      type: 'table',
+      label: T('apng.channels'),
+      columns: [T('apng.col.field'), T('apng.col.values'), T('apng.col.ascii'), T('apng.col.read')],
+      rows: channels.map((c) => [
+        T(`apng.field.${c.field}`),
+        c.values.slice(0, APNG_MAX_VALUES).join(' ') +
+          (c.values.length > APNG_MAX_VALUES ? ' …' : ''),
+        c.decodes.length ? showText(c.decodes[0]!.text) : '',
+        c.lead ? T('apng.yes') : T('apng.no'),
+      ]),
+      highlight: channels.map((c, i) => (c.lead ? i : -1)).filter((i) => i >= 0),
+    });
+  }
+
+  // Each frame rebuilt as a standalone PNG (preview + download).
+  const frames = apngFrames(chunks, s.ihdrChunk?.data ?? new Uint8Array(), {
+    maxFrames: APNG_MAX_FRAMES,
+  });
+  const previews = frames.slice(0, APNG_MAX_PREVIEW);
+  for (const f of previews) {
+    out.push({
+      type: 'picture',
+      label: f.fctl
+        ? T('apng.frame', {
+            n: f.index + 1,
+            w: f.fctl.width,
+            h: f.fctl.height,
+            x: f.fctl.xOffset,
+            y: f.fctl.yOffset,
+            num: f.fctl.delayNum,
+            den: f.fctl.delayDen,
+          })
+        : T('apng.frameDefault', { n: f.index + 1 }),
+      data: f.png,
+      mime: 'image/png',
+      filename: `${stem}-frame${f.index + 1}.png`,
+    });
+  }
+  if (frames.length > previews.length) {
+    out.push({
+      type: 'files',
+      label: T('apng.framesAll'),
+      files: frames.map((f) => ({ name: `${stem}-frame${f.index + 1}.png`, data: f.png })),
+    });
+    out.push({
+      type: 'note',
+      level: 'info',
+      text: T('apng.framesCapped', { shown: previews.length, count: frames.length }),
+    });
+  }
+  return out;
+}
 
 function textSection(s: Surgery): Output[] {
   if (!s.texts.length && !s.hintMisses.length) return [];
@@ -866,6 +990,7 @@ function render(s: Surgery, opts: SurgeryOptions, name: string | undefined): Out
   }
 
   out.push(
+    ...apngSection(s, stem),
     ...chunkSection(s),
     ...textSection(s),
     ...zlibSection(s, opts),
@@ -908,10 +1033,10 @@ function triage(bytes: Uint8Array): { score: number; reason: string } | null {
 
 export default defineTool({
   id: 'png-surgeon',
-  name: 'PNG chunk surgeon (inspect, repair, reorder)',
+  name: 'PNG / APNG chunk surgeon (inspect, repair, reorder, frames)',
   category: 'stego',
   description:
-    'Black or broken PNG? Lists every chunk without stopping at the first error, shows the text chunks, puts shuffled IDAT chunks back in order (from a hint, by hand, or by search), repairs CRCs, signature, zlib header and IHDR size, and shows the rebuilt image. PNG only.',
+    'Black or broken PNG? Lists every chunk without stopping at the first error, shows the text chunks, puts shuffled IDAT chunks back in order (from a hint, by hand, or by search), repairs CRCs, signature, zlib header and IHDR size, and shows the rebuilt image. For an animated PNG it decodes acTL/fcTL, rebuilds each frame as a standalone PNG, and reads the per-frame fields (delays, offsets, sizes…) as a possible hidden channel. PNG only.',
   tags: [
     'pngcheck',
     'idat',
@@ -929,6 +1054,14 @@ export default defineTool({
     'black image',
     'iend',
     'tEXt',
+    'apng',
+    'animated png',
+    'actl',
+    'fctl',
+    'fdat',
+    'frame',
+    'delay_num',
+    'hidden channel',
   ],
   input: 'bytes',
   placeholder: 'Drop a PNG file (or paste its bytes as hex / base64)',
