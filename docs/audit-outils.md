@@ -144,5 +144,28 @@ nœuds avec type/offset/taille/chemin/aperçu/download/open-in-tool, flags en av
 
 - Décompression bz2/xz en WASM (licence + taille à vérifier, comme iced-x86).
 - `number-base` ↔ `base-convert` : unifier ou documenter la différence.
-- Barre de progression worker dans l'UI pour les gros fichiers.
+- Barre de progression worker dans l'UI pour les gros fichiers (primitive de progression du socle Phase 3, non faite).
 - Revue des 10 stégano image pour une éventuelle vue unifiée « plans/canaux ».
+
+## Examen des candidats de fusion (Phase 5) et des limites `MAX_*`
+
+Verdict : **aucun code modifié**, les quatre outils restent séparés.
+
+- **`image-structure` ↔ `image-analyzer`** : le parsing des conteneurs est déjà mutualisé. Les deux
+  s'appuient sur les parseurs partagés `_png`, `_jpeg`, `_gif` ; `image-analyzer` réutilise déjà
+  `describeTail` d'`image-structure`. Ce qui reste distinct n'est pas du parsing dupliqué :
+  `image-structure` fait la chirurgie/réparation (IHDR, chunks, extraction de fichiers), alors que
+  `image-analyzer` fait la synthèse (métadonnées EXIF/XMP/IPTC, vignette, régions, chaînes). Un
+  module commun n'enlèverait presque aucune ligne.
+- **`docucolor` ↔ `printer-dots`** : déjà en couches. `_docucolor.ts` est le codec de la matrice
+  15 × 8 (colonnes, parité, orientations) ; `printer-dots` est la vision (détection des points,
+  réseau, recherche de fenêtres) et réutilise `orient`/`ORIENTATIONS` de `_docucolor`. Aucune
+  logique dupliquée à extraire.
+- **Limites `MAX_*`** : les noms se répètent mais pas les valeurs ni le sens. `MAX_PIXELS` vaut
+  30 M (`pit`, `pvd`), 40 M (`_piet-core`) ou 60 M (`_image-analyzer-thumb`) ; `MAX_BYTES` vaut
+  256 MiB (`_extract`), 128 MiB (`_sqlite-run`) ou 40 MiB (`_web-source-fetch`) ; 256 MiB apparaît
+  pour des raisons différentes (`audio-stego` fichier lu entier, `_extract` budget d'octets, `_zip`
+  sortie décompressée). Aucune valeur n'est partagée à l'identique par 3 outils pour la même
+  raison : pas de `src/core/limits.ts` créé, centraliser forcerait des couplages artificiels. À
+  rouvrir si un 3ᵉ outil reprend 30 M pixels (`pit`/`pvd`) ou 256 MiB « fichier lu entier ».
+- **Primitive de progression worker** : reste au backlog (changement UI/worker plus large).
