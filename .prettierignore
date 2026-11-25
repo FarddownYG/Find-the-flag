@@ -5,3 +5,4 @@ public/samples
 coverage
 playwright-report
 test-results
+wasm/ftf-x86/pkg

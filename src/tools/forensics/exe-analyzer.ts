@@ -33,6 +33,8 @@ import {
   peStrings,
   peSymbols,
 } from './_exe-view-pe';
+import { encodingView, type ExecSection } from './_exe-encoding-view';
+import type { SectionRow } from './_exe-types';
 
 const T = toolT('exe-analyzer');
 
@@ -45,6 +47,29 @@ function kindOf(head: Uint8Array): Kind | null {
   if (isPe(head)) return 'pe';
   if (machoMagic(head)) return 'macho';
   return null;
+}
+
+/** The "Instruction encoding" view: scan an x86/x86-64 binary's executable sections for a hidden
+ *  direction-bit channel. Format-independent once we have the sections and the bitness. */
+async function x86Encoding(
+  r: Reader,
+  sections: readonly SectionRow[],
+  isX86: boolean,
+  bitness: 16 | 32 | 64,
+  o: Opts,
+): Promise<Output[]> {
+  if (!isX86) return [{ type: 'note', level: 'info', text: T('enc.notX86') }];
+  const exec = sections.filter((s) => s.exec && s.size > 0);
+  if (!exec.length) return [{ type: 'note', level: 'warn', text: T('enc.noExec') }];
+  const execSecs: ExecSection[] = [];
+  for (const s of exec) {
+    execSecs.push({ name: s.name, offset: s.offset, bytes: await r.read(s.offset, s.size) });
+  }
+  return encodingView(execSecs, bitness, {
+    bitOrder: o.bitOrder,
+    invert: o.invert,
+    families: o.families,
+  });
 }
 
 export default defineTool({
@@ -96,6 +121,7 @@ export default defineTool({
         { value: 'imports', label: 'Imports and libraries' },
         { value: 'resources', label: 'Resources (PE)' },
         { value: 'strings', label: 'Strings per section' },
+        { value: 'encoding', label: 'Instruction encoding' },
       ],
       'overview',
     ),
@@ -117,6 +143,24 @@ export default defineTool({
     demangle: bool('Demangle C++ names', true, {
       hint: 'Itanium (GCC, Clang) and legacy Rust names. A name that cannot be demangled is shown as it is.',
       showIf: (v) => isView(v, 'symbols', 'imports'),
+    }),
+    bitOrder: select(
+      'Bit order',
+      [
+        { value: 'msb', label: 'Most-significant bit first' },
+        { value: 'lsb', label: 'Least-significant bit first' },
+      ],
+      'msb',
+      { showIf: (v) => isView(v, 'encoding') },
+    ),
+    invert: bool('Invert bits', false, {
+      hint: 'Swap which form means 0 and which means 1.',
+      showIf: (v) => isView(v, 'encoding'),
+    }),
+    families: text('Families', '', {
+      placeholder: 'all   ·   e.g. "mov xor cmp"',
+      hint: 'Which direction-bit families to read bits from. Empty = all: add, or, adc, sbb, and, sub, xor, cmp, mov.',
+      showIf: (v) => isView(v, 'encoding'),
     }),
   },
   examples: [
@@ -232,6 +276,14 @@ export default defineTool({
           return [{ type: 'note', level: 'info', text: T('note.noResourcesElf') }];
         case 'strings':
           return elfStrings(ctx, info, o);
+        case 'encoding':
+          return x86Encoding(
+            r,
+            info.sections,
+            info.header.machine === 3 || info.header.machine === 62,
+            info.header.bits,
+            o,
+          );
         default:
           return elfOverview(ctx, info);
       }
@@ -252,6 +304,16 @@ export default defineTool({
           return peResources(ctx, info);
         case 'strings':
           return peStrings(ctx, info, o);
+        case 'encoding':
+          return info.coff
+            ? x86Encoding(
+                r,
+                info.sections,
+                info.coff.machine === 0x14c || info.coff.machine === 0x8664,
+                info.opt?.plus ? 64 : 32,
+                o,
+              )
+            : noteOutputs(info.hints);
         default:
           return peOverview(ctx, info);
       }
@@ -271,6 +333,8 @@ export default defineTool({
         return [{ type: 'note', level: 'info', text: T('note.noResourcesMacho') }];
       case 'strings':
         return machoStrings(ctx, info, o);
+      case 'encoding':
+        return [{ type: 'note', level: 'info', text: T('enc.machoTodo') }];
       default:
         return machoOverview(ctx, info);
     }

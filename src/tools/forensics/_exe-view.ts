@@ -18,6 +18,9 @@ export interface Opts {
   section: string;
   code: boolean;
   demangle: boolean;
+  bitOrder: string;
+  invert: boolean;
+  families: string;
 }
 
 /** The translated name of another tool, for the hints that point at it. */

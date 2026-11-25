@@ -13,6 +13,7 @@ export default tseslint.config(
       'playwright-report',
       'test-results',
       'public/samples',
+      'wasm/ftf-x86/pkg',
     ],
   },
   js.configs.recommended,
