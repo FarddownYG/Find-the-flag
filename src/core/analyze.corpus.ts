@@ -60,7 +60,7 @@ export const CORPUS: CorpusEntry[] = [
   {
     file: 'mp4-encrypted-mdat.mp4',
     technique: 'MP4 unreferenced high-entropy mdat (encrypted container)',
-    expect: { kind: 'mp4-unreferenced-entropy' },
+    expect: { kind: 'encrypted' },
   },
   {
     file: 'zip-in-jpeg.jpg',

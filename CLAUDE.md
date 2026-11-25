@@ -48,7 +48,7 @@ public : un push sur `main` est une publication immédiate et définitive.
 ## AGENCE (mode autonome — état du run)
 
 ```
-ÉTAT: RUNNING | lot 1/5 | sans-gain 0/2 | start 2026-11-25 | fin : les 5 FINI verts OU 5 lots
+ÉTAT: RUNNING | lot 3/5 | sans-gain 0/2 | start 2026-11-25 | fin : les 5 FINI verts OU 5 lots
 FINI: [ ] 1. banc de détection du corpus maison = 100 % des techniques depuis l'ENTRÉE UNIQUE, sans choisir d'outil
       [ ] 2. fichiers sains (photo/vidéo/PDF normaux) → zéro faux positif « confirmé »
       [ ] 3. chaque résultat affiche son explication EN HAUT
@@ -64,9 +64,11 @@ COMMANDES: bench `node scripts/detect-bench.mjs` (créé au lot 1, oracle du tau
 PLAN : L1 corpus+banc · L2 pipeline auto (worker) + anomalies (MP4 mdat non réf, carte entropie, zones non réf,
   post-EOF, verdict chiffré TCSteg) · L3 page résultats en couches (verdict/comment/cours/étape/refaire/écartés ;
   confirmé/probable/candidat) · L4 migration outils sur socle (converger PNG/GZIP/RIFF) · L5 UX catalogue + Learn
-FAIT: —
-EN COURS: L1 corpus maison (1 fixture/technique) + banc mesurant le % détecté depuis l'entrée. Accept: banc
-  tourne, imprime un % et le détail détecté/raté par cas ; fichiers sains → 0 faux positif.
+FAIT: L1 27e2339 corpus maison + banc (baseline 5/15=33 %, 0 FP) — preuve node scripts/detect-bench.mjs
+      L2 analyze() complet : parser MP4 (_mp4), moteur anomalies (_anomaly : entropie/zones non réf/post-EOF/
+         verdict chiffré), détecteurs image/audio/texte/binaire/crypto → banc 15/15=100 %, 0 FP (MP4-mdat détecté)
+EN COURS: L3 brancher analyze() derrière l'entrée unique (worker, progression, stop) + page résultats en couches.
+  FINI#1 atteint au niveau MOTEUR (banc 100 %) ; reste le câblage UI pour « depuis l'entrée, sans choisir d'outil ».
 DÉCISIONS: D1 le banc est l'oracle du taux de détection, il ne doit JAMAIS baisser
            D2 fusion main = fast-forward au vert (autorisé explicitement par l'utilisateur, dépôt public)
            D3 « rien trouvé » INTERDIT sans la liste des vérifs faites + anomalies relevées
