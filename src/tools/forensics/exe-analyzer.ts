@@ -1,6 +1,7 @@
 import { bool, defineTool, number, select, text } from '../../core/define';
 import { ToolError } from '../../core/errors';
 import type { Output } from '../../core/types';
+import { buildWriteup, kvTable, mdTable, type WriteupSection } from '../../core/writeup';
 import { toolT } from '../../i18n/tool-text';
 import { formatSize } from '../../lib/bytes';
 import { Reader } from './_exe-bin';
@@ -72,7 +73,43 @@ async function x86Encoding(
   });
 }
 
-export default defineTool({
+/** Rows of a table kept in the writeup (the views can list thousands of symbols or strings). */
+const WRITEUP_ROWS = 40;
+
+/** The "how I found it" Markdown: what the chosen view showed, as tables, and its verdict notes. */
+function writeupOutput(out: Output[]): Output {
+  const sections: WriteupSection[] = [];
+  const notes: string[] = [];
+  for (const o of out) {
+    if (o.type === 'note') {
+      notes.push(`- ${o.text}`);
+    } else if (o.type === 'kv' && o.entries.length) {
+      sections.push({
+        heading: o.label ?? T('writeup.details'),
+        body: kvTable(o.entries, [T('writeup.item'), T('writeup.value')]),
+      });
+    } else if (o.type === 'table' && o.rows.length) {
+      const rows = o.rows.slice(0, WRITEUP_ROWS);
+      const cut =
+        rows.length < o.rows.length
+          ? `\n\n${T('writeup.truncated', { shown: rows.length, total: o.rows.length })}`
+          : '';
+      sections.push({
+        heading: o.label ?? T('writeup.details'),
+        body: mdTable(o.columns, rows) + cut,
+      });
+    }
+  }
+  if (notes.length) sections.unshift({ heading: T('writeup.notes'), body: notes.join('\n') });
+  sections.push({ heading: T('writeup.technique'), body: T('writeup.how') });
+  return {
+    type: 'text',
+    label: T('label.writeup'),
+    value: buildWriteup(sections, { title: T('writeup.title') }),
+  };
+}
+
+const base = defineTool({
   id: 'exe-analyzer',
   name: 'Executable analyzer (ELF, PE, Mach-O)',
   category: 'forensics',
@@ -161,6 +198,9 @@ export default defineTool({
       placeholder: 'all   ·   e.g. "mov xor cmp"',
       hint: 'Which direction-bit families to read bits from. Empty = all: add, or, adc, sbb, and, sub, xor, cmp, mov.',
       showIf: (v) => isView(v, 'encoding'),
+    }),
+    writeup: bool('Copy-ready writeup (Markdown)', false, {
+      hint: 'Add a Markdown "how I found it" report you can paste into a CTF writeup.',
     }),
   },
   examples: [
@@ -348,3 +388,15 @@ export default defineTool({
     return null;
   },
 });
+
+/** The analysis is unchanged; the optional writeup is appended to whatever the view produced. */
+const tool: typeof base = {
+  ...base,
+  async run(file, o) {
+    const out = await base.run(file, o);
+    if (o.writeup) out.push(writeupOutput(out));
+    return out;
+  },
+};
+
+export default tool;

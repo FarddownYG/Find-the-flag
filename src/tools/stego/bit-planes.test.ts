@@ -12,8 +12,17 @@ interface Opts {
   filter: 'all' | 'invert' | 'grayscale' | 'channels' | 'colormap' | 'xor' | 'equalize';
   xor: number;
   alpha: boolean;
+  writeup: boolean;
 }
-const defaults: Opts = { mode: 'all', channel: 'r', bit: 0, filter: 'all', xor: 0, alpha: false };
+const defaults: Opts = {
+  mode: 'all',
+  channel: 'r',
+  bit: 0,
+  filter: 'all',
+  xor: 0,
+  alpha: false,
+  writeup: false,
+};
 
 const make = (
   w: number,
@@ -163,5 +172,18 @@ describe('bit-planes', () => {
         { mode: 'one', bit: 9 },
       ),
     ).toThrow(/0 \(lowest\) to 7/);
+  });
+
+  it('adds a Markdown writeup naming the structured planes, and nothing when off', async () => {
+    const input = await sample('stego-planes.png');
+    const out = bitPlanes.run(input, { ...defaults, writeup: true }) as Output[];
+    const w = out.find((o) => o.type === 'text' && o.label === 'Writeup (Markdown)');
+    if (w?.type !== 'text') throw new Error('no writeup output');
+    expect(w.value).toMatch(/^# /);
+    expect(w.value).toContain('## Planes that look structured');
+    expect(w.value).toContain('- **G1**: structured');
+    expect(w.value).toContain('## Technique');
+    const plain = bitPlanes.run(input, { ...defaults }) as Output[];
+    expect(plain.some((o) => o.type === 'text')).toBe(false);
   });
 });

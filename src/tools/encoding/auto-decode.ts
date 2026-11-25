@@ -1,7 +1,8 @@
-import { defineTool, number, text as textOption } from '../../core/define';
+import { bool, defineTool, number, text as textOption } from '../../core/define';
 import { ToolError } from '../../core/errors';
 import { DEFAULT_FLAG_PATTERN } from '../../core/flags';
 import type { Output } from '../../core/types';
+import { buildWriteup, codeBlock, FLAG_MASK, kvTable, mdTable } from '../../core/writeup';
 import { toolT } from '../../i18n/tool-text';
 import { formatSize, printableRatio, toHex, utf8Decode, utf8Encode } from '../../lib/bytes';
 import { chiSquared, plaintextScore } from '../../lib/english';
@@ -233,6 +234,82 @@ function previewOf(c: Candidate): string {
   return sig ? T('value.binaryFile', { ...p, type: sig }) : T('value.binary', p);
 }
 
+const GENERIC_FLAG_ALL = new RegExp(DEFAULT_FLAG_PATTERN, 'g');
+
+/** The flag-looking token of a candidate (the first one), if its text has one. */
+function flagOf(c: Candidate, prefix: string | undefined): string | undefined {
+  if (!c.flag || c.text === null) return undefined;
+  const p = prefix?.trim();
+  if (p) {
+    const own = new RegExp(`${escapeRe(p)}\\{[^{}]{1,200}\\}`, 'i').exec(c.text)?.[0];
+    if (own) return own;
+  }
+  return new RegExp(DEFAULT_FLAG_PATTERN).exec(c.text)?.[0];
+}
+
+/** A one-line preview for the writeup; flags are masked before the cut so none leaks in part. */
+function writeupPreview(c: Candidate, includeFlag: boolean): string {
+  if (!includeFlag && c.textLike && c.text !== null) {
+    return previewOf({ ...c, text: c.text.replace(GENERIC_FLAG_ALL, FLAG_MASK) });
+  }
+  return previewOf(c);
+}
+
+/** The "how I found it" Markdown, fed with the recipe and ranking the tool already shows. */
+function writeupOutput(
+  result: AutoDecodeResult,
+  shown: Candidate[],
+  prefix: string | undefined,
+  includeFlag: boolean,
+): Output {
+  const { best, input, explored } = result;
+  const steps = best.recipe.map((name, i) => [i + 1, name]);
+  const sections = [
+    {
+      heading: T('writeup.summary'),
+      body: kvTable(
+        [
+          [T('writeup.recipe'), recipeName(best)],
+          [T('writeup.steps'), String(best.recipe.length)],
+          [
+            T('writeup.size'),
+            `${formatSize(input.bytes.length)} → ${formatSize(best.bytes.length)}`,
+          ],
+          [T('writeup.explored'), String(explored)],
+        ],
+        [T('writeup.item'), T('writeup.value')],
+      ),
+    },
+    ...(steps.length
+      ? [{ heading: T('writeup.chain'), body: mdTable(['#', T('col.recipe')], steps) }]
+      : []),
+    { heading: T('writeup.result'), body: codeBlock('', writeupPreview(best, includeFlag)) },
+    {
+      heading: T('label.top'),
+      body: mdTable(
+        ['#', T('col.recipe'), T('col.score'), T('col.preview')],
+        shown.map((c, i) => [
+          i + 1,
+          recipeName(c),
+          c.score.toFixed(1),
+          writeupPreview(c, includeFlag),
+        ]),
+      ),
+    },
+    { heading: T('writeup.technique'), body: T('writeup.how') },
+  ];
+  return {
+    type: 'text',
+    label: T('label.writeup'),
+    value: buildWriteup(sections, {
+      title: T('writeup.title'),
+      flag: flagOf(best, prefix),
+      includeFlag,
+      flagLabel: T('writeup.flag'),
+    }),
+  };
+}
+
 export default defineTool({
   id: 'auto-decode',
   name: 'Auto-decode (magic)',
@@ -268,6 +345,13 @@ export default defineTool({
     flagPrefix: textOption('Flag prefix', '', {
       placeholder: 'picoCTF (optional)',
       hint: 'Candidates containing prefix{...} win. flag{...} and common CTF prefixes are always recognised.',
+    }),
+    writeup: bool('Copy-ready writeup (Markdown)', false, {
+      hint: 'Add a Markdown "how I found it" report you can paste into a CTF writeup.',
+    }),
+    includeFlag: bool('Include the flag in the writeup', false, {
+      hint: 'Off by default so the writeup can be shared without spoiling the flag.',
+      showIf: (v) => v.writeup === true,
     }),
   },
   examples: [
@@ -306,7 +390,7 @@ export default defineTool({
     if (printableRatio(utf8Encode(t)) < 1) return null;
     return { score: 0.3, reason: T('detect.token') };
   },
-  run({ bytes }, { maxDepth, beamWidth, flagPrefix }) {
+  run({ bytes }, { maxDepth, beamWidth, flagPrefix, writeup, includeFlag }) {
     if (!bytes.length) throw new ToolError(T('error.empty'));
     const result = autoDecode(bytes, { maxDepth, beamWidth, flagPrefix });
     const { best, input, ranked, explored } = result;
@@ -349,6 +433,7 @@ export default defineTool({
         highlight: [0],
       });
     }
+    if (writeup) out.push(writeupOutput(result, shown, flagPrefix, includeFlag));
     return out;
   },
 });

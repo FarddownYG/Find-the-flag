@@ -607,4 +607,25 @@ describe('auto-decode tool', () => {
     expect(autoDecodeTool.detect!(sample('hello world'))).toBeNull();
     expect(autoDecodeTool.detect!(sample('internationalization'))).toBeNull();
   });
+
+  it('adds a Markdown writeup, with the flag only when opted in', () => {
+    const input = b64(toHex(bytes(rot13(FLAG))));
+    const writeupOf = (extra: Record<string, unknown>) => {
+      const w = run(input, { writeup: true, ...extra }).find(
+        (o) => o.type === 'text' && o.label === 'Writeup (Markdown)',
+      );
+      if (w?.type !== 'text') throw new Error('no writeup output');
+      return w.value;
+    };
+    const off = writeupOf({ includeFlag: false });
+    expect(off).toMatch(/^# /);
+    expect(off).toContain('## Summary');
+    expect(off).toContain('## Decoding chain');
+    expect(off).toContain('| 3 | rot13 |');
+    expect(off).toContain('## Top recipes');
+    expect(off).toContain('## Technique');
+    expect(off).not.toContain(FLAG);
+    expect(writeupOf({ includeFlag: true })).toContain(`**Flag:** \`${FLAG}\``);
+    expect(run(input).some((o) => o.type === 'text')).toBe(false);
+  });
 });

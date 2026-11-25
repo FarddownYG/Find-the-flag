@@ -659,6 +659,23 @@ describe('robustness: cut and damaged files', () => {
   });
 });
 
+describe('writeup', () => {
+  it('adds a Markdown writeup of the chosen view, and nothing when off', async () => {
+    const elf = sample('exe-sample.elf');
+    const out = await run(elf, { writeup: true });
+    const w = out.find((o) => o.type === 'text' && o.label === 'Writeup (Markdown)');
+    if (w?.type !== 'text') throw new Error('no writeup output');
+    expect(w.value).toMatch(/^# /);
+    expect(w.value).toContain('## Identification');
+    expect(w.value).toContain('PT_GNU_STACK');
+    expect(w.value).toContain('## Technique');
+    const plain = await run(elf);
+    expect(plain.some((o) => o.type === 'text' && o.label === 'Writeup (Markdown)')).toBe(false);
+    const strings = await run(elf, { view: 'strings', section: '.rodata', writeup: true });
+    expect(flat(strings)).toContain('FTF{elf_rodata}');
+  });
+});
+
 describe('big files are read in pieces', () => {
   it('48 MiB of appended data: entropy is measured in chunks and the download is a Blob slice', async () => {
     const elf = buildSampleElf();

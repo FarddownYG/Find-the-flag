@@ -1,6 +1,7 @@
 import { bool, defineTool, number, select, toggle } from '../../core/define';
 import { ToolError } from '../../core/errors';
 import type { Output, RgbaImage } from '../../core/types';
+import { buildWriteup, kvTable, mdTable, type WriteupSection } from '../../core/writeup';
 import { toolT } from '../../i18n/tool-text';
 import {
   bitPlaneImage,
@@ -55,6 +56,46 @@ const verdictText = (v: Verdict) =>
       : v === 'noise'
         ? T('value.noise')
         : T('value.structured');
+
+/** The "how I found it" Markdown: the planes the tool flagged, its table, notes and pictures. */
+/** The result, plus the writeup when asked for. */
+function withWriteup(out: Output[], on: boolean): Output[] {
+  if (on) out.push(writeupOutput(out));
+  return out;
+}
+
+function writeupOutput(out: Output[]): Output {
+  const sections: WriteupSection[] = [];
+  const notes: string[] = [];
+  const pictures: string[] = [];
+  for (const o of out) {
+    if (o.type === 'note') notes.push(`- ${o.text}`);
+    else if (o.type === 'image' && o.label) pictures.push(`- ${o.label}`);
+    else if (o.type === 'kv') {
+      sections.push({
+        heading: T('writeup.plane'),
+        body: kvTable(o.entries, [T('writeup.item'), T('writeup.value')]),
+      });
+    } else if (o.type === 'table') {
+      const marked = (o.highlight ?? []).map((i) => o.rows[i]).filter((r) => r !== undefined);
+      if (marked.length) {
+        sections.push({
+          heading: T('writeup.zone'),
+          body: marked.map((r) => `- **${r[0]}**: ${r[3]} (${r[1]} / ${r[2]})`).join('\n'),
+        });
+      }
+      sections.push({ heading: o.label ?? T('label.summary'), body: mdTable(o.columns, o.rows) });
+    }
+  }
+  if (notes.length) sections.unshift({ heading: T('writeup.notes'), body: notes.join('\n') });
+  if (pictures.length) sections.push({ heading: T('writeup.pictures'), body: pictures.join('\n') });
+  sections.push({ heading: T('writeup.technique'), body: T('writeup.how') });
+  return {
+    type: 'text',
+    label: T('label.writeup'),
+    value: buildWriteup(sections, { title: T('writeup.title') }),
+  };
+}
 
 export default defineTool({
   id: 'bit-planes',
@@ -121,6 +162,9 @@ export default defineTool({
       hint: 'Off (default): every output is opaque, so colours hidden under transparent pixels show up.',
       showIf: (v) => v.mode === 'filters',
     }),
+    writeup: bool('Copy-ready writeup (Markdown)', false, {
+      hint: 'Add a Markdown "how I found it" report you can paste into a CTF writeup.',
+    }),
   },
   examples: [
     {
@@ -181,7 +225,7 @@ export default defineTool({
         image: bitPlaneImage(shown, ch.index, o.bit),
         filename: `plane-${ch.id}${o.bit}.png`,
       });
-      return out;
+      return withWriteup(out, o.writeup);
     }
 
     if (o.mode === 'all') {
@@ -229,7 +273,7 @@ export default defineTool({
         highlight,
       });
       out.push(...images);
-      return out;
+      return withWriteup(out, o.writeup);
     }
 
     // filters
@@ -313,6 +357,6 @@ export default defineTool({
         `xor-${k}`,
       );
     }
-    return out;
+    return withWriteup(out, o.writeup);
   },
 });

@@ -28,7 +28,7 @@ type Note = Extract<Output, { type: 'note' }>;
 type Kv = Extract<Output, { type: 'kv' }>;
 
 const run = async (text: string, language: 'auto' | 'en' | 'fr' = 'auto'): Promise<ToolResult> =>
-  tool.run(text, { language });
+  tool.run(text, { language, writeup: false });
 const tableOf = (result: ToolResult, label: string): Table => {
   const t = result.find((o): o is Table => o.type === 'table' && (o.label ?? '').startsWith(label));
   if (!t) throw new Error(`no table "${label}"`);
@@ -584,7 +584,7 @@ describe('output', () => {
     });
     // The language option of this tool goes on to the solvers.
     const ct = await makeSample('playfair', FRENCH[0]!, 0);
-    const french = buttons(await tool.run(ct, { language: 'fr' }))[0]!;
+    const french = buttons(await tool.run(ct, { language: 'fr', writeup: false }))[0]!;
     expect(french.options).toMatchObject({ language: 'french' });
   });
 
@@ -636,6 +636,24 @@ describe('output', () => {
     expect(keys.size).toBeGreaterThan(100);
     const missing = [...keys].filter((k) => !(`tool.cipher-identify.${k}` in en));
     expect(missing).toEqual([]);
+  });
+
+  it('adds a Markdown writeup with the ranking, the reasons and the routing', async () => {
+    const text = PROSE_A.replace(/[^A-Za-z]/g, '');
+    const ct = await makeSample('caesar', text, 0);
+    const out = await tool.run(ct, { language: 'auto', writeup: true });
+    const w = out.find((o) => o.type === 'text' && o.label === 'Writeup (Markdown)');
+    if (w?.type !== 'text') throw new Error('no writeup output');
+    expect(w.value).toMatch(/^# /);
+    expect(w.value).toContain('## Verdict');
+    expect(w.value).toContain('## Ranking of likely ciphers and encodings');
+    expect(w.value).toContain('| Caesar / ROT shift |');
+    expect(w.value).toContain('**For:**');
+    expect(w.value).toContain('## Where to go next');
+    expect(w.value).toContain('## Statistics');
+    expect(w.value).toContain('## Technique');
+    const plain = await tool.run(ct, { language: 'auto', writeup: false });
+    expect(plain.some((o) => o.type === 'text')).toBe(false);
   });
 });
 

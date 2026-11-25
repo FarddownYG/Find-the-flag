@@ -1,7 +1,8 @@
-import { defineTool, toggle } from '../../core/define';
+import { bool, defineTool, toggle } from '../../core/define';
 import { ToolError } from '../../core/errors';
 import { registeredTools } from '../../core/tool-list';
 import type { AnyTool, Output } from '../../core/types';
+import { buildWriteup, kvTable, mdTable } from '../../core/writeup';
 import type { Params } from '../../i18n';
 import { toolName, toolT } from '../../i18n/tool-text';
 import { findShapes } from './_cipher-identify-encodings';
@@ -103,6 +104,65 @@ function openBlock(c: Candidate, text: string, first: boolean): Output {
   };
 }
 
+/** The "how I found it" Markdown, fed with the ranking, reasons and routing shown by the tool. */
+function writeupOutput(verdict: string, listed: Candidate[], statistics: Output): Output {
+  const bullets = (c: Candidate) =>
+    [
+      ...c.why.map((w) => `- **${T('kv.for')}:** ${w}`),
+      ...c.against.map((w) => `- **${T('kv.against')}:** ${w}`),
+    ].join('\n');
+  const routes = listed
+    .filter((c) => c.links.length)
+    .slice(0, DETAILED)
+    .map(
+      (c) =>
+        `- ${c.name} → ${c.links
+          .slice(0, 3)
+          .map((l) => toolName(l.tool))
+          .join(', ')}`,
+    )
+    .join('\n');
+  const sections = [
+    { heading: T('writeup.verdict'), body: verdict },
+    ...(listed.length
+      ? [
+          {
+            heading: T('label.ranking'),
+            body: mdTable(
+              [T('col.family'), T('col.fit')],
+              listed.map((c) => [c.name, `${c.score} %`]),
+            ),
+          },
+        ]
+      : []),
+    ...listed.slice(0, DETAILED).flatMap((c, i) =>
+      c.why.length || c.against.length
+        ? [
+            {
+              heading: T('label.candidate', { rank: i + 1, name: c.name, score: c.score }),
+              body: bullets(c),
+            },
+          ]
+        : [],
+    ),
+    ...(routes ? [{ heading: T('writeup.routing'), body: routes }] : []),
+    ...(statistics.type === 'kv'
+      ? [
+          {
+            heading: T('label.statistics'),
+            body: kvTable(statistics.entries, [T('writeup.item'), T('writeup.value')]),
+          },
+        ]
+      : []),
+    { heading: T('writeup.technique'), body: T('writeup.how') },
+  ];
+  return {
+    type: 'text',
+    label: T('label.writeup'),
+    value: buildWriteup(sections, { title: T('writeup.title') }),
+  };
+}
+
 export default defineTool({
   id: 'cipher-identify',
   name: 'Cipher identifier',
@@ -133,6 +193,9 @@ export default defineTool({
       { value: 'en', label: 'English' },
       { value: 'fr', label: 'French' },
     ]),
+    writeup: bool('Copy-ready writeup (Markdown)', false, {
+      hint: 'Add a Markdown "how I found it" report you can paste into a CTF writeup.',
+    }),
   },
   examples: [
     {
@@ -203,7 +266,7 @@ export default defineTool({
     if (wordy && ioc >= 0.055) return null;
     return { score: 0.45, reason: T('detect.letters') };
   },
-  async run(text, { language }) {
+  async run(text, { language, writeup }) {
     if (!/\S/.test(text)) throw new ToolError(T('error.empty'));
     const stats = analyse(text, language);
     const byId = new Map(registeredTools().map((t) => [t.id, t] as const));
@@ -323,12 +386,12 @@ export default defineTool({
         ],
       });
     }
-    out.push(
-      statisticsTable(stats),
-      checksTable(stats),
-      ...periodTable(stats),
-      ...kasiskiTable(stats),
-    );
+    const statistics = statisticsTable(stats);
+    const verdict = out.find((o) => o.type === 'note');
+    out.push(statistics, checksTable(stats), ...periodTable(stats), ...kasiskiTable(stats));
+    if (writeup) {
+      out.push(writeupOutput(verdict?.type === 'note' ? verdict.text : '', listed, statistics));
+    }
     return out;
   },
 });
