@@ -58,6 +58,8 @@ interface Opts {
   skip: number;
   limit: number;
   message: string;
+  writeup: boolean;
+  includeFlag: boolean;
 }
 const defaults: Opts = {
   mode: 'auto',
@@ -72,6 +74,8 @@ const defaults: Opts = {
   skip: 0,
   limit: 0,
   message: 'FTF{lsb}',
+  writeup: false,
+  includeFlag: false,
 };
 const run = (image: RgbaImage, o: Partial<Opts> = {}) =>
   lsb.run(asInput(image), { ...defaults, ...o }) as Output[];
@@ -355,3 +359,47 @@ function scanWithoutZones(img: RgbaImage): string {
   }
   return all;
 }
+
+describe('lsb writeup', () => {
+  const writeupOf = (out: Output[]) => {
+    const w = out.find((x) => x.type === 'text' && x.label === 'Writeup (Markdown)');
+    if (w?.type !== 'text') throw new Error('no writeup output');
+    return w.value;
+  };
+  const flagImage = async () =>
+    (await prepareInput('image', {
+      bytes: new Uint8Array(
+        readFileSync(new URL('../../../public/samples/stego-lsb.png', import.meta.url)),
+      ),
+    })) as ImageInput;
+
+  it('auto mode: headings, and the flag only when opted in', async () => {
+    const input = await flagImage();
+    const off = writeupOf(lsb.run(input, { ...defaults, writeup: true }) as Output[]);
+    expect(off).toMatch(/^# /);
+    expect(off).toContain('## Best hit');
+    expect(off).toContain('## Technique');
+    expect(off).not.toContain('flag{lsb_hidden_in_pixels}');
+    const on = writeupOf(
+      lsb.run(input, { ...defaults, writeup: true, includeFlag: true }) as Output[],
+    );
+    expect(on).toContain('**Flag:** `flag{lsb_hidden_in_pixels}`');
+  });
+
+  it('manual mode: extraction table, flag gated', async () => {
+    const input = await flagImage();
+    const o = { ...defaults, mode: 'manual' as const, limit: 40, writeup: true };
+    const off = writeupOf(lsb.run(input, o) as Output[]);
+    expect(off).toContain('## Extraction');
+    expect(off).toContain('| Bit planes | 0 |');
+    expect(off).not.toContain('flag{lsb_hidden_in_pixels}');
+    expect(writeupOf(lsb.run(input, { ...o, includeFlag: true }) as Output[])).toContain(
+      '**Flag:** `flag{lsb_hidden_in_pixels}`',
+    );
+  });
+
+  it('adds nothing when writeup is off', async () => {
+    const out = lsb.run(await flagImage(), { ...defaults }) as Output[];
+    expect(out.some((x) => x.type === 'text')).toBe(false);
+  });
+});

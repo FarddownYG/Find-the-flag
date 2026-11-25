@@ -93,4 +93,28 @@ describe('PVD tool', () => {
     const text = await run(asInput(cover(80, 60, 99)), { ...SAMPLE_SETTINGS, mode: 'auto' });
     expect(text).not.toContain('FTF{');
   });
+
+  it('adds a Markdown writeup, with the flag only when opted in', async () => {
+    const input = (await prepareInput('image', { bytes: readFileSync(SAMPLE) })) as ImageInput;
+    const writeupOf = async (extra: Record<string, unknown>) => {
+      const out = (await pvd.run(input, {
+        ...SAMPLE_SETTINGS,
+        mode: 'auto',
+        writeup: true,
+        ...extra,
+      } as never)) as Output[];
+      const w = out.find((x) => x.type === 'text' && x.label === 'Writeup (Markdown)');
+      if (w?.type !== 'text') throw new Error('no writeup output');
+      return w.value;
+    };
+    const off = await writeupOf({ includeFlag: false });
+    expect(off).toMatch(/^# /);
+    expect(off).toContain('## How it was found');
+    expect(off).toContain('## Redo it by hand (Python)');
+    expect(off).toContain('## Technique');
+    expect(off).not.toContain('FTF{pvd_serpentine}');
+    expect(await writeupOf({ includeFlag: true })).toContain('**Flag:** `FTF{pvd_serpentine}`');
+    const plain = (await pvd.run(input, { ...SAMPLE_SETTINGS, mode: 'auto' } as never)) as Output[];
+    expect(plain.some((x) => x.type === 'text' && x.label === 'Writeup (Markdown)')).toBe(false);
+  });
 });

@@ -2,6 +2,7 @@ import { bool, defineTool, select, text, toggle } from '../../core/define';
 import { ToolError } from '../../core/errors';
 import type { Output, RgbaImage } from '../../core/types';
 import { registeredTools } from '../../core/tool-list';
+import { buildWriteup, codeBlock, kvTable, mdTable } from '../../core/writeup';
 import { toolName, toolT } from '../../i18n/tool-text';
 import { toHex } from '../../lib/bytes';
 import { plaintextScore } from '../../lib/english';
@@ -158,6 +159,51 @@ function pythonScript(s: Settings): string {
   ].join('\n');
 }
 
+const pairColumns = () => ['p1', 'p2', 'd', T('col.range'), T('col.bits')];
+
+const pairRows = (trace: PairTrace[]) =>
+  trace
+    .slice(0, 3)
+    .map((p) => [
+      p.p1,
+      p.p2,
+      p.d,
+      `${p.range.lo}–${p.range.hi}`,
+      `${p.value.toString(2).padStart(p.range.bits, '0')} (${p.value})`,
+    ]);
+
+/** The "how I found it" Markdown, fed with the facts the tool already shows. */
+function writeupOutput(
+  s: Settings,
+  trace: PairTrace[],
+  body: Uint8Array,
+  includeFlag: boolean,
+): Output {
+  const message = latin1(body);
+  const sections = [
+    {
+      heading: T('label.settings'),
+      body: kvTable([[T('kv.how'), settingsLabel(s)]], [T('writeup.item'), T('writeup.value')]),
+    },
+    ...(trace.length
+      ? [{ heading: T('label.pairs'), body: mdTable(pairColumns(), pairRows(trace)) }]
+      : []),
+    { heading: T('label.decoded'), body: codeBlock('', preview(body, 512)) },
+    { heading: T('label.python'), body: codeBlock('python', pythonScript(s)) },
+    { heading: T('writeup.technique'), body: T('note.sheet') },
+  ];
+  return {
+    type: 'text',
+    label: T('label.writeup'),
+    value: buildWriteup(sections, {
+      title: T('writeup.title'),
+      flag: FLAG_RE.exec(message)?.[0],
+      includeFlag,
+      flagLabel: T('writeup.flag'),
+    }),
+  };
+}
+
 function explain(s: Settings, trace: PairTrace[]): Output[] {
   const out: Output[] = [];
   out.push({ type: 'kv', label: T('label.settings'), entries: [[T('kv.how'), settingsLabel(s)]] });
@@ -165,16 +211,8 @@ function explain(s: Settings, trace: PairTrace[]): Output[] {
     out.push({
       type: 'table',
       label: T('label.pairs'),
-      columns: ['p1', 'p2', 'd', T('col.range'), T('col.bits')],
-      rows: trace
-        .slice(0, 3)
-        .map((p) => [
-          p.p1,
-          p.p2,
-          p.d,
-          `${p.range.lo}–${p.range.hi}`,
-          `${p.value.toString(2).padStart(p.range.bits, '0')} (${p.value})`,
-        ]),
+      columns: pairColumns(),
+      rows: pairRows(trace),
     });
   }
   out.push({ type: 'text', label: T('label.python'), value: pythonScript(s) });
@@ -306,6 +344,14 @@ export default defineTool({
       { showIf: (v) => v.mode === 'decode' },
     ),
     message: text('Message to hide', 'FTF{pvd}', { showIf: (v) => v.mode === 'encode' }),
+    writeup: bool('Copy-ready writeup (Markdown)', false, {
+      hint: 'Add a Markdown "how I found it" report you can paste into a CTF writeup.',
+      showIf: (v) => v.mode !== 'encode',
+    }),
+    includeFlag: bool('Include the flag in the writeup', false, {
+      hint: 'Off by default so the writeup can be shared without spoiling the flag.',
+      showIf: (v) => v.mode !== 'encode' && v.writeup === true,
+    }),
   },
   examples: [
     {
@@ -369,6 +415,7 @@ export default defineTool({
       const { body, label } = applyStop(raw, o.stop);
       out.push(...decodedOutputs(body, raw, label));
       out.push(...explain(s, trace));
+      if (o.writeup) out.push(writeupOutput(s, trace, body, o.includeFlag));
       return out;
     }
 
@@ -427,6 +474,7 @@ export default defineTool({
     const { body, label } = applyStop(raw, 'length');
     out.push(...decodedOutputs(body, raw, label));
     out.push(...explain(best.s, trace));
+    if (o.writeup) out.push(writeupOutput(best.s, trace, body, o.includeFlag));
     return out;
   },
 });

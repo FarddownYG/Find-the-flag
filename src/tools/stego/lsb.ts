@@ -1,7 +1,8 @@
-import { defineTool, number, select, text, toggle } from '../../core/define';
+import { bool, defineTool, number, select, text, toggle } from '../../core/define';
 import { ToolError } from '../../core/errors';
 import { registeredTools } from '../../core/tool-list';
 import type { Output, RgbaImage } from '../../core/types';
+import { buildWriteup, codeBlock, kvTable, type WriteupSection } from '../../core/writeup';
 import { signatureName, toolName, toolT } from '../../i18n/tool-text';
 import { latin1Decode, printableRatio, toHex, utf8Encode } from '../../lib/bytes';
 import type { Signature } from '../../lib/signatures';
@@ -276,6 +277,23 @@ const orderLabel = (o: WalkOptions) => {
   return t === 'column' ? T('value.colByCol') : T('value.rowByRow');
 };
 
+/** The "how I found it" Markdown, fed with the facts the tool already shows. */
+function writeupOutput(
+  sections: WriteupSection[],
+  shown: Uint8Array,
+  includeFlag: boolean,
+): Output {
+  const flag = FLAG_RE.exec(latin1Decode(shown))?.[0];
+  return {
+    type: 'text',
+    label: T('label.writeup'),
+    value: buildWriteup(
+      [...sections, { heading: T('writeup.technique'), body: T('writeup.techniqueBody') }],
+      { title: T('writeup.title'), flag, includeFlag, flagLabel: T('writeup.flag') },
+    ),
+  };
+}
+
 const fmtPlanes = (p: number[]) => (p.length === 1 ? `${p[0]}` : p.join(','));
 
 export default defineTool({
@@ -374,6 +392,14 @@ export default defineTool({
       showIf: (v) => v.mode === 'manual',
     }),
     message: text('Message to hide', 'FTF{lsb}', { showIf: (v) => v.mode === 'encode' }),
+    writeup: bool('Copy-ready writeup (Markdown)', false, {
+      hint: 'Add a Markdown "how I found it" report you can paste into a CTF writeup.',
+      showIf: (v) => v.mode !== 'encode',
+    }),
+    includeFlag: bool('Include the flag in the writeup', false, {
+      hint: 'Off by default so the writeup can be shared without spoiling the flag.',
+      showIf: (v) => v.mode !== 'encode' && v.writeup === true,
+    }),
   },
   examples: [
     {
@@ -439,18 +465,15 @@ export default defineTool({
       if (!bytes.length) {
         throw new ToolError(T('error.nothingLeft', { count: capacity, skip: o.skip }));
       }
-      out.push({
-        type: 'kv',
-        label: T('label.extraction'),
-        entries: [
-          [T('kv.channels'), channelsToString(params.channels)],
-          [T('kv.planes'), fmtPlanes(params.planes)],
-          [T('kv.pixelOrder'), orderLabel(o)],
-          [T('kv.bitOrder'), o.bitOrder === 'msb' ? T('value.msb') : T('value.lsb')],
-          ...walk,
-          [T('kv.extracted'), T('value.extracted', { n: bytes.length, capacity })],
-        ],
-      });
+      const extraction: [string, string][] = [
+        [T('kv.channels'), channelsToString(params.channels)],
+        [T('kv.planes'), fmtPlanes(params.planes)],
+        [T('kv.pixelOrder'), orderLabel(o)],
+        [T('kv.bitOrder'), o.bitOrder === 'msb' ? T('value.msb') : T('value.lsb')],
+        ...walk,
+        [T('kv.extracted'), T('value.extracted', { n: bytes.length, capacity })],
+      ];
+      out.push({ type: 'kv', label: T('label.extraction'), entries: extraction });
       const sig = strongSignature(bytes);
       if (sig) {
         out.push({
@@ -476,6 +499,34 @@ export default defineTool({
         out.push(...nextSteps(bytes.subarray(0, printableRun(bytes))));
       }
       out.push({ type: 'note', level: 'info', text: T('note.seeAlso') });
+      if (o.writeup) {
+        const shown =
+          body ?? (sig ? bytes.subarray(0, 12) : bytes.subarray(0, printableRun(bytes)));
+        out.push(
+          writeupOutput(
+            [
+              {
+                heading: T('label.extraction'),
+                body: kvTable(extraction, [T('writeup.item'), T('writeup.value')]),
+              },
+              {
+                heading: body ? T('label.body') : T('label.extracted'),
+                body: codeBlock('', sig ? toHex(shown, ' ') : preview(shown, 512)),
+              },
+              ...(sig
+                ? [
+                    {
+                      heading: T('label.extracted'),
+                      body: T('note.magic', { name: signatureName(sig), ext: sig.ext }),
+                    },
+                  ]
+                : []),
+            ],
+            shown,
+            o.includeFlag,
+          ),
+        );
+      }
       return out;
     }
 
@@ -550,6 +601,28 @@ export default defineTool({
     out.push({ type: 'bytes', label: T('label.best'), value: bytes, filename: carved.filename });
     if (best.kind !== 'file') out.push(...nextSteps(bytes));
     out.push({ type: 'note', level: 'info', text: T('note.seeAlso') });
+    if (o.writeup) {
+      out.push(
+        writeupOutput(
+          [
+            {
+              heading: T('label.hits'),
+              body: T('note.scanned', { count: full.tried, kib: SCAN_BYTES / 1024 }),
+            },
+            {
+              heading: T('label.best'),
+              body: T('note.best', { params: hitLabel(best), what: best.what }),
+            },
+            {
+              heading: T('label.extracted'),
+              body: codeBlock('', best.kind === 'file' ? best.preview : preview(bytes, 512)),
+            },
+          ],
+          best.kind === 'file' ? new Uint8Array() : bytes,
+          o.includeFlag,
+        ),
+      );
+    }
     return out;
   },
 });

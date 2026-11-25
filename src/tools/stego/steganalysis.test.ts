@@ -124,3 +124,23 @@ describe('steganalysis tool', () => {
     expect(out.length).toBeGreaterThan(5);
   });
 });
+
+describe('steganalysis writeup', () => {
+  const writeupOf = (out: Output[]) => {
+    const w = out.find((x) => x.type === 'text');
+    if (w?.type !== 'text') throw new Error('no writeup output');
+    return w.value;
+  };
+
+  it('appends a Markdown writeup only when asked', async () => {
+    const input = await sample('stego-lsb.png');
+    const off = (await steganalysis.run(input, { writeup: false } as never)) as Output[];
+    expect(off.some((x) => x.type === 'text')).toBe(false);
+    const md = writeupOf((await steganalysis.run(input, { writeup: true } as never)) as Output[]);
+    expect(md).toMatch(/^# /);
+    expect(md).toContain('## Verdict');
+    expect(md).toContain('## Technique');
+    expect(md).toContain('strong signs of LSB embedding');
+    expect(md).toContain('| --- |');
+  });
+});

@@ -1,7 +1,8 @@
-import { defineTool } from '../../core/define';
+import { bool, defineTool } from '../../core/define';
 import { ToolError } from '../../core/errors';
 import { registeredTools } from '../../core/tool-list';
 import type { Output, RgbaImage } from '../../core/types';
+import { buildWriteup, kvTable, mdTable, type WriteupSection } from '../../core/writeup';
 import { toolName, toolT } from '../../i18n/tool-text';
 import {
   channelSamples,
@@ -113,7 +114,11 @@ export default defineTool({
   ],
   input: 'image',
   placeholder: 'Drop a lossless image (PNG, BMP, GIF, PPM): the test reads exact pixel values',
-  options: {},
+  options: {
+    writeup: bool('Copy-ready writeup (Markdown)', false, {
+      hint: 'Add a Markdown "how I found it" report you can paste into a CTF writeup.',
+    }),
+  },
   examples: [
     {
       label: 'Detect LSB embedding',
@@ -126,7 +131,7 @@ export default defineTool({
       expect: 'no sign of hidden data',
     },
   ],
-  run({ image }) {
+  run({ image }, o) {
     if (!image.width || !image.height) throw new ToolError(T('error.noPixels'));
     const { width: w, height: h } = image;
     const pixels = w * h;
@@ -190,16 +195,13 @@ export default defineTool({
     out.push({ type: 'note', level: 'info', text: T('note.detectsOnly') });
 
     // ---- chi-square ----
-    out.push({
-      type: 'kv',
-      label: T('label.chi'),
-      entries: CHANNELS.map((name, c): [string, string] => [
-        name,
-        chi[c]!.pairs >= MIN_PAIRS
-          ? T('value.chi', { p: pct(chi[c]!.p), pairs: chi[c]!.pairs })
-          : T('value.chiFew', { p: pct(chi[c]!.p), pairs: chi[c]!.pairs }),
-      ]),
-    });
+    const chiEntries = CHANNELS.map((name, c): [string, string] => [
+      name,
+      chi[c]!.pairs >= MIN_PAIRS
+        ? T('value.chi', { p: pct(chi[c]!.p), pairs: chi[c]!.pairs })
+        : T('value.chiFew', { p: pct(chi[c]!.p), pairs: chi[c]!.pairs }),
+    ]);
+    out.push({ type: 'kv', label: T('label.chi'), entries: chiEntries });
     const hot: number[] = [];
     const bandRows: (string | number)[][] = [];
     for (let b = 0; b < bandCount; b++) {
@@ -229,11 +231,8 @@ export default defineTool({
     }
 
     // ---- RS ----
-    out.push({
-      type: 'kv',
-      label: T('label.rs'),
-      entries: CHANNELS.map((name, c): [string, string] => [name, pct(rs[c]!.estimate)]),
-    });
+    const rsEntries = CHANNELS.map((name, c): [string, string] => [name, pct(rs[c]!.estimate)]);
+    out.push({ type: 'kv', label: T('label.rs'), entries: rsEntries });
     out.push({ type: 'note', level: 'info', text: T('note.rsIndicator') });
 
     // ---- coherence ----
@@ -320,6 +319,30 @@ export default defineTool({
     out.push({ type: 'note', level: 'info', text: T('tech.rs') });
     out.push({ type: 'note', level: 'info', text: T('tech.coherence') });
     out.push({ type: 'note', level: 'info', text: T('tech.outliers') });
+
+    if (o.writeup) {
+      const heads: [string, string] = [T('writeup.item'), T('writeup.value')];
+      const sections: WriteupSection[] = [
+        { heading: T('writeup.verdict'), body: (out[0] as { text: string }).text },
+        { heading: T('label.chi'), body: kvTable(chiEntries, heads) },
+        {
+          heading: T('label.bands'),
+          body: mdTable([T('col.band'), T('col.rows'), ...CHANNELS], bandRows),
+        },
+        { heading: T('label.rs'), body: kvTable(rsEntries, heads) },
+        {
+          heading: T('writeup.technique'),
+          body: [T('tech.chi'), T('tech.rs'), T('tech.coherence'), T('tech.outliers')]
+            .map((x) => `- ${x}`)
+            .join('\n'),
+        },
+      ];
+      out.push({
+        type: 'text',
+        label: T('label.writeup'),
+        value: buildWriteup(sections, { title: T('writeup.title') }),
+      });
+    }
     return out;
   },
 });
