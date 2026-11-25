@@ -665,3 +665,38 @@ function buildTiff(thumbnail) {
   if (bit < message.length * 8) throw new Error('LSB zone sample: message did not fit');
   write('stego-lsb-zone.png', encodeRgb(W, H, data));
 }
+
+// ---------- stego-clean.png: control for the steganalysis tool, nothing hidden ----------
+// A smoothed random cover (neighbouring pixels correlate like a photo) whose bit 0 is just the rounding
+// of the blur and carries no message: the clean baseline the chi-square, RS and coherence signals must not flag.
+
+{
+  const W = 160;
+  const H = 120;
+  const rnd = prng(77);
+  const base = new Float64Array(W * H);
+  for (let i = 0; i < W * H; i++) base[i] = Math.floor(rnd() * 256);
+  const data = new Uint8Array(W * H * 3);
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      let sum = 0;
+      let count = 0;
+      for (let dy = -2; dy <= 2; dy++) {
+        for (let dx = -2; dx <= 2; dx++) {
+          const yy = y + dy;
+          const xx = x + dx;
+          if (yy >= 0 && yy < H && xx >= 0 && xx < W) {
+            sum += base[yy * W + xx];
+            count++;
+          }
+        }
+      }
+      const v = Math.round(sum / count);
+      const o = (y * W + x) * 3;
+      data[o] = v;
+      data[o + 1] = v;
+      data[o + 2] = v;
+    }
+  }
+  write('stego-clean.png', encodeRgb(W, H, data));
+}
