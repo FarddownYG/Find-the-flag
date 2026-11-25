@@ -2,14 +2,13 @@ import { bool, defineTool, select, text, toggle } from '../../core/define';
 import { ToolError } from '../../core/errors';
 import type { Output } from '../../core/types';
 import { toolT } from '../../i18n/tool-text';
-import { fromBase64, toBase64, toHex, utf8Decode, utf8Encode } from '../../lib/bytes';
+import { B64URL, fromBase64, toBase64, toHex, utf8Decode, utf8Encode } from '../../lib/bytes';
 import { createHmac, type HmacAlgo } from './_hmac';
 import { WEAK_SECRETS } from './_jwt-secrets';
 
 const T = toolT('jwt');
 
-const URL_SAFE = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
-const b64url = (b: Uint8Array) => toBase64(b, URL_SAFE, false);
+const b64url = (b: Uint8Array) => toBase64(b, B64URL, false);
 
 const HS: Record<string, HmacAlgo> = { HS256: 'sha256', HS384: 'sha384', HS512: 'sha512' };
 

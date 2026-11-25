@@ -1,6 +1,6 @@
 import { bool, defineTool, file, text, toggle } from '../../core/define';
 import { toolT } from '../../i18n/tool-text';
-import { toBase64, utf8Encode } from '../../lib/bytes';
+import { B64URL, toBase64, utf8Encode } from '../../lib/bytes';
 import { isBareUrl } from './_web-source-fetch';
 import { looksLikeMap } from './_web-source-map';
 import { buildReport } from './_web-source-report';
@@ -9,8 +9,7 @@ import { analyze, classify } from './_web-source-run';
 const T = toolT('web-source');
 
 /** base64url, no padding, of a JSON text: the way a JWT part is written. */
-const b64url = (json: string): string =>
-  toBase64(utf8Encode(json)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const b64url = (json: string): string => toBase64(utf8Encode(json), B64URL, false);
 
 // The "Try" inputs are made of pieces so that no secret scanner mistakes them for real keys.
 const DEMO_JWT = [

@@ -55,6 +55,9 @@ export function fromHex(s: string): Uint8Array {
 
 const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 
+/** URL-safe alphabet (RFC 4648 §5): pass to toBase64, with pad = false for a JWT part. */
+export const B64URL = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+
 export function toBase64(b: Uint8Array, alphabet = B64, pad = true): string {
   let out = '';
   let i = 0;
