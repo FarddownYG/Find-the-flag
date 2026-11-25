@@ -48,30 +48,29 @@ public : un push sur `main` est une publication immédiate et définitive.
 ## AGENCE (mode autonome — état du run)
 
 ```
-ÉTAT: STOPPED | cycle 12/14 | sans-gain 0/2 | start 2026-10-15T10:30Z | fin : tous les critères FINI verts
-FINI: [x] portes vertes sur HEAD de autonome/2026-10-15 (check 5463 tests, docs:tools sans diff,
-          build, e2e 660 passed)
-      [x] vague 1 : playfair, bifid, hill, adfgvx, columnar, nihilist, enigma
-      [x] vague 2 : barcode (+ barcode-pattern), 9 encodages, symbol-ciphers
-      [x] vague 3 : sstv, pdf-analyzer, sqlite
-      [x] vague 4 : audio-stego, exe-analyzer, cipher-identify
-      [x] check:privacy propre, commits FarddownYG noreply sans mention d'IA
-COMMANDES: npm run check · npm run docs:tools + git diff --exit-code docs/TOOLS.md · npm run build
-           · e2e : build → vite preview → playwright (worktree propre) · captures → scratchpad (hors git)
-FAIT: 65 → 90 outils, chacun vérifié contre une référence indépendante (vecteurs publiés recalculés
-      en Python, py-enigma, PySSTV, poppler, sqlite3, readelf / pefile, Python wave / binascii)
-      6087893 fix(ui) removeChild quand un menu change avec une option texte focus (réentrance)
-DÉCISIONS: D1 un agent = une famille, commit dans son worktree isolé ; seul l'orchestrateur intègre
-           (cherry-pick + portes complètes) — rouvrir si une intégration casse main
-           D2 fusion vers main = fast-forward depuis autonome/ (pas de PR, voir garde-fou e-mail)
-           D3 pas de table de symboles inventée (Templar, Dancing Men) sans source vérifiable
-ARBITRAGES: A1 tranché (« go ») : main avancé en fast-forward sur autonome/2026-10-15 le 2026-10-15,
-           25 outils mis en production.
-PROPOSÉ (non exécuté, impact / effort / risque) :
-  1. Barre du haut en russe 9 px trop large sur mobile (vue par l'agent exe-analyzer) — moyen / faible / faible
-  2. qr.test.ts dépasse son budget de 15 s sous charge (vu 4 fois) — moyen / faible / faible
-  3. Liens croisés : symbol-ciphers → braille, frequency → cipher-identify, text-analyzer sur la
-     table confusables d'Unicode — moyen / moyen / faible
-  4. CI : actions/checkout et setup-node v4 tournent sur Node 20 déprécié → v5 — faible / faible / faible
-  5. Templar, Dancing Men, runes dès qu'une table de référence vérifiable est disponible — moyen / moyen / moyen
+ÉTAT: RUNNING | lot 1/5 | sans-gain 0/2 | start 2026-11-25 | fin : les 5 FINI verts OU 5 lots
+FINI: [ ] 1. banc de détection du corpus maison = 100 % des techniques depuis l'ENTRÉE UNIQUE, sans choisir d'outil
+      [ ] 2. fichiers sains (photo/vidéo/PDF normaux) → zéro faux positif « confirmé »
+      [ ] 3. chaque résultat affiche son explication EN HAUT
+      [ ] 4. parcours « dépose un fichier → comprends ce qu'il contient » vérifié sur captures, sans doc
+      [ ] 5. check (type/lint/format/tests/i18n/privacy) + docs:tools sans diff + build + e2e verts
+COMMANDES: bench `node scripts/detect-bench.mjs` (créé au lot 1, oracle du taux) · check `npm run check`
+           · build `npm run build` · docs `npm run docs:tools` + git diff --exit-code docs/TOOLS.md
+           · e2e `CI=true CHROMIUM_PATH=/opt/pw-browsers/chromium npx playwright test --trace off` · captures → scratchpad
+ÉTAPE 0 (vérifié) : entrée classe mais ne lance jamais tool.run() (pas de pipeline auto) ; _extract.ts
+  (conteneurs+carving+décodage, borné) non branché derrière l'entrée ; entropy.ts inutilisé ; pas d'anomalies
+  (zone non référencée / post-EOF général / carte d'entropie / verdict « chiffré ») ; AUCUN parser MP4/MOV/MKV/AVI ;
+  résultats en liste plate ; aucun banc/corpus. ~150 fixtures existent ; manquent MP4-mdat, ZIP-dans-JPEG, PDF-PJ-b64, x86, mots-symboles, APNG, LSB-pas.
+PLAN : L1 corpus+banc · L2 pipeline auto (worker) + anomalies (MP4 mdat non réf, carte entropie, zones non réf,
+  post-EOF, verdict chiffré TCSteg) · L3 page résultats en couches (verdict/comment/cours/étape/refaire/écartés ;
+  confirmé/probable/candidat) · L4 migration outils sur socle (converger PNG/GZIP/RIFF) · L5 UX catalogue + Learn
+FAIT: —
+EN COURS: L1 corpus maison (1 fixture/technique) + banc mesurant le % détecté depuis l'entrée. Accept: banc
+  tourne, imprime un % et le détail détecté/raté par cas ; fichiers sains → 0 faux positif.
+DÉCISIONS: D1 le banc est l'oracle du taux de détection, il ne doit JAMAIS baisser
+           D2 fusion main = fast-forward au vert (autorisé explicitement par l'utilisateur, dépôt public)
+           D3 « rien trouvé » INTERDIT sans la liste des vérifs faites + anomalies relevées
+           D4 jamais de fichier/flag Root-Me commité ; fixtures 100 % maison
+ARBITRAGES: — (autorisation totale de l'utilisateur ce run ; toute question → council, pas d'arrêt pour demander)
+PROPOSÉ (rempli à l'arrêt, ≤5, impact/effort/risque) : —
 ```
