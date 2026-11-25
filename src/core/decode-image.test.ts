@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { encode } from 'fast-png';
-import { decodeImageExact } from './decode-image';
+import { decodeImageExact, decodeNetpbm } from './decode-image';
 
 /** Small deterministic generator (xorshift32). */
 function rng(seed: number) {
@@ -89,5 +89,78 @@ describe('decodeImageExact: PNG sample values', () => {
     for (let i = 0; i < 16; i++) packed[i >> 1] = (packed[i >> 1] ?? 0) | (i << (i % 2 ? 0 : 4));
     const img = decode(encode({ width: 16, height: 1, data: packed, depth: 4, channels: 1 }));
     expect([...data].map((i) => img.data[4 * i])).toEqual([...data].map((v) => v * 17));
+  });
+});
+
+describe('decodeNetpbm: PBM / PGM / PPM', () => {
+  const enc = new TextEncoder();
+  const cat = (...parts: (string | number[] | Uint8Array)[]): Uint8Array => {
+    const chunks = parts.map((p) =>
+      typeof p === 'string' ? enc.encode(p) : p instanceof Uint8Array ? p : Uint8Array.from(p),
+    );
+    const out = new Uint8Array(chunks.reduce((n, c) => n + c.length, 0));
+    let o = 0;
+    for (const c of chunks) {
+      out.set(c, o);
+      o += c.length;
+    }
+    return out;
+  };
+  const px = (img: { data: Uint8ClampedArray }, i: number) => [
+    img.data[i * 4],
+    img.data[i * 4 + 1],
+    img.data[i * 4 + 2],
+    img.data[i * 4 + 3],
+  ];
+
+  it('reads a binary PPM (P6)', () => {
+    const img = decodeNetpbm(cat('P6\n2 2\n255\n', [255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 0]));
+    expect([img.width, img.height]).toEqual([2, 2]);
+    expect(px(img, 0)).toEqual([255, 0, 0, 255]);
+    expect(px(img, 3)).toEqual([255, 255, 0, 255]);
+  });
+
+  it('reads an ASCII PPM (P3) with header comments and loose whitespace', () => {
+    const img = decodeNetpbm(
+      cat('P3 # a comment\n2 2\n# another\n255\n 255 0 0  0 255 0\n0 0 255 255 255 0\n'),
+    );
+    expect(px(img, 0)).toEqual([255, 0, 0, 255]);
+    expect(px(img, 2)).toEqual([0, 0, 255, 255]);
+  });
+
+  it('matches between P3, P6 and decodeImageExact', () => {
+    const p6 = cat('P6\n2 1\n255\n', [10, 20, 30, 40, 50, 60]);
+    const p3 = cat('P3\n2 1\n255\n 10 20 30 40 50 60\n');
+    expect(decodeNetpbm(p3).data).toEqual(decodeNetpbm(p6).data);
+    expect(decodeImageExact(p6)!.data).toEqual(decodeNetpbm(p6).data);
+  });
+
+  it('scales a maxval other than 255', () => {
+    const img = decodeNetpbm(cat('P3\n1 1\n15\n 15 0 8\n'));
+    expect(px(img, 0)).toEqual([255, 0, Math.round((8 * 255) / 15), 255]);
+  });
+
+  it('reads 16-bit samples big-endian and scales them', () => {
+    const img = decodeNetpbm(cat('P6\n1 1\n65535\n', [0xff, 0xff, 0x00, 0x00, 0x80, 0x00]));
+    expect(px(img, 0)).toEqual([255, 0, Math.round((0x8000 * 255) / 65535), 255]);
+  });
+
+  it('reads PGM (P2 ASCII and P5 binary)', () => {
+    const a = decodeNetpbm(cat('P2\n2 1\n255\n 100 200\n'));
+    expect(px(a, 0)).toEqual([100, 100, 100, 255]);
+    expect(decodeNetpbm(cat('P5\n2 1\n255\n', [100, 200])).data).toEqual(a.data);
+  });
+
+  it('reads PBM bitmaps (P1 ASCII and P4 binary): 1 = black', () => {
+    const a = decodeNetpbm(cat('P1\n2 2\n1 0 0 1\n'));
+    expect(px(a, 0)).toEqual([0, 0, 0, 255]);
+    expect(px(a, 1)).toEqual([255, 255, 255, 255]);
+    // Row 0 bits 1 0 -> 0x80; row 1 bits 0 1 -> 0x40 (each row padded to a byte).
+    expect(decodeNetpbm(cat('P4\n2 2\n', [0x80, 0x40])).data).toEqual(a.data);
+  });
+
+  it('throws on a truncated raster and on a bad header', () => {
+    expect(() => decodeNetpbm(cat('P6\n2 2\n255\n', [1, 2, 3]))).toThrow();
+    expect(() => decodeNetpbm(enc.encode('P7\n2 2\n255\n'))).toThrow();
   });
 });

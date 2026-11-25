@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { encode } from 'fast-png';
 import { describe, expect, it } from 'vitest';
+import '../../core/registry'; // populates registeredTools() so key chaining can find Vigenère
 import { decodeImageExact } from '../../core/decode-image';
 import { ToolError } from '../../core/errors';
 import { resultToText } from '../../core/result-text';
@@ -1275,5 +1276,190 @@ describe('Piet triage', () => {
     expect(detect(png(grid('w w k w', 'k w w k'), 8), 'scan.png')).toBeNull();
     const damaged = png(ftf(), 4).slice(0, 60);
     expect(detect(damaged, 'x.png')).toBeNull();
+  });
+});
+
+// ---------- Netpbm input, format diagnostics and key chaining ----------
+
+describe('Piet — Netpbm, diagnostics and chaining', () => {
+  const enc = new TextEncoder();
+  const concat = (...parts: Uint8Array[]): Uint8Array => {
+    const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+    let o = 0;
+    for (const p of parts) {
+      out.set(p, o);
+      o += p.length;
+    }
+    return out;
+  };
+  const toP6 = (img: RgbaImage, comment = ''): Uint8Array => {
+    const n = img.width * img.height;
+    const raster = new Uint8Array(n * 3);
+    for (let i = 0; i < n; i++) {
+      raster[i * 3] = img.data[i * 4]!;
+      raster[i * 3 + 1] = img.data[i * 4 + 1]!;
+      raster[i * 3 + 2] = img.data[i * 4 + 2]!;
+    }
+    return concat(enc.encode(`P6\n${comment}${img.width} ${img.height}\n255\n`), raster);
+  };
+  const toP3 = (img: RgbaImage, comment = ''): Uint8Array => {
+    let s = `P3\n${comment}${img.width} ${img.height}\n255\n`;
+    for (let i = 0; i < img.width * img.height; i++) {
+      s += `${img.data[i * 4]} ${img.data[i * 4 + 1]} ${img.data[i * 4 + 2]} `;
+    }
+    return enc.encode(`${s}\n`);
+  };
+  const toP6_16 = (img: RgbaImage): Uint8Array => {
+    const n = img.width * img.height;
+    const raster = new Uint8Array(n * 6);
+    for (let i = 0; i < n; i++) {
+      for (let c = 0; c < 3; c++) {
+        const v = img.data[i * 4 + c]! * 257; // 8-bit -> 16-bit, scales back exactly
+        raster[(i * 3 + c) * 2] = v >> 8;
+        raster[(i * 3 + c) * 2 + 1] = v & 0xff;
+      }
+    }
+    return concat(enc.encode(`P6\n${img.width} ${img.height}\n65535\n`), raster);
+  };
+  const runImage = async (bytes: Uint8Array, opts: Partial<Opts> = {}): Promise<Output[]> =>
+    tool.run({ bytes, name: 'prog', image: decodeImageExact(bytes)! }, { ...defaults, ...opts });
+
+  it('reads the same program from PPM P6, P3 (with comments), 16-bit PPM and PNG', async () => {
+    const img = image(ftfCells());
+    const png = encode({
+      width: img.width,
+      height: img.height,
+      data: img.data,
+      channels: 4,
+      depth: 8,
+    });
+    for (const bytes of [toP6(img), toP3(img, '# a piet program\n'), toP6_16(img), png]) {
+      expect(printed(await runImage(bytes))).toBe('FTF');
+    }
+  });
+
+  it('detects the codel size straight from a PPM (1 px and 4 px)', async () => {
+    for (const codel of [1, 4]) {
+      const out = await runImage(toP6(image(ftfCells(), codel)));
+      expect(printed(out)).toBe('FTF');
+      expect(kvValue(out, 'Codel size')).toBe(`${codel} px (detected)`);
+    }
+  });
+
+  it('warns about a lossy format before the output, from the magic bytes', async () => {
+    const jpeg = concat(Uint8Array.from([0xff, 0xd8, 0xff, 0xe0]), new Uint8Array(8));
+    const out = await tool.run(
+      { bytes: jpeg, name: 'prog.jpg', image: image(ftfCells()) },
+      defaults,
+    );
+    const lossyAt = out.findIndex((o) => o.type === 'note' && /lossy/i.test(o.text));
+    const outputAt = out.findIndex((o) => o.type === 'text');
+    expect(lossyAt).toBeGreaterThanOrEqual(0);
+    expect(lossyAt).toBeLessThan(outputAt);
+    expect(resultToText(out)).toMatch(/JPEG/);
+  });
+
+  it('recovers an off-colour program with Nearest and reports the palette split', async () => {
+    const base = image(ftfCells(), 4);
+    const off = { ...base, data: new Uint8ClampedArray(base.data) };
+    const bump = (v: number, d: number) => Math.max(0, Math.min(255, v + d));
+    for (let i = 0; i < off.data.length; i += 4) {
+      off.data[i] = bump(off.data[i]!, 7);
+      off.data[i + 1] = bump(off.data[i + 1]!, -6);
+      off.data[i + 2] = bump(off.data[i + 2]!, 5);
+    }
+    const out = await runImage(toP6(off), { unknown: 'nearest', steps: 5000 });
+    expect(printed(out)).toBe('FTF');
+    expect(resultToText(out)).toMatch(/exact Piet colours/);
+  });
+
+  it('gives an image diagnostic for a non-Piet picture, not a blind loop', async () => {
+    const cells = Array.from({ length: 4 }, () => Array.from({ length: 4 }, () => 'x')); // all grey
+    const out = await exec(image(cells), { unknown: 'white', steps: 50 });
+    const txt = resultToText(out);
+    expect(txt).toMatch(/off-palette/);
+    expect(txt).toMatch(/most likely the image/i);
+  });
+
+  const printString = (s: string): string[][] =>
+    program(
+      [...s].flatMap((ch): Op[] => [
+        ['push', ch.codePointAt(0)!],
+        ['out(char)', 1],
+      ]),
+    ).cells;
+
+  it('offers a key-like output as the Vigenère key', async () => {
+    const out = await exec(image(printString('KEYS')));
+    expect(printed(out)).toBe('KEYS');
+    const act = out.find((o) => o.type === 'actions');
+    expect(act?.type === 'actions' && act.actions[0]!.open?.tool).toBe('vigenere');
+    expect(act?.type === 'actions' && act.actions[0]!.options.key).toBe('KEYS');
+  });
+
+  it('extracts the key from a "key is …" style message', async () => {
+    const out = await exec(image(printString('key TEST')));
+    expect(printed(out)).toBe('key TEST');
+    const act = out.find((o) => o.type === 'actions');
+    expect(act?.type === 'actions' && act.actions[0]!.options.key).toBe('TEST');
+  });
+
+  it('does not offer a key for ordinary words that merely contain "key"/"pass"', async () => {
+    const out = await exec(image(printString('a monkey')));
+    expect(printed(out)).toBe('a monkey');
+    expect(out.some((o) => o.type === 'actions')).toBe(false);
+  });
+
+  it('keeps codel 1 for a clean codel-1 image with sparse one-pixel detail', () => {
+    // A 2x2-block checkerboard of exact Piet colours plus one genuine 1px codel: the exact gcd is
+    // 1, so the run-length estimate must NOT override it to 2 (that would erase the 1px codel).
+    const W = 16;
+    const H = 16;
+    const data = new Uint8ClampedArray(W * H * 4);
+    const put = (x: number, y: number, hex: number) => {
+      const i = (y * W + x) * 4;
+      data[i] = (hex >> 16) & 255;
+      data[i + 1] = (hex >> 8) & 255;
+      data[i + 2] = hex & 255;
+      data[i + 3] = 255;
+    };
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) put(x, y, ((x >> 1) + (y >> 1)) % 2 ? 0x0000ff : 0xffc0c0);
+    }
+    put(0, 0, 0x00ff00); // one real one-pixel codel
+    const built = buildGrid({ width: W, height: H, data }, { codel: 0, unknown: 'white' });
+    expect(built.codel).toBe(1);
+    expect(built.estimated).toBe(false);
+  });
+
+  it('still estimates the codel size on a noisy, off-palette image', () => {
+    const C = 4;
+    const G = 10;
+    const W = C * G;
+    const H = C * G;
+    const data = new Uint8ClampedArray(W * H * 4);
+    for (let by = 0; by < G; by++) {
+      for (let bx = 0; bx < G; bx++) {
+        const r = 10 + bx * 20; // off-palette block colours -> low exact-Piet share
+        const g = 30 + by * 20;
+        for (let y = 0; y < C; y++) {
+          for (let x = 0; x < C; x++) {
+            const i = ((by * C + y) * W + (bx * C + x)) * 4;
+            data[i] = r;
+            data[i + 1] = g;
+            data[i + 2] = 50;
+            data[i + 3] = 255;
+          }
+        }
+      }
+    }
+    // One stray pixel breaks the exact gcd to 1; it is far below the estimator's frequency cutoff,
+    // so the dominant 4-pixel grid still wins.
+    const i = (0 * W + 1) * 4;
+    data[i] = data[i + 1] = data[i + 2] = 200;
+    data[i + 3] = 255;
+    const built = buildGrid({ width: W, height: H, data }, { codel: 0, unknown: 'nearest' });
+    expect(built.estimated).toBe(true);
+    expect(built.codel).toBe(4);
   });
 });

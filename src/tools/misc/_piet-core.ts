@@ -66,8 +66,8 @@ export function classify(rgb: number): number {
   return KIND_OF_RGB.get(rgb) ?? -1;
 }
 
-/** The closest of the 20 colours (Euclidean distance in RGB). */
-export function nearestKind(rgb: number): number {
+/** The closest of the 20 colours and the squared RGB distance to it. */
+export function nearestInfo(rgb: number): { kind: number; dist2: number } {
   const r = (rgb >> 16) & 255;
   const g = (rgb >> 8) & 255;
   const b = rgb & 255;
@@ -83,8 +83,20 @@ export function nearestKind(rgb: number): number {
       best = kind;
     }
   });
-  return best;
+  return { kind: best, dist2: bestDist };
 }
+
+/** The closest of the 20 colours (Euclidean distance in RGB). */
+export function nearestKind(rgb: number): number {
+  return nearestInfo(rgb).kind;
+}
+
+/**
+ * How far off-palette a colour may be and still count as "recoverable" (would snap to the right
+ * Piet colour with "Nearest"): a squared RGB distance. Light compression keeps a colour within
+ * this; a photo or text pixel is well beyond it.
+ */
+export const NEAR_DIST2 = 64 * 64;
 
 /** Hue steps (0-5) and shade steps (0-2) from one colour to another: they pick the command. */
 export function colourChange(from: number, to: number): { hue: number; shade: number } {
@@ -183,6 +195,51 @@ export function detectCodelSize(width: number, height: number, rgb: Int32Array):
   return Math.max(1, g);
 }
 
+/**
+ * A robust codel-size guess for when the exact gcd fell to 1 because a few pixels are off
+ * (scaling artefacts, light compression). Short runs of length 1 that make up a real share of
+ * the picture mean genuine one-pixel detail, so the guess stays 1; otherwise it is the gcd of the
+ * run lengths that occur often, the rare odd runs ignored.
+ */
+export function estimateCodelSize(width: number, height: number, rgb: Int32Array): number {
+  const freq = new Map<number, number>();
+  let total = 0;
+  const add = (len: number) => {
+    freq.set(len, (freq.get(len) ?? 0) + 1);
+    total++;
+  };
+  for (let y = 0; y < height; y++) {
+    let run = 1;
+    const row = y * width;
+    for (let x = 1; x < width; x++) {
+      if (rgb[row + x] === rgb[row + x - 1]) run++;
+      else {
+        add(run);
+        run = 1;
+      }
+    }
+    add(run);
+  }
+  for (let x = 0; x < width; x++) {
+    let run = 1;
+    for (let y = 1; y < height; y++) {
+      if (rgb[y * width + x] === rgb[(y - 1) * width + x]) run++;
+      else {
+        add(run);
+        run = 1;
+      }
+    }
+    add(run);
+  }
+  if (total === 0) return 1;
+  if ((freq.get(1) ?? 0) / total > 0.15) return 1; // real one-pixel detail
+  const cutoff = Math.max(2, total * 0.02);
+  let g = 0;
+  for (const [len, count] of freq) if (count >= cutoff) g = gcd(g, len);
+  const est = Math.max(1, g);
+  return est <= Math.min(width, height) ? est : 1;
+}
+
 /** The colour of a codel: its pixels are normally all alike; otherwise the most common one. */
 function codelColour(rgb: Int32Array, width: number, cx: number, cy: number, size: number): number {
   const first = rgb[cy * size * width + cx * size]!;
@@ -256,14 +313,36 @@ export interface BuiltGrid {
   /** Codel size in pixels. */
   codel: number;
   detected: boolean;
+  /** The codel size was not an exact gcd but a robust guess from the run lengths. */
+  estimated: boolean;
   /** The image width/height was not a multiple of the codel size: the remainder is ignored. */
   cropped: boolean;
   /** Codels whose colour is not one of the 20 (they were mapped as per the option). */
   unknownCodels: number;
+  /** Codels that are exactly one of the 20 Piet colours. */
+  exactCodels: number;
+  /** Off-palette codels close enough to snap to a Piet colour (recoverable with "Nearest"). */
+  nearCodels: number;
+  /** Off-palette codels too far to recover (a photo, text, heavy compression). */
+  farCodels: number;
 }
 
 const MAX_PIXELS = 40_000_000;
 const MAX_CODELS = 4_000_000;
+
+/** The share of (sampled) pixels that are exactly one of the 20 Piet colours. */
+function pietExactShare(rgb: Int32Array): number {
+  const total = rgb.length;
+  if (total === 0) return 0;
+  const stride = Math.max(1, Math.floor(total / 20_000));
+  let sampled = 0;
+  let exact = 0;
+  for (let i = 0; i < total; i += stride) {
+    sampled++;
+    if (classify(rgb[i]!) >= 0) exact++;
+  }
+  return sampled === 0 ? 0 : exact / sampled;
+}
 
 export function buildGrid(image: RgbaImage, o: BuildOptions): BuiltGrid {
   const { width, height, data } = image;
@@ -275,7 +354,28 @@ export function buildGrid(image: RgbaImage, o: BuildOptions): BuiltGrid {
   for (let i = 0; i < rgb.length; i++) rgb[i] = flatten(data, i * 4);
 
   const detected = !(o.codel > 0);
-  const codel = detected ? detectCodelSize(width, height, rgb) : Math.floor(o.codel);
+  let codel: number;
+  let estimated = false;
+  if (!detected) {
+    codel = Math.floor(o.codel);
+  } else {
+    const exact = detectCodelSize(width, height, rgb);
+    if (exact > 1) {
+      codel = exact;
+    } else {
+      // The exact gcd is 1. Only trust a run-length estimate when the picture is clearly
+      // noisy or compressed (many off-palette colours): a clean codel-1 program keeps codel 1,
+      // so a genuine one-pixel codel is never silently read at a larger size.
+      codel = 1;
+      if (pietExactShare(rgb) < 0.9) {
+        const guess = estimateCodelSize(width, height, rgb);
+        if (guess > 1) {
+          codel = guess;
+          estimated = true;
+        }
+      }
+    }
+  }
   if (codel > width || codel > height) {
     throw new ToolError(T('error.codelTooLarge', { codel, width, height }));
   }
@@ -290,7 +390,10 @@ export function buildGrid(image: RgbaImage, o: BuildOptions): BuiltGrid {
   // Colour of every codel.
   const kinds = new Uint8Array(n);
   const memo = new Map<number, number>();
+  const offMemo = new Map<number, number>(); // colour -> 1 near (recoverable), 2 far
   let unknownCodels = 0;
+  let nearCodels = 0;
+  let farCodels = 0;
   for (let cy = 0; cy < ch; cy++) {
     for (let cx = 0; cx < cw; cx++) {
       const colour = codelColour(rgb, width, cx, cy, codel);
@@ -307,7 +410,16 @@ export function buildGrid(image: RgbaImage, o: BuildOptions): BuiltGrid {
                 : WHITE;
         memo.set(colour, kind);
       }
-      if (!KIND_OF_RGB.has(colour)) unknownCodels++;
+      if (!KIND_OF_RGB.has(colour)) {
+        unknownCodels++;
+        let cls = offMemo.get(colour);
+        if (cls === undefined) {
+          cls = nearestInfo(colour).dist2 <= NEAR_DIST2 ? 1 : 2;
+          offMemo.set(colour, cls);
+        }
+        if (cls === 1) nearCodels++;
+        else farCodels++;
+      }
       kinds[cy * cw + cx] = kind;
     }
   }
@@ -366,7 +478,19 @@ export function buildGrid(image: RgbaImage, o: BuildOptions): BuiltGrid {
     blockCount: blocks,
     exits: new Map(),
   };
-  return { grid, imageWidth: width, imageHeight: height, codel, detected, cropped, unknownCodels };
+  return {
+    grid,
+    imageWidth: width,
+    imageHeight: height,
+    codel,
+    detected,
+    estimated,
+    cropped,
+    unknownCodels,
+    exactCodels: n - unknownCodels,
+    nearCodels,
+    farCodels,
+  };
 }
 
 /**

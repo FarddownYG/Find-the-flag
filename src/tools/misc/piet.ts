@@ -1,8 +1,9 @@
 import { decodeImageExact } from '../../core/decode-image';
 import { defineTool, number, text, toggle } from '../../core/define';
 import { ToolError } from '../../core/errors';
+import { registeredTools } from '../../core/tool-list';
 import type { Output, RgbaImage } from '../../core/types';
-import { toolT } from '../../i18n/tool-text';
+import { toolName, toolT } from '../../i18n/tool-text';
 import { u32le } from '../../lib/bytes';
 import { buildGrid, paletteProfile, type BuiltGrid } from './_piet-core';
 import {
@@ -34,6 +35,15 @@ function smallPicture(bytes: Uint8Array): RgbaImage | null {
     pixels *= ((bytes[20]! << 24) | (bytes[21]! << 16) | (bytes[22]! << 8) | bytes[23]!) >>> 0;
   } else if (bytes[0] === 0x42 && bytes[1] === 0x4d) {
     pixels = u32le(bytes, 18) * Math.abs(u32le(bytes, 22) | 0);
+  } else if (bytes[0] === 0x50 && bytes[1]! >= 0x31 && bytes[1]! <= 0x36) {
+    // Netpbm: no cheap header pixel count, so decode (it is small, gated by GUESS_MAX_BYTES).
+    try {
+      const img = decodeImageExact(bytes);
+      return img && img.width * img.height <= GUESS_MAX_PIXELS ? img : null;
+    } catch (e) {
+      if (e instanceof ToolError) return null;
+      throw e;
+    }
   } else {
     return null;
   }
@@ -49,6 +59,115 @@ function smallPicture(bytes: Uint8Array): RgbaImage | null {
 const grouped = (n: number) => n.toLocaleString('en-US');
 const clamp = (v: number, lo: number, hi: number, fallback: number) =>
   Number.isFinite(v) ? Math.min(Math.max(Math.floor(v), lo), hi) : fallback;
+
+/** The file format from its magic bytes, and whether it is lossy (which ruins Piet colours). */
+function formatInfo(bytes: Uint8Array): { name: string; lossy: boolean } {
+  const b = bytes;
+  if (b.length >= 3 && b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46)
+    return { name: 'GIF', lossy: false };
+  if (
+    b.length >= 16 &&
+    b[0] === 0x52 &&
+    b[1] === 0x49 &&
+    b[2] === 0x46 &&
+    b[3] === 0x46 &&
+    b[8] === 0x57 &&
+    b[9] === 0x45 &&
+    b[10] === 0x42 &&
+    b[11] === 0x50
+  ) {
+    // Only 'VP8 ' (0x20) is surely lossy; 'VP8L' is lossless and 'VP8X' may wrap either, so do
+    // not raise a false "colours altered" warning for it — the palette split shows real damage.
+    return { name: 'WebP', lossy: b[15] === 0x20 };
+  }
+  if (b.length < 2) return { name: '', lossy: false };
+  if (b[0] === 0x89 && b[1] === 0x50) return { name: 'PNG', lossy: false };
+  if (b[0] === 0x42 && b[1] === 0x4d) return { name: 'BMP', lossy: false };
+  if (b[0] === 0xff && b[1] === 0xd8) return { name: 'JPEG', lossy: true };
+  if (b[0] === 0x50 && b[1]! >= 0x31 && b[1]! <= 0x36) {
+    const t = b[1]! - 0x30;
+    return { name: t === 1 || t === 4 ? 'PBM' : t === 2 || t === 5 ? 'PGM' : 'PPM', lossy: false };
+  }
+  return { name: '', lossy: false };
+}
+
+/** Words that sit around a key in a message ("the key is X") but are not the key itself. */
+const KEY_STOPWORDS = new Set([
+  'key',
+  'is',
+  'the',
+  'pass',
+  'password',
+  'passphrase',
+  'clé',
+  'cle',
+  'est',
+  'mot',
+  'de',
+  'passe',
+  'le',
+  'la',
+  'your',
+  'secret',
+  'phrase',
+]);
+const keyScore = (t: string): number => t.length + (t.match(/[A-Z]/g)?.length ?? 0);
+
+/** Whole-word markers that announce a key/password, so "monkey" or "oracle" do not trigger it. */
+const KEY_MARKERS = new Set([
+  'key',
+  'keys',
+  'pass',
+  'password',
+  'passphrase',
+  'passwd',
+  'secret',
+  'cle',
+  'cles',
+  'clé',
+  'clés',
+]);
+
+/**
+ * When the output looks like a key or password, offer to open it in the Vigenère tool with the
+ * key filled in — the usual next step after a Piet program hands you a keyword.
+ */
+function keyChaining(output: string): Output[] {
+  if (!registeredTools().some((x) => x.id === 'vigenere')) return [];
+  const tokens = output.match(/[A-Za-z0-9_-]{2,}/g) ?? [];
+  const candidates = tokens.filter((t) => t.length >= 3 && !KEY_STOPWORDS.has(t.toLowerCase()));
+  const words = output
+    .toLowerCase()
+    .split(/[^a-zà-ÿ]+/i)
+    .filter(Boolean);
+  const intro = words.some((w) => KEY_MARKERS.has(w)) || /mot\s+de\s+passe/i.test(output);
+  let key: string | null = null;
+  if (intro && candidates.length) {
+    key = candidates.reduce((a, b) => (keyScore(b) > keyScore(a) ? b : a));
+  } else if (tokens.length === 1 && candidates.length === 1) {
+    // A lone token with no announcing word: only offer it when it actually looks like a key
+    // (has an upper-case letter or a digit, or is long), not an everyday word.
+    const t = candidates[0]!;
+    if (/[A-Z]/.test(t) || /\d/.test(t) || t.length >= 8) key = t;
+  }
+  if (!key) return [];
+  const vigenere = registeredTools().find((x) => x.id === 'vigenere');
+  const name = vigenere ? toolName(vigenere) : 'Vigenère';
+  return [
+    {
+      type: 'actions',
+      label: T('chain.label'),
+      actions: [
+        {
+          label: T('chain.useKey', { key, tool: name }),
+          options: { mode: 'decrypt', key },
+          open: { tool: 'vigenere', text: '' },
+          primary: true,
+        },
+      ],
+    },
+  ];
+}
 
 function stopText(r: PietResult, stepLimit: number): string {
   switch (r.stop) {
@@ -73,6 +192,13 @@ function notes(b: BuiltGrid, r: PietResult, unknown: string, stepLimit: number):
       type: 'note',
       level: 'info',
       text: T('note.cropped', { codel: b.codel }),
+    });
+  }
+  if (b.estimated) {
+    out.push({
+      type: 'note',
+      level: 'warn',
+      text: T('note.estimated', { codel: b.codel }),
     });
   }
   if (b.unknownCodels > 0) {
@@ -147,7 +273,9 @@ function stats(b: BuiltGrid, r: PietResult, stepLimit: number, hasInput: boolean
     [
       T('kv.codelSize'),
       b.detected
-        ? T('value.codelDetected', { codel: b.codel })
+        ? b.estimated
+          ? T('value.codelEstimated', { codel: b.codel })
+          : T('value.codelDetected', { codel: b.codel })
         : T('value.codelManual', { codel: b.codel }),
     ],
     [
@@ -225,7 +353,7 @@ export default defineTool({
   name: 'Piet',
   category: 'misc',
   description:
-    'Run a Piet program (an image made of colour blocks): codel size detection, output and a step-by-step trace.',
+    'Run a Piet program (an image made of colour blocks): reads PNG, BMP, GIF, WebP and Netpbm (PPM/PGM/PBM) directly, detects the codel size, warns when a lossy format or a wrong codel size broke the colours, and shows the output with a step-by-step trace.',
   tags: [
     'esolang',
     'esoteric',
@@ -236,9 +364,12 @@ export default defineTool({
     'colour blocks',
     'mondrian',
     'program image',
+    'ppm',
+    'netpbm',
+    'pnm',
   ],
   input: 'image',
-  placeholder: 'Drop a Piet program (PNG or BMP is read pixel for pixel)',
+  placeholder: 'Drop a Piet program — PNG, BMP, GIF, WebP or a .ppm, read pixel for pixel',
   options: {
     codel: number('Codel size', 0, {
       min: 0,
@@ -301,7 +432,7 @@ export default defineTool({
     if (named) return { score: 0.6, reason: T('detect.named') };
     return null;
   },
-  run({ image }, opts) {
+  run({ image, bytes }, opts) {
     const stepLimit = clamp(opts.steps, 1, STEP_LIMIT_MAX, 1_000_000);
     const built = buildGrid(image, {
       codel: clamp(opts.codel, 0, 512, 0),
@@ -312,11 +443,45 @@ export default defineTool({
       stepLimit,
       traceRows: clamp(opts.trace, 0, TRACE_MAX, 200),
     });
-    const out: Output[] = notes(built, result, opts.unknown, stepLimit);
+    const total = Math.max(1, built.grid.width * built.grid.height);
+    const fmt = formatInfo(bytes);
+    const out: Output[] = [];
+
+    // Format first, with a prominent warning when it is a lossy one (the usual cause of failure).
+    if (fmt.lossy) {
+      out.push({ type: 'note', level: 'warn', text: T('note.lossy', { format: fmt.name }) });
+    } else if (fmt.name) {
+      out.push({ type: 'note', level: 'info', text: T('note.format', { format: fmt.name }) });
+    }
+
+    // Palette health: the share of codels that are exact Piet colours, near, or off-palette.
+    if (built.unknownCodels > 0 || fmt.lossy) {
+      const pct = (k: number) => Math.round((k / total) * 100);
+      out.push({
+        type: 'note',
+        level: built.farCodels / total > 0.05 ? 'warn' : 'info',
+        text: T('note.palette', {
+          exact: pct(built.exactCodels),
+          near: pct(built.nearCodels),
+          off: pct(built.farCodels),
+        }),
+      });
+    }
+
+    out.push(...notes(built, result, opts.unknown, stepLimit));
+
+    // A largely off-palette picture that printed nothing (or looped to the step limit) is almost
+    // certainly not a Piet program, or is in the wrong format or codel size — say so plainly.
+    if (built.farCodels / total > 0.5 && (result.stop === 'step-limit' || !result.output)) {
+      out.push({ type: 'note', level: 'warn', text: T('note.imageProblem') });
+    }
+
     if (result.output) out.push({ type: 'text', label: T('label.output'), value: result.output });
     else if (result.stop !== 'black-start') {
       out.push({ type: 'note', level: 'info', text: T('note.printedNothing') });
     }
+
+    out.push(...keyChaining(result.output));
     out.push(stats(built, result, stepLimit, opts.input !== ''));
     if (result.trace.length) out.push(traceTable(result));
     return out;

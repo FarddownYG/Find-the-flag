@@ -20,7 +20,124 @@ export function decodeImageExact(bytes: Uint8Array): RgbaImage | null {
     return pngToRgba(png);
   }
   if (bytes[0] === 0x42 && bytes[1] === 0x4d) return decodeBmp(bytes);
+  if (bytes[0] === 0x50 && bytes[1]! >= 0x31 && bytes[1]! <= 0x36) return decodeNetpbm(bytes);
   return null;
+}
+
+const NETPBM_MAX_PIXELS = 100_000_000;
+const isBlank = (c: number) =>
+  c === 0x20 || c === 0x09 || c === 0x0a || c === 0x0d || c === 0x0b || c === 0x0c;
+
+/**
+ * Netpbm: PBM/PGM/PPM, ASCII (P1/P2/P3) and binary (P4/P5/P6). Handles `#` header comments,
+ * a maxval other than 255 (scaled to 8 bits) and 16-bit samples (big-endian). Browsers do not
+ * decode Netpbm, so a Piet program saved as a .ppm needs this pure-JS reader.
+ */
+export function decodeNetpbm(b: Uint8Array): RgbaImage {
+  const type = b[0] === 0x50 ? b[1]! - 0x30 : 0;
+  if (type < 1 || type > 6) throw new ToolError(t('core.netpbm.header'));
+  const ascii = type <= 3;
+  const bitmap = type === 1 || type === 4; // PBM: 1 = black, 0 = white, no maxval
+
+  let pos = 2;
+  const skipBlanksAndComments = () => {
+    for (;;) {
+      while (pos < b.length && isBlank(b[pos]!)) pos++;
+      if (b[pos] === 0x23) while (pos < b.length && b[pos] !== 0x0a) pos++;
+      else break;
+    }
+  };
+  const headerUint = (): number => {
+    skipBlanksAndComments();
+    const start = pos;
+    let v = 0;
+    while (pos < b.length && b[pos]! >= 0x30 && b[pos]! <= 0x39) v = v * 10 + (b[pos++]! - 0x30);
+    if (pos === start) throw new ToolError(t('core.netpbm.header'));
+    return v;
+  };
+
+  const width = headerUint();
+  const height = headerUint();
+  const maxval = bitmap ? 1 : headerUint();
+  if (width <= 0 || height <= 0 || width * height > NETPBM_MAX_PIXELS) {
+    throw new ToolError(t('core.netpbm.size', { width, height }));
+  }
+  if (!bitmap && (maxval < 1 || maxval > 65535)) {
+    throw new ToolError(t('core.netpbm.maxval', { maxval }));
+  }
+
+  const n = width * height;
+  const out = new Uint8ClampedArray(n * 4);
+  const scale = (v: number) =>
+    maxval === 255 ? v : Math.round((Math.min(v, maxval) * 255) / maxval);
+
+  if (ascii) {
+    const nextToken = (): number => {
+      skipBlanksAndComments();
+      if (bitmap) {
+        // A PBM sample is a single 0/1 digit; whitespace between them is optional.
+        if (pos >= b.length) throw new ToolError(t('core.netpbm.truncated'));
+        const c = b[pos++]!;
+        if (c !== 0x30 && c !== 0x31) throw new ToolError(t('core.netpbm.truncated'));
+        return c - 0x30;
+      }
+      const start = pos;
+      let v = 0;
+      while (pos < b.length && b[pos]! >= 0x30 && b[pos]! <= 0x39) v = v * 10 + (b[pos++]! - 0x30);
+      if (pos === start) throw new ToolError(t('core.netpbm.truncated'));
+      return v;
+    };
+    for (let i = 0; i < n; i++) {
+      if (bitmap) {
+        const v = nextToken() ? 0 : 255; // 1 = black
+        out[i * 4] = out[i * 4 + 1] = out[i * 4 + 2] = v;
+      } else if (type === 2) {
+        const g = scale(nextToken());
+        out[i * 4] = out[i * 4 + 1] = out[i * 4 + 2] = g;
+      } else {
+        out[i * 4] = scale(nextToken());
+        out[i * 4 + 1] = scale(nextToken());
+        out[i * 4 + 2] = scale(nextToken());
+      }
+      out[i * 4 + 3] = 255;
+    }
+    return { width, height, data: out };
+  }
+
+  // Binary: exactly one whitespace byte closes the header; the raster follows.
+  if (pos < b.length && isBlank(b[pos]!)) pos++;
+  const two = maxval > 255;
+  const need =
+    type === 4 ? Math.ceil(width / 8) * height : n * (type === 6 ? 3 : 1) * (two ? 2 : 1);
+  if (b.length - pos < need) throw new ToolError(t('core.netpbm.truncated'));
+  let rp = pos;
+  const sample = () => (two ? (b[rp++]! << 8) | b[rp++]! : b[rp++]!);
+
+  if (type === 4) {
+    const rowBytes = Math.ceil(width / 8);
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const bit = (b[pos + y * rowBytes + (x >> 3)]! >> (7 - (x & 7))) & 1;
+        const v = bit ? 0 : 255; // 1 = black
+        const o = (y * width + x) * 4;
+        out[o] = out[o + 1] = out[o + 2] = v;
+        out[o + 3] = 255;
+      }
+    }
+  } else {
+    for (let i = 0; i < n; i++) {
+      if (type === 5) {
+        const g = scale(sample());
+        out[i * 4] = out[i * 4 + 1] = out[i * 4 + 2] = g;
+      } else {
+        out[i * 4] = scale(sample());
+        out[i * 4 + 1] = scale(sample());
+        out[i * 4 + 2] = scale(sample());
+      }
+      out[i * 4 + 3] = 255;
+    }
+  }
+  return { width, height, data: out };
 }
 
 function unpackSamples(png: DecodedPng): Uint8Array | Uint16Array | Uint8ClampedArray {
