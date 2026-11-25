@@ -35,7 +35,8 @@ function equalWidth(width: number): RangeTable {
   const bits = Math.log2(width);
   if (!Number.isInteger(bits) || width < 2) throw new Error('width must be a power of two ≥ 2');
   const out: Range[] = [];
-  for (let lo = 0; lo <= 255; lo += width) out.push({ lo, hi: Math.min(lo + width - 1, 255), bits });
+  for (let lo = 0; lo <= 255; lo += width)
+    out.push({ lo, hi: Math.min(lo + width - 1, 255), bits });
   return out;
 }
 
@@ -49,7 +50,11 @@ export const EQUAL_8: RangeTable = equalWidth(8);
  * tile 0..255. Returns null on a malformed spec.
  */
 export function parseTable(spec: string): RangeTable | null {
-  const widths = spec.trim().split(/[\s,]+/).filter(Boolean).map(Number);
+  const widths = spec
+    .trim()
+    .split(/[\s,]+/)
+    .filter(Boolean)
+    .map(Number);
   if (!widths.length || widths.some((w) => !Number.isInteger(w) || w < 2 || (w & (w - 1)) !== 0)) {
     return null;
   }
@@ -206,7 +211,8 @@ export function bitsToBytes(bits: readonly number[], msbFirst: boolean): Uint8Ar
 /** Bits of a message's bytes, most- or least-significant bit first. */
 export function bytesToBits(bytes: Uint8Array, msbFirst: boolean): number[] {
   const bits: number[] = [];
-  for (const byte of bytes) for (let j = 0; j < 8; j++) bits.push((byte >> (msbFirst ? 7 - j : j)) & 1);
+  for (const byte of bytes)
+    for (let j = 0; j < 8; j++) bits.push((byte >> (msbFirst ? 7 - j : j)) & 1);
   return bits;
 }
 
@@ -252,7 +258,10 @@ export function embed(
 // ---------- capacity ----------
 
 /** Rough capacity in bits: sum of each usable pair's bit count. */
-export function capacityBits(image: RgbaImage, o: { channel: Channel; traversal: Traversal } & PvdParams): number {
+export function capacityBits(
+  image: RgbaImage,
+  o: { channel: Channel; traversal: Traversal } & PvdParams,
+): number {
   const s = samplesOf(image, o.channel, sequence(image.width, image.height, o.traversal));
   let bits = 0;
   const n = s.val.length - (s.val.length % 2);

@@ -554,3 +554,85 @@ function buildTiff(thumbnail) {
   // SOI, APP1(EXIF), COM, then the rest of the baseline JPEG.
   write('stego-exif.jpg', concat(main.subarray(0, 2), app1, com, main.subarray(2)));
 }
+
+// ---------- stego-pvd.png: Wu & Tsai PVD, serpentine, grey, overflow test, MSB first ----------
+// Mirrors src/tools/stego/_pvd.ts exactly so the PVD tool round-trips it in auto mode.
+{
+  const WU_TSAI = [
+    { lo: 0, hi: 7, bits: 3 },
+    { lo: 8, hi: 15, bits: 3 },
+    { lo: 16, hi: 31, bits: 4 },
+    { lo: 32, hi: 63, bits: 5 },
+    { lo: 64, hi: 127, bits: 6 },
+    { lo: 128, hi: 255, bits: 7 },
+  ];
+  const rangeOf = (d) => WU_TSAI.find((r) => d >= r.lo && d <= r.hi) ?? WU_TSAI[WU_TSAI.length - 1];
+  const adjust = (p1, p2, dNew) => {
+    const m = dNew - Math.abs(p2 - p1);
+    const hi = Math.ceil(m / 2);
+    const lo = Math.floor(m / 2);
+    return p1 <= p2 ? [p1 - hi, p2 + lo] : [p1 + hi, p2 - lo];
+  };
+  const usable = (p1, p2, r) => {
+    const [a, b] = adjust(p1, p2, r.hi);
+    return a >= 0 && a <= 255 && b >= 0 && b <= 255;
+  };
+
+  // Narrow on purpose: the message spills across many rows, so the odd rows are read
+  // right-to-left and a plain row-by-row walk no longer recovers it — the serpentine trap.
+  const W = 24;
+  const H = 90;
+  const gray = new Uint8Array(W * H); // one grey value per pixel
+  const rnd = prng(7);
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      // Smooth mid-range gradient (stays well inside 0..255, so no fall-off skips near the start).
+      let v = 90 + (x * 50) / W + (y * 40) / H + (rnd() < 0.5 ? 1 : 0);
+      gray[y * W + x] = Math.max(60, Math.min(190, Math.round(v)));
+    }
+  }
+
+  // Serpentine visiting order (odd rows right-to-left), like sequence(W,H,'serpentine').
+  const seq = [];
+  for (let y = 0; y < H; y++) {
+    if (y % 2 === 0) for (let x = 0; x < W; x++) seq.push(y * W + x);
+    else for (let x = W - 1; x >= 0; x--) seq.push(y * W + x);
+  }
+
+  // Message bits, MSB first: "<len>:FTF{pvd_serpentine}".
+  const body = 'FTF{pvd_serpentine}';
+  const message = enc.encode(`${body.length}:${body}`);
+  const bits = [];
+  for (const byte of message) for (let k = 7; k >= 0; k--) bits.push((byte >> k) & 1);
+
+  let bitPos = 0;
+  const n = seq.length - (seq.length % 2);
+  for (let i = 0; i < n && bitPos < bits.length; i += 2) {
+    const i1 = seq[i];
+    const i2 = seq[i + 1];
+    const p1 = gray[i1];
+    const p2 = gray[i2];
+    const d = Math.abs(p2 - p1);
+    const r = rangeOf(d);
+    if (!usable(p1, p2, r)) continue;
+    let value = 0;
+    let got = 0;
+    while (got < r.bits && bitPos < bits.length) {
+      value = (value << 1) | bits[bitPos++];
+      got++;
+    }
+    if (got < r.bits) value <<= r.bits - got;
+    const [a, b] = adjust(p1, p2, r.lo + value);
+    gray[i1] = a;
+    gray[i2] = b;
+  }
+  if (bitPos < bits.length) throw new Error('PVD sample: message did not fit');
+
+  const data = new Uint8Array(W * H * 3);
+  for (let p = 0; p < W * H; p++) {
+    data[p * 3] = gray[p];
+    data[p * 3 + 1] = gray[p];
+    data[p * 3 + 2] = gray[p];
+  }
+  write('stego-pvd.png', encodeRgb(W, H, data));
+}

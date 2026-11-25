@@ -64,7 +64,11 @@ describe('PVD — round trip for every combination', () => {
 describe('PVD — building blocks', () => {
   it('decodes a Wu & Tsai pair by hand', () => {
     // p1=100, p2=120 -> d=20 in range [16,31] (4 bits), value = 20 - 16 = 4 -> bits 0100
-    const img: RgbaImage = { width: 2, height: 1, data: new Uint8ClampedArray([100, 100, 100, 255, 120, 120, 120, 255]) };
+    const img: RgbaImage = {
+      width: 2,
+      height: 1,
+      data: new Uint8ClampedArray([100, 100, 100, 255, 120, 120, 120, 255]),
+    };
     const s = samplesOf(img, 'gray', sequence(2, 1, 'row'));
     expect([...extractBits(s, { table: WU_TSAI, overflow: false })]).toEqual([0, 1, 0, 0]);
   });
@@ -72,7 +76,11 @@ describe('PVD — building blocks', () => {
   it('keeps the average when it pushes a difference, and flags a fall-off pair', () => {
     expect(adjust(100, 120, 31)).toEqual([94, 125]); // d 20 -> 31, split 6/5 around the average
     // A pair near the edges cannot reach the top of a wide range without leaving 0..255.
-    const img: RgbaImage = { width: 2, height: 1, data: new Uint8ClampedArray([48, 48, 48, 255, 200, 200, 200, 255]) };
+    const img: RgbaImage = {
+      width: 2,
+      height: 1,
+      data: new Uint8ClampedArray([48, 48, 48, 255, 200, 200, 200, 255]),
+    };
     const s = samplesOf(img, 'gray', sequence(2, 1, 'row'));
     expect(extractBits(s, { table: WU_TSAI, overflow: true })).toEqual([]); // skipped
     expect(extractBits(s, { table: WU_TSAI, overflow: false }).length).toBe(7); // read anyway
