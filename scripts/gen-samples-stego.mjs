@@ -636,3 +636,32 @@ function buildTiff(thumbnail) {
   }
   write('stego-pvd.png', encodeRgb(W, H, data));
 }
+
+// ---------- stego-lsb-zone.png: flag on row 0 only, every other pixel, bit 0 of R,G,B ----------
+
+{
+  const W = 108;
+  const H = 48;
+  const data = new Uint8Array(W * H * 3);
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const o = (y * W + x) * 3;
+      // Smooth gradient with a quiet bit 0, so only the carrier row stands out.
+      data[o] = (30 + (x * 120) / W + (y * 40) / H) & 0xfe;
+      data[o + 1] = (90 + (y * 100) / H + (x * 20) / W) & 0xfe;
+      data[o + 2] = (160 - (x * 60) / W + (y * 20) / H) & 0xfe;
+    }
+  }
+  // MSB first, even pixels of row 0 only (x = 0, 2, 4 ...), R then G then B.
+  const message = enc.encode('FTF{lsb_row0_step2}\0');
+  let bit = 0;
+  for (let x = 0; x < W && bit < message.length * 8; x += 2) {
+    for (let c = 0; c < 3 && bit < message.length * 8; c++, bit++) {
+      const v = (message[bit >> 3] >> (7 - (bit & 7))) & 1;
+      const o = x * 3 + c;
+      data[o] = (data[o] & 0xfe) | v;
+    }
+  }
+  if (bit < message.length * 8) throw new Error('LSB zone sample: message did not fit');
+  write('stego-lsb-zone.png', encodeRgb(W, H, data));
+}

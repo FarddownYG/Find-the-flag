@@ -14,6 +14,23 @@ export interface LsbParams {
   planes: number[];
   order: PixelOrder;
   bitOrder: BitOrder;
+  /**
+   * Explicit visiting order as row-major pixel indices (e.g. a serpentine walk or a carrier zone).
+   * When set it replaces `order`; `step` and `offset` still apply to it.
+   */
+  pixels?: Int32Array;
+  /** Read only every `step`-th pixel of the sequence (default 1): the "every other pixel" trick. */
+  step?: number;
+  /** Skip this many pixels at the start of the sequence (default 0). */
+  offset?: number;
+}
+
+/** How many pixels a params set actually visits, after the zone, step and offset. */
+function visitCount(img: RgbaImage, p: LsbParams): number {
+  const seqLen = p.pixels ? p.pixels.length : img.width * img.height;
+  const step = p.step && p.step > 0 ? Math.floor(p.step) : 1;
+  const offset = p.offset && p.offset > 0 ? Math.floor(p.offset) : 0;
+  return Math.max(0, Math.ceil((seqLen - offset) / step));
 }
 
 const CHANNEL_INDEX: Record<string, number> = { r: 0, g: 1, b: 2, a: 3 };
@@ -77,20 +94,26 @@ export function extractBits(img: RgbaImage, p: LsbParams, maxBytes = Infinity): 
   const { width: w, height: h, data } = img;
   const planes = p.bitOrder === 'msb' ? [...p.planes].reverse() : p.planes;
   const perPixel = p.channels.length * planes.length;
-  const total = w * h;
-  const outLen = Math.min(maxBytes, Math.floor((total * perPixel) / 8));
+  const step = p.step && p.step > 0 ? Math.floor(p.step) : 1;
+  const offset = p.offset && p.offset > 0 ? Math.floor(p.offset) : 0;
+  const count = visitCount(img, p);
+  const outLen = Math.min(maxBytes, Math.floor((count * perPixel) / 8));
   const out = new Uint8Array(outLen);
   const msb = p.bitOrder === 'msb';
+  // The pixel index at sequence position s (row-major by default, or the explicit zone/walk).
+  const pixelAt = (s: number): number => {
+    if (p.pixels) return p.pixels[s]!;
+    if (p.order === 'col') {
+      const y = s % h;
+      return y * w + (s - y) / h;
+    }
+    return s;
+  };
   let acc = 0;
   let nb = 0;
   let o = 0;
-  for (let k = 0; k < total && o < outLen; k++) {
-    let pix = k;
-    if (p.order === 'col') {
-      const y = k % h;
-      pix = y * w + (k - y) / h;
-    }
-    const base = pix * 4;
+  for (let i = 0; i < count && o < outLen; i++) {
+    const base = pixelAt(offset + i * step) * 4;
     for (const ch of p.channels) {
       const v = data[base + ch]!;
       for (const pl of planes) {
@@ -108,6 +131,6 @@ export function extractBits(img: RgbaImage, p: LsbParams, maxBytes = Infinity): 
   return out;
 }
 
-/** Number of bytes a full extraction yields. */
+/** Number of bytes a full extraction yields (respecting the zone, step and offset). */
 export const capacityBytes = (img: RgbaImage, p: LsbParams) =>
-  Math.floor((img.width * img.height * p.channels.length * p.planes.length) / 8);
+  Math.floor((visitCount(img, p) * p.channels.length * p.planes.length) / 8);

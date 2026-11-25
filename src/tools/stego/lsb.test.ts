@@ -46,13 +46,18 @@ function embed(img: RgbaImage, p: LsbParams, payload: Uint8Array): RgbaImage {
 
 const asInput = (image: RgbaImage): ImageInput => ({ bytes: new Uint8Array(), image });
 interface Opts {
-  mode: 'auto' | 'manual';
+  mode: 'auto' | 'manual' | 'encode';
   channels: string;
   planes: string;
   order: 'row' | 'col';
   bitOrder: 'msb' | 'lsb';
+  traversal: 'row' | 'serpentine' | 'column' | 'column-serpentine';
+  rows: string;
+  step: number;
+  offset: number;
   skip: number;
   limit: number;
+  message: string;
 }
 const defaults: Opts = {
   mode: 'auto',
@@ -60,8 +65,13 @@ const defaults: Opts = {
   planes: '0',
   order: 'row',
   bitOrder: 'msb',
+  traversal: 'row',
+  rows: '',
+  step: 1,
+  offset: 0,
   skip: 0,
   limit: 0,
+  message: 'FTF{lsb}',
 };
 const run = (image: RgbaImage, o: Partial<Opts> = {}) =>
   lsb.run(asInput(image), { ...defaults, ...o }) as Output[];
@@ -224,3 +234,124 @@ describe('option parsers', () => {
     expect(parseChannels('BGR')).toEqual([2, 1, 0]);
   });
 });
+
+describe('carrier zone: row 0, every other pixel', () => {
+  const loadZone = async (): Promise<ImageInput> =>
+    (await prepareInput('image', {
+      bytes: new Uint8Array(
+        readFileSync(new URL('../../../public/samples/stego-lsb-zone.png', import.meta.url)),
+      ),
+    })) as ImageInput;
+  const FLAG = 'FTF{lsb_row0_step2}';
+
+  it('auto finds the flag, names the zone and reports the carrier row', async () => {
+    const out = lsb.run(await loadZone(), { ...defaults }) as Output[];
+    const text = resultToText(out);
+    expect(utf8Decode(bytesOf(out).value)).toBe(FLAG);
+    expect(text).toContain('rows 0, step 2, offset 0');
+    const anomalies = out.find((x) => x.type === 'table' && x.columns[0] === 'Row');
+    expect(anomalies?.type === 'table' && anomalies.rows[0]![0]).toBe('0');
+    expect(text).toContain('every 2 pixels (offset 0)');
+  });
+
+  it('a plain full-image scan alone does not recover it', async () => {
+    const input = await loadZone();
+    const plain = scanWithoutZones(input.image);
+    expect(plain).not.toContain(FLAG);
+  });
+
+  it('manual with rows, step and offset recovers it', async () => {
+    const input = await loadZone();
+    const out = lsb.run(input, {
+      ...defaults,
+      mode: 'manual',
+      rows: '0',
+      step: 2,
+      limit: FLAG.length,
+    }) as Output[];
+    expect(utf8Decode(bytesOf(out).value)).toBe(FLAG);
+  });
+
+  it('a wrong step, offset or zone does not', async () => {
+    const input = await loadZone();
+    const base = { ...defaults, mode: 'manual' as const, limit: FLAG.length };
+    for (const o of [
+      { rows: '0', step: 1 },
+      { rows: '0', step: 2, offset: 1 },
+      { rows: '1', step: 2 },
+    ]) {
+      const out = lsb.run(input, { ...base, ...o }) as Output[];
+      expect(utf8Decode(bytesOf(out).value)).not.toBe(FLAG);
+    }
+  });
+
+  it('step 2 over the whole image reads the same bits (row 0 comes first)', async () => {
+    const out = lsb.run(await loadZone(), {
+      ...defaults,
+      mode: 'manual',
+      step: 2,
+      limit: FLAG.length,
+    }) as Output[];
+    expect(utf8Decode(bytesOf(out).value)).toBe(FLAG);
+  });
+
+  it('encode then decode round-trips at the same settings', () => {
+    const settings = {
+      channels: 'bgr',
+      planes: '0,1',
+      bitOrder: 'lsb' as const,
+      traversal: 'serpentine' as const,
+      rows: '3-9',
+      step: 3,
+      offset: 2,
+    };
+    const enc = lsb.run(asInput(noiseImage(60, 20)), {
+      ...defaults,
+      ...settings,
+      mode: 'encode',
+      message: 'FTF{round_trip}',
+    }) as Output[];
+    const img = enc.find((x) => x.type === 'image');
+    expect(img?.type === 'image' && img.filename).toBe('lsb-stego.png');
+    if (img?.type !== 'image') throw new Error('no image output');
+    const dec = run(img.image, { ...settings, mode: 'manual', limit: 15 });
+    expect(utf8Decode(bytesOf(dec).value)).toBe('FTF{round_trip}');
+  });
+
+  it('encode refuses a message that does not fit', () => {
+    expect(() =>
+      run(noiseImage(8, 8), { mode: 'encode', message: 'x'.repeat(100), rows: '0' }),
+    ).toThrow(/does not fit/);
+  });
+
+  it('cuts a length-prefixed body and offers the chain decoder', () => {
+    const params: LsbParams = {
+      channels: parseChannels('rgb'),
+      planes: [0],
+      order: 'row',
+      bitOrder: 'msb',
+    };
+    const body = 'SGVsbG8gd29ybGQsIGhpZGRlbiBpbiBwaXhlbHM=';
+    const img = embed(noiseImage(80, 80), params, utf8Encode(`${body.length}:${body}JUNK`));
+    const out = run(img, { mode: 'manual', limit: 50 });
+    const text = out.find((x) => x.type === 'text');
+    expect(text?.type === 'text' && text.value).toBe(body);
+  });
+});
+
+/** The auto scan's full-image half only, to prove the zone candidates are what finds the sample. */
+function scanWithoutZones(img: RgbaImage): string {
+  let all = '';
+  for (const chans of ['rgb', 'r', 'g', 'b']) {
+    for (const bitOrder of ['msb', 'lsb'] as const) {
+      const p: LsbParams = {
+        channels: parseChannels(chans),
+        planes: [0],
+        order: 'row',
+        bitOrder,
+      };
+      all += utf8Decode(extractBits(img, p, 256));
+    }
+  }
+  return all;
+}
