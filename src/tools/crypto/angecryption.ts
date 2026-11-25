@@ -1,9 +1,11 @@
 import { bool, defineTool, file, select, text, toggle } from '../../core/define';
 import { ToolError } from '../../core/errors';
 import type { Output } from '../../core/types';
+import { buildWriteup, kvTable } from '../../core/writeup';
 import { toolT } from '../../i18n/tool-text';
-import { formatSize, fromHex, toHex, utf8Decode } from '../../lib/bytes';
+import { formatSize, fromHex, latin1Decode, toHex, utf8Decode } from '../../lib/bytes';
 import { identify } from '../../lib/signatures';
+import { FLAG_RE } from '../stego/_lsb-classify';
 import {
   BLOCK,
   buildConstruct,
@@ -145,6 +147,8 @@ function decryptRun(
     windows: boolean;
     target: string;
     header: string;
+    writeup: boolean;
+    includeFlag: boolean;
   },
 ): Output[] {
   if (cipherIn.length < 2 * BLOCK) throw new ToolError(T('err.tooShort'));
@@ -214,21 +218,18 @@ function decryptRun(
       name: real?.name ?? model?.name ?? '?',
     }),
   });
-  out.push({
-    type: 'kv',
-    label: T('label.found'),
-    entries: [
-      [T('kv.key'), showKey(cand.key)],
-      [T('kv.variant'), `AES-${cand.key.length * 8}-CBC`],
-      [T('kv.keySource'), sourceLabel(cand)],
-      [T('kv.iv'), toHex(iv)],
-      [T('kv.proof'), signatures.map((s) => SIG_LABEL[s]?.() ?? s).join(', ')],
-      [
-        T('kv.recovered'),
-        `${real?.name ?? T('value.unknownType')} · ${formatSize(recovered.length)}`,
-      ],
+  const foundEntries: [string, string][] = [
+    [T('kv.key'), showKey(cand.key)],
+    [T('kv.variant'), `AES-${cand.key.length * 8}-CBC`],
+    [T('kv.keySource'), sourceLabel(cand)],
+    [T('kv.iv'), toHex(iv)],
+    [T('kv.proof'), signatures.map((s) => SIG_LABEL[s]?.() ?? s).join(', ')],
+    [
+      T('kv.recovered'),
+      `${real?.name ?? T('value.unknownType')} · ${formatSize(recovered.length)}`,
     ],
-  });
+  ];
+  out.push({ type: 'kv', label: T('label.found'), entries: foundEntries });
 
   const mime = real?.mime;
   if (mime && /^image\/(png|jpeg|gif)$/.test(mime)) {
@@ -254,6 +255,28 @@ function decryptRun(
     out.push({ type: 'note', level: 'warn', text: T('note.trimmed', { n: trimmed }) });
   out.push({ type: 'note', level: 'info', text: T('note.honest') });
   out.push({ type: 'note', level: 'info', text: T('note.technique') });
+  if (o.writeup) {
+    out.push({
+      type: 'text',
+      label: T('label.writeup'),
+      value: buildWriteup(
+        [
+          {
+            heading: T('label.found'),
+            body: kvTable(foundEntries, [T('writeup.item'), T('writeup.value')]),
+          },
+          { heading: T('writeup.how'), body: T('note.how', { iv: toHex(iv), certain }) },
+          { heading: T('writeup.technique'), body: T('note.technique') },
+        ],
+        {
+          title: T('writeup.title'),
+          flag: FLAG_RE.exec(latin1Decode(recovered))?.[0],
+          includeFlag: o.includeFlag,
+          flagLabel: T('writeup.flag'),
+        },
+      ),
+    });
+  }
   return out;
 }
 
@@ -389,6 +412,14 @@ export default defineTool({
         showIf: (v) => v.mode === 'encrypt',
       },
     ),
+    writeup: bool('Copy-ready writeup (Markdown)', false, {
+      hint: 'Add a Markdown "how I found it" report you can paste into a CTF writeup.',
+      showIf: (v) => v.mode === 'decrypt',
+    }),
+    includeFlag: bool('Include the flag in the writeup', false, {
+      hint: 'Off by default so the writeup can be shared without spoiling the flag.',
+      showIf: (v) => v.mode === 'decrypt' && v.writeup === true,
+    }),
   },
   examples: [
     {
@@ -407,6 +438,8 @@ export default defineTool({
       windows: o.windows,
       target: o.target,
       header: o.header,
+      writeup: o.writeup,
+      includeFlag: o.includeFlag,
     });
   },
 });

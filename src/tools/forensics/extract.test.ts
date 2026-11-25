@@ -142,4 +142,24 @@ describe('Universal extractor tool', () => {
   it('rejects an empty file', async () => {
     await expect(open(new Uint8Array(0))).rejects.toBeInstanceOf(ToolError);
   });
+
+  it('adds a Markdown writeup, with the flag only when opted in', async () => {
+    const writeupOf = async (extra: Record<string, unknown>) => {
+      const out = await open(sample('extract-nested.zip'), { writeup: true, ...extra });
+      const w = out.find((o) => o.type === 'text' && o.label === 'Writeup (Markdown)');
+      if (w?.type !== 'text') throw new Error('no writeup output');
+      return w.value;
+    };
+    const flag = 'FTF{extract_unwraps_layers}';
+    const off = await writeupOf({ includeFlag: false });
+    expect(off).toMatch(/^# /);
+    expect(off).toContain('## Summary');
+    expect(off).toContain('## Where the flags are');
+    expect(off).toContain('## Tree');
+    expect(off).toContain('## Technique');
+    expect(off).not.toContain(flag);
+    expect(await writeupOf({ includeFlag: true })).toContain(`**Flag:** \`${flag}\``);
+    const plain = await open(sample('extract-nested.zip'));
+    expect(plain.some((o) => o.type === 'text' && o.label === 'Writeup (Markdown)')).toBe(false);
+  });
 });

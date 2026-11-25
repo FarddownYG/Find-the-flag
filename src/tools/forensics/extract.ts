@@ -2,6 +2,7 @@ import { bool, defineTool, number } from '../../core/define';
 import { ToolError } from '../../core/errors';
 import { registeredTools } from '../../core/tool-list';
 import type { Output } from '../../core/types';
+import { buildWriteup, FLAG_MASK, kvTable, mdTable } from '../../core/writeup';
 import { signatureName, toolName, toolT } from '../../i18n/tool-text';
 import { formatSize, utf8Decode } from '../../lib/bytes';
 import { SIGNATURES } from '../../lib/signatures';
@@ -186,6 +187,13 @@ export default defineTool({
       max: 256,
       hint: 'The file is read into memory: a larger one is cut at this size.',
     }),
+    writeup: bool('Copy-ready writeup (Markdown)', false, {
+      hint: 'Add a Markdown "how I found it" report you can paste into a CTF writeup.',
+    }),
+    includeFlag: bool('Include the flag in the writeup', false, {
+      hint: 'Off by default so the writeup can be shared without spoiling the flag.',
+      showIf: (v) => v.writeup === true,
+    }),
   },
   examples: [
     {
@@ -210,7 +218,7 @@ export default defineTool({
       expect: 'flag{matryoshka_archive}',
     },
   ],
-  async run(input, { depth, carve, decode, size }) {
+  async run(input, { depth, carve, decode, size, writeup, includeFlag }) {
     if (input.size === 0) throw new ToolError(T('error.empty'));
     const cap = Math.max(1, Math.floor(size)) * MIB;
     const bytes = await input.read(0, cap);
@@ -258,18 +266,15 @@ export default defineTool({
       .slice(0, 10)
       .map(([f, c]) => `${formatName(f)} × ${c}`)
       .join(', ');
-    out.push({
-      type: 'kv',
-      label: T('label.summary'),
-      entries: [
-        [T('kv.input'), `${formatName(result.root.format)} · ${formatSize(bytes.length)}`],
-        [T('kv.nodes'), String(result.nodeCount)],
-        [T('kv.depth'), String(Math.max(...nodes.map((x) => x.depth)))],
-        [T('kv.formats'), formats || '-'],
-        [T('kv.budget'), `${formatSize(result.byteBudgetSpent)} / ${formatSize(MAX_BYTES)}`],
-        [T('kv.complete'), result.truncated ? T('value.no') : T('value.yes')],
-      ],
-    });
+    const summary: [string, string][] = [
+      [T('kv.input'), `${formatName(result.root.format)} · ${formatSize(bytes.length)}`],
+      [T('kv.nodes'), String(result.nodeCount)],
+      [T('kv.depth'), String(Math.max(...nodes.map((x) => x.depth)))],
+      [T('kv.formats'), formats || '-'],
+      [T('kv.budget'), `${formatSize(result.byteBudgetSpent)} / ${formatSize(MAX_BYTES)}`],
+      [T('kv.complete'), result.truncated ? T('value.no') : T('value.yes')],
+    ];
+    out.push({ type: 'kv', label: T('label.summary'), entries: summary });
     if (flagged.length > 0) {
       out.push({
         type: 'kv',
@@ -355,11 +360,75 @@ export default defineTool({
       }
     }
 
-    out.push({
-      type: 'note',
-      level: 'info',
-      text: T('note.how', { depth: MAX_DEPTH, nodes: MAX_NODES, size: formatSize(MAX_BYTES) }),
+    const howNote = T('note.how', {
+      depth: MAX_DEPTH,
+      nodes: MAX_NODES,
+      size: formatSize(MAX_BYTES),
     });
+    out.push({ type: 'note', level: 'info', text: howNote });
+
+    if (writeup) {
+      const sections = [
+        {
+          heading: T('label.summary'),
+          body: kvTable(summary, [T('writeup.item'), T('writeup.value')]),
+        },
+        ...(flagged.length > 0
+          ? [
+              {
+                heading: T('label.flagsAt'),
+                body: mdTable(
+                  [T('col.flag'), T('col.path')],
+                  flagged.flatMap((x) =>
+                    x.node.flags.map((f): [string, string] => [f, x.node.path]),
+                  ),
+                ),
+              },
+            ]
+          : []),
+        ...(nodes.length > 1
+          ? [
+              {
+                heading: T('label.tree'),
+                body: mdTable(
+                  [
+                    T('col.path'),
+                    T('col.format'),
+                    T('col.size'),
+                    T('col.status'),
+                    T('col.foundBy'),
+                  ],
+                  nodes.map(({ node, depth: d }) => [
+                    `${'· '.repeat(d)}${node.name}`,
+                    formatName(node.format),
+                    node.size,
+                    statusText(node),
+                    howText(node.how),
+                  ]),
+                ),
+              },
+            ]
+          : []),
+        { heading: T('writeup.technique'), body: howNote },
+      ];
+      // buildWriteup masks one flag; several can be found, so mask them all here.
+      const masked = includeFlag
+        ? sections
+        : sections.map((sec) => ({
+            ...sec,
+            body: result.flags.reduce((b, f) => b.split(f).join(FLAG_MASK), sec.body),
+          }));
+      out.push({
+        type: 'text',
+        label: T('label.writeup'),
+        value: buildWriteup(masked, {
+          title: T('writeup.title'),
+          flag: result.flags[0],
+          includeFlag,
+          flagLabel: T('writeup.flag'),
+        }),
+      });
+    }
     return out;
   },
 });

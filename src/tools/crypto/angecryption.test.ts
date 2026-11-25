@@ -70,4 +70,30 @@ describe('AngeCryption tool', () => {
   it('refuses an invalid typed key length', async () => {
     await expect(run(sample, { key: 'short' })).rejects.toThrow();
   });
+
+  it('adds a Markdown writeup, with a recovered flag only when opted in', async () => {
+    const key = 'FTF-angecrypt-16';
+    const recovered = (await run(sample, { key })).find(
+      (o): o is Extract<Output, { type: 'picture' }> => o.type === 'picture',
+    )!.data;
+    const flag = 'FTF{ange_writeup}';
+    const plain = new Uint8Array([...recovered, ...utf8Encode(flag)]);
+    const built = await run(plain, { mode: 'encrypt', key, cover: 'png' });
+    const cipher = built.find((o): o is Extract<Output, { type: 'bytes' }> => o.type === 'bytes')!;
+    const writeupOf = async (extra: Record<string, unknown>) => {
+      const w = (await run(cipher.value, { key, writeup: true, ...extra })).find(
+        (o) => o.type === 'text' && o.label === 'Writeup (Markdown)',
+      );
+      if (w?.type !== 'text') throw new Error('no writeup output');
+      return w.value;
+    };
+    const off = await writeupOf({ includeFlag: false });
+    expect(off).toMatch(/^# /);
+    expect(off).toContain('## Key and IV found');
+    expect(off).toContain('## Technique');
+    expect(off).not.toContain(flag);
+    expect(await writeupOf({ includeFlag: true })).toContain(`**Flag:** \`${flag}\``);
+    const none = await run(sample, { key });
+    expect(none.some((o) => o.type === 'text' && o.label === 'Writeup (Markdown)')).toBe(false);
+  });
 });

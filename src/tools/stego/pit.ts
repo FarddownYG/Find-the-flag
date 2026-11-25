@@ -1,6 +1,7 @@
-import { defineTool, number, select, text, toggle } from '../../core/define';
+import { bool, defineTool, number, select, text, toggle } from '../../core/define';
 import { ToolError } from '../../core/errors';
 import type { Output, RgbaImage } from '../../core/types';
+import { buildWriteup, codeBlock, kvTable, mdTable } from '../../core/writeup';
 import { toolT } from '../../i18n/tool-text';
 import { latin1Decode, toHex } from '../../lib/bytes';
 import { plaintextScore } from '../../lib/english';
@@ -251,6 +252,53 @@ function explain(s: PitSettings, trace: PixelTrace[]): Output[] {
   ];
 }
 
+/** The "how I found it" Markdown, fed with the facts the tool already shows. */
+function writeupOutput(
+  s: PitSettings,
+  trace: PixelTrace[],
+  body: Uint8Array,
+  includeFlag: boolean,
+): Output {
+  const message = latin1(body);
+  const sections = [
+    {
+      heading: T('label.settings'),
+      body: kvTable([[T('kv.how'), settingsLabel(s)]], [T('writeup.item'), T('writeup.value')]),
+    },
+    ...(trace.length
+      ? [
+          {
+            heading: T('label.pixels'),
+            body: mdTable(
+              [
+                T('col.pixel'),
+                T('col.indicator'),
+                T('col.code'),
+                T('col.channels'),
+                T('col.bits'),
+                T('col.size'),
+              ],
+              traceRows(trace, s),
+            ),
+          },
+        ]
+      : []),
+    { heading: T('label.decoded'), body: codeBlock('', preview(body, 512)) },
+    { heading: T('label.python'), body: codeBlock('python', pythonScript(s)) },
+    { heading: T('writeup.technique'), body: T('note.sheet') },
+  ];
+  return {
+    type: 'text',
+    label: T('label.writeup'),
+    value: buildWriteup(sections, {
+      title: T('writeup.title'),
+      flag: FLAG_RE.exec(message)?.[0],
+      includeFlag,
+      flagLabel: T('writeup.flag'),
+    }),
+  };
+}
+
 // ---------- tool ----------
 
 export default defineTool({
@@ -349,6 +397,14 @@ export default defineTool({
       showIf: (v) => manual(v) && v.startMode === 'row',
     }),
     message: text('Message to hide', 'FTF{pit}', { showIf: (v) => v.mode === 'encode' }),
+    writeup: bool('Copy-ready writeup (Markdown)', false, {
+      hint: 'Add a Markdown "how I found it" report you can paste into a CTF writeup.',
+      showIf: (v) => v.mode !== 'encode',
+    }),
+    includeFlag: bool('Include the flag in the writeup', false, {
+      hint: 'Off by default so the writeup can be shared without spoiling the flag.',
+      showIf: (v) => v.mode !== 'encode' && v.writeup === true,
+    }),
   },
   examples: [
     {
@@ -434,6 +490,7 @@ export default defineTool({
         });
       }
       out.push(...explain(s, r.trace));
+      if (o.writeup) out.push(writeupOutput(s, r.trace, r.body, o.includeFlag));
       return out;
     }
 
@@ -503,6 +560,7 @@ export default defineTool({
       out.push({ type: 'bytes', label: T('label.bytes'), value: r.body, filename: 'pit-body.bin' });
     }
     out.push(...explain(best.s, r.trace));
+    if (o.writeup) out.push(writeupOutput(best.s, r.trace, r.body, o.includeFlag));
     return out;
   },
 });

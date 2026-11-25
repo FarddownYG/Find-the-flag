@@ -111,4 +111,29 @@ describe('PIT tool', () => {
       run(asInput(image), { ...SAMPLE_SETTINGS, mode: 'encode', message: 'x'.repeat(5000) }),
     ).rejects.toThrow();
   });
+
+  it('adds a Markdown writeup, with the flag only when opted in', async () => {
+    const input = await sample();
+    const writeupOf = async (extra: Record<string, unknown>) => {
+      const out = (await pit.run(input, {
+        ...SAMPLE_SETTINGS,
+        mode: 'auto',
+        writeup: true,
+        ...extra,
+      } as never)) as Output[];
+      const w = out.find((x) => x.type === 'text' && x.label === 'Writeup (Markdown)');
+      if (w?.type !== 'text') throw new Error('no writeup output');
+      return w.value;
+    };
+    const off = await writeupOf({ includeFlag: false });
+    expect(off).toMatch(/^# /);
+    expect(off).toContain('## How it was found');
+    expect(off).toContain('## Hand-decoded pixels');
+    expect(off).toContain('## Redo it by hand (Python)');
+    expect(off).toContain('## Technique');
+    expect(off).not.toContain(FLAG);
+    expect(await writeupOf({ includeFlag: true })).toContain(`**Flag:** \`${FLAG}\``);
+    const plain = (await pit.run(input, { ...SAMPLE_SETTINGS, mode: 'auto' } as never)) as Output[];
+    expect(plain.some((x) => x.type === 'text' && x.label === 'Writeup (Markdown)')).toBe(false);
+  });
 });
