@@ -637,6 +637,56 @@ function buildTiff(thumbnail) {
   write('stego-pvd.png', encodeRgb(W, H, data));
 }
 
+// ---------- stego-pit.png: Pixel Indicator Technique (Gutub), indicator G, body on row 1 ----------
+// Mirrors src/tools/stego/_pit.ts: the indicator channel is G; its two low bits pick where the pixel
+// hides 2 bits per channel (00 nothing, 01 red, 10 blue, 11 blue then red). An 8-byte big-endian
+// length sits in row 0 and the body starts on ROW 1, not right after the header: the trap.
+{
+  const W = 64;
+  const H = 40;
+  const IND = 1; // green
+  const TABLE = { 0: [], 1: [0], 2: [2], 3: [2, 0] }; // code -> channels, in reading order
+  const PATTERN = [3, 1, 2, 3, 0, 2, 1]; // the code of the k-th pixel of a stage
+  const BPC = 2;
+  const data = new Uint8Array(W * H * 3);
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const o = (y * W + x) * 3;
+      data[o] = 40 + Math.round((x * 90) / W + (y * 50) / H);
+      data[o + 1] = 120 + Math.round((y * 80) / H + (x * 30) / W);
+      data[o + 2] = 200 - Math.round((x * 60) / W + (y * 30) / H);
+    }
+  }
+  // Place `payload` (MSB first) from pixel `first`; return the pixel after the last one used.
+  const place = (payload, first) => {
+    const nBits = payload.length * 8;
+    const bitAt = (i) => (i >= nBits ? 0 : (payload[i >> 3] >> (7 - (i & 7))) & 1);
+    let pos = 0;
+    let p = first;
+    while (pos < nBits) {
+      if (p >= W * H) throw new Error('PIT sample: message did not fit');
+      const code = PATTERN[(p - first) % PATTERN.length];
+      data[p * 3 + IND] = (data[p * 3 + IND] & ~3) | code;
+      for (const c of TABLE[code]) {
+        if (pos >= nBits) break;
+        let v = 0;
+        for (let i = 0; i < BPC; i++) v |= bitAt(pos + i) << (BPC - 1 - i);
+        pos += BPC;
+        data[p * 3 + c] = (data[p * 3 + c] & ~((1 << BPC) - 1)) | v;
+      }
+      p++;
+    }
+    return p;
+  };
+  const message = enc.encode('FTF{pit_indicator}');
+  const header = new Uint8Array(8); // big-endian length
+  new DataView(header.buffer).setBigUint64(0, BigInt(message.length));
+  const headerEnd = place(header, 0);
+  if (headerEnd > W) throw new Error('PIT sample: the header must end inside row 0');
+  place(message, W); // body on row 1
+  write('stego-pit.png', encodeRgb(W, H, data));
+}
+
 // ---------- stego-lsb-zone.png: flag on row 0 only, every other pixel, bit 0 of R,G,B ----------
 
 {
