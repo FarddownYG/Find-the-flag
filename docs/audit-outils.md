@@ -169,3 +169,34 @@ Verdict : **aucun code modifié**, les quatre outils restent séparés.
   raison : pas de `src/core/limits.ts` créé, centraliser forcerait des couplages artificiels. À
   rouvrir si un 3ᵉ outil reprend 30 M pixels (`pit`/`pvd`) ou 256 MiB « fichier lu entier ».
 - **Primitive de progression worker** : reste au backlog (changement UI/worker plus large).
+
+## Examen des parseurs en double (Lot 4) : aucun code modifié
+
+Verdict : les trois paires restent séparées. Chaque boucle ressemble à sa voisine par sa forme
+(lire un en-tête, avancer d'une taille), mais ce qui la rend utile est exactement ce qui diffère ;
+un itérateur commun devrait être paramétré sur tous ces points, pour moins de lignes retirées que
+de lignes de configuration ajoutées, avec le risque de changer un parseur qui passe le banc de
+détection (15/15, 0 faux positif).
+
+- **PNG : `_png.parsePng` ↔ `_png-surgeon-parse.parseTolerant`.** `parsePng` est strict : il
+  s'arrête au premier chunk invalide et le signale (`problem`). `parseTolerant` ne s'arrête
+  jamais : resynchronisation par balayage (CRC valide, sinon type connu), réparation de type,
+  trous (`gaps`), données après IEND, IHDR renommé. Ce qu'ils partagent se limite à la lecture
+  d'un en-tête de 8 octets et au CRC, déjà mutualisés (`u32be`, `crc32`). La boucle de marche
+  n'a pas de logique commune : un lecteur partagé devrait soit réimplémenter l'un des deux
+  comportements dans l'autre, soit exposer des rappels pour chaque décision.
+- **GZIP : `_extract.ts` ↔ `archive.ts` (`readGzipMember`).** `_extract` ne lit pas
+  d'en-tête gzip : il passe les octets à `Gunzip` (fflate) en flux avec un plafond de sortie
+  (`inflateBounded`) et ne voit qu'un nœud « inflate ». `archive.ts` analyse l'en-tête (FEXTRA,
+  nom, commentaire, FHCRC), localise la fin du flux deflate (`deflateScan`), vérifie CRC32/ISIZE
+  et enchaîne les membres. Aucun code de marche en double ; la détection de signature est déjà
+  `isGzip` (`encoding/_inflate`). Rien à extraire.
+- **RIFF/WAV : `core/wav.scanWav` ↔ `audio/_audio-stego-pcm.walkChunks`
+  (`_audio-stego-riff.analyzeChunks` consomme déjà le résultat de `walkChunks`, pas de
+  troisième marche).** `scanWav` (cœur, utilisé par le décodeur) ignore la validité des
+  identifiants, ne s'arrête pas sur un dépassement, lit `fmt ` (dont WAVE_FORMAT_EXTENSIBLE) et
+  s'arrête au premier `data`. `walkChunks` couvre aussi AIFF (big-endian), rejette les
+  identifiants invalides, s'arrête sur une taille qui sort du fichier (sauf `data`/`SSND`) et
+  rend tous les chunks, `declaredEnd` et `stop` pour la stégo. Terminaisons incompatibles ; et
+  `core/` ne doit pas importer depuis `tools/`. À rouvrir si un 3ᵉ outil réécrit la même marche
+  avec les mêmes règles d'arrêt.

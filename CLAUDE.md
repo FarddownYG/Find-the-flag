@@ -48,7 +48,7 @@ public : un push sur `main` est une publication immédiate et définitive.
 ## AGENCE (mode autonome — état du run)
 
 ```
-ÉTAT: RUNNING | lot 4/5 | sans-gain 0/2 | start 2026-11-25 | FINI VERTS à L3 ; L4-L5 = qualité/UX bornée
+ÉTAT: RUNNING | lot 5/5 | sans-gain 0/2 | start 2026-11-25 | FINI VERTS à L3 ; L5 = dernier lot (catalogue/Learn)
 FINI: [x] 1. banc du corpus maison = 15/15 (100 %) depuis l'ENTRÉE UNIQUE, sans choisir d'outil (banc + UI auto)
       [x] 2. fichiers sains (photo/vidéo/PDF) → zéro faux positif « confirmé » (banc 0 FP + captures clean)
       [x] 3. chaque résultat affiche son explication EN HAUT (page résultats en couches, verdict en tête)
@@ -71,8 +71,11 @@ FAIT: L1 27e2339 corpus maison + banc (baseline 5/15=33 %, 0 FP) — preuve node
          cours/étape/refaire/écartés ; confirmé/probable/candidat) + leçons×18 kinds×5 locales. Captures OVERALL PASS.
 LES 5 FINI SONT VERTS dès L3. L4 (migration socle/dedup) + L5 (catalogue+Learn) = lots qualité/UX planifiés du
   mandat (« app intuitive »), bornés ; je les enchaîne puis STOP après L5. Pas de dérive : chaque lot a une accept. écrite.
-EN COURS: L4 — converger les doublons nommés (PNG _png/_png-surgeon, GZIP ×2, RIFF/WAV ×3) sans régression
-  (banc 15/15 + tests avant/après). Accept : doublons réduits, banc inchangé, gates verts.
+      L4 examen doublons PNG/GZIP/RIFF : aucun vrai doublon (strictesses/buts différents, primitives déjà
+         factorisées) → gardés séparés, documenté dans audit-outils.md ; banc 15/15 inchangé, zéro code touché.
+EN COURS: L5 — catalogue (taxonomie lisible), en-tête par outil « à quoi ça sert / quand », vocabulaire cohérent,
+  section Apprendre reliée aux outils. Tokens FTF sobres, mobile/clavier, captures relues. Accept : captures PASS,
+  gates + e2e verts, banc 15/15. Puis STOP (5 lots) + backlog classé.
 DÉCISIONS: D1 le banc est l'oracle du taux de détection, il ne doit JAMAIS baisser
            D2 fusion main = fast-forward au vert (autorisé explicitement par l'utilisateur, dépôt public)
            D3 « rien trouvé » INTERDIT sans la liste des vérifs faites + anomalies relevées
