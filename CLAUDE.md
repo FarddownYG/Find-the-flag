@@ -48,7 +48,7 @@ public : un push sur `main` est une publication immédiate et définitive.
 ## AGENCE (mode autonome — état du run)
 
 ```
-ÉTAT: RUNNING | lot 5/5 | sans-gain 0/2 | start 2026-11-25 | FINI VERTS à L3 ; L5 = dernier lot (catalogue/Learn)
+ÉTAT: STOPPED | FINI 5/5 verts à L3 | start 2026-11-25 | arrêt : condition FINI atteinte (succès)
 FINI: [x] 1. banc du corpus maison = 15/15 (100 %) depuis l'ENTRÉE UNIQUE, sans choisir d'outil (banc + UI auto)
       [x] 2. fichiers sains (photo/vidéo/PDF) → zéro faux positif « confirmé » (banc 0 FP + captures clean)
       [x] 3. chaque résultat affiche son explication EN HAUT (page résultats en couches, verdict en tête)
@@ -73,13 +73,24 @@ LES 5 FINI SONT VERTS dès L3. L4 (migration socle/dedup) + L5 (catalogue+Learn)
   mandat (« app intuitive »), bornés ; je les enchaîne puis STOP après L5. Pas de dérive : chaque lot a une accept. écrite.
       L4 examen doublons PNG/GZIP/RIFF : aucun vrai doublon (strictesses/buts différents, primitives déjà
          factorisées) → gardés séparés, documenté dans audit-outils.md ; banc 15/15 inchangé, zéro code touché.
-EN COURS: L5 — catalogue (taxonomie lisible), en-tête par outil « à quoi ça sert / quand », vocabulaire cohérent,
-  section Apprendre reliée aux outils. Tokens FTF sobres, mobile/clavier, captures relues. Accept : captures PASS,
-  gates + e2e verts, banc 15/15. Puis STOP (5 lots) + backlog classé.
+EN COURS: — (arrêt : les 5 FINI sont verts). Détection corpus 33 % → 100 % (15/15), 0 faux positif.
 DÉCISIONS: D1 le banc est l'oracle du taux de détection, il ne doit JAMAIS baisser
            D2 fusion main = fast-forward au vert (autorisé explicitement par l'utilisateur, dépôt public)
            D3 « rien trouvé » INTERDIT sans la liste des vérifs faites + anomalies relevées
            D4 jamais de fichier/flag Root-Me commité ; fixtures 100 % maison
-ARBITRAGES: — (autorisation totale de l'utilisateur ce run ; toute question → council, pas d'arrêt pour demander)
-PROPOSÉ (rempli à l'arrêt, ≤5, impact/effort/risque) : —
+           D5 arrêt à FINI (condition écrite par l'utilisateur) plutôt que dérive vers MIEUX
+ARBITRAGES (toi — décisions produit, non exécutées) :
+  A1 Taxonomie des catégories (mandat : Fichiers/Image/Audio/Vidéo/Texte/Crypto/Binaire/Web vs actuel
+     encoding/crypto/stego/forensics/audio/misc) : re-catégoriser 100+ outils = choix produit + risque ; à toi.
+PROPOSÉ (non exécuté, impact / effort / risque) :
+  1. Lot 5 — section Apprendre reliant les leçons par technique (analysis-lessons déjà écrites) aux outils —
+     fort / moyen / faible  (bornée, réutilise le contenu existant, aucune décision produit)
+  2. Lot 5 — en-tête « à quoi ça sert / quand l'utiliser » par outil (la description 1 ligne existe déjà ;
+     ajouter le « quand ») — moyen / fort (100+ outils × 5 langues) / faible
+  3. Progression réelle du worker (canal additif) pour les gros fichiers ; actuellement « analyse… » + Stop —
+     faible / moyen / moyen (touche le protocole worker partagé)
+  4. Mobile : le <select> de langue de la barre est tronqué « Englis » (préexistant, vu sur captures) —
+     faible / faible / faible
+  5. Vue analyse mobile : le hex dump déborde dans son scroll interne (overflow-x à cadrer) —
+     faible / faible / faible
 ```
