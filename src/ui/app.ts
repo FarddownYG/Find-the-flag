@@ -1,10 +1,14 @@
 import { selectFlags } from '../core/flags';
+import { resultToText } from '../core/result-text';
+import { CancelledError, Runner } from '../core/runner';
 import { getTool, TOOLS } from '../core/registry';
 import { CATEGORIES, type AnyTool, type Sample } from '../core/types';
 import { getLocale, LOCALES, isLocale, onLocaleChange, setLocale, t } from '../i18n';
 import { categoryBlurb, categoryName, toolDescription, toolName } from '../i18n/tool-text';
-import { isValidUtf8, printableRatio, utf8Decode, utf8Encode } from '../lib/bytes';
+import { formatSize, isValidUtf8, printableRatio, utf8Decode, utf8Encode } from '../lib/bytes';
 import { clear, copyText, debounce, h } from './dom';
+import { renderAnalysis } from './analysis-view';
+import type { AnalysisSource } from './analysis-lessons';
 import { renderResources } from './resources';
 import { search } from './search';
 import { flagSettings } from './settings';
@@ -153,7 +157,7 @@ export function mountApp(root: HTMLElement): void {
       renderResources(main);
     } else {
       document.title = t('ui.title');
-      renderHome(main);
+      teardown = renderHome(main);
     }
     renderNav();
     main.scrollTo?.(0, 0);
@@ -224,6 +228,10 @@ function settingsPanel(): HTMLElement {
 // ---------- home: triage ----------
 
 const TRIAGE_READ_LIMIT = 8 * 1024 * 1024;
+/** The analysis reads at most this much of a file; the rest is left out and said so. */
+const ANALYZE_READ_LIMIT = 64 * 1024 * 1024;
+/** Pasted text shorter than this is not worth an analysis. */
+const ANALYZE_MIN_TEXT = 8;
 
 function sampleFrom(text: string | null, bytes: Uint8Array, name?: string): Sample {
   return { text, bytes, name };
@@ -250,7 +258,7 @@ function rank(sample: Sample) {
   return out.sort((a, b) => b.score - a.score).slice(0, 8);
 }
 
-function renderHome(main: HTMLElement) {
+function renderHome(main: HTMLElement): () => void {
   let file: { bytes: Uint8Array; name: string; handle: File } | null = null;
   const results = h('div', { class: 'triage-results', 'aria-live': 'polite' });
   const fileInput = h('input', {
@@ -274,6 +282,140 @@ function renderHome(main: HTMLElement) {
     }, 120),
   });
 
+  // The automatic analysis: the `analyze` tool in a worker of its own, stoppable, shown above the guesses.
+  const analysis = h('div', { class: 'analysis-slot', 'aria-live': 'polite' });
+  const runner = new Runner();
+  let runToken = 0;
+  let stoppedToken = 0;
+
+  function stopAnalysis() {
+    runToken++;
+    runner.cancel();
+    clear(analysis);
+  }
+
+  /** What to analyse right now, or null when there is nothing (or too little) on screen. */
+  function currentJob(): {
+    name?: string;
+    load: () => Promise<AnalysisSource>;
+    cut: number;
+  } | null {
+    if (file) {
+      const f = file;
+      return {
+        name: f.name,
+        cut: f.handle.size > ANALYZE_READ_LIMIT ? ANALYZE_READ_LIMIT : 0,
+        load: async () => {
+          const bytes =
+            f.handle.size <= TRIAGE_READ_LIMIT
+              ? f.bytes
+              : new Uint8Array(await f.handle.slice(0, ANALYZE_READ_LIMIT).arrayBuffer());
+          const big = f.handle.size > TRIAGE_READ_LIMIT;
+          return {
+            bytes,
+            name: f.name,
+            raw: big
+              ? { file: f.handle, name: f.name }
+              : { bytes: f.bytes, file: f.handle, name: f.name },
+          };
+        },
+      };
+    }
+    const text = ta.value.trim();
+    if (text.length < ANALYZE_MIN_TEXT) return null;
+    return {
+      cut: 0,
+      load: () => {
+        const bytes = utf8Encode(text);
+        return Promise.resolve({ bytes, raw: { text } });
+      },
+    };
+  }
+
+  const queueAnalysis = debounce(() => void runAnalysis(), 250);
+
+  async function runAnalysis() {
+    const job = currentJob();
+    if (!job) return;
+    const token = ++runToken;
+    clear(analysis);
+    analysis.append(
+      h(
+        'div',
+        { class: 'an-busy', role: 'status' },
+        h('span', null, t('ui.analysis.running')),
+        h(
+          'button',
+          {
+            type: 'button',
+            class: 'btn',
+            onclick: () => {
+              stoppedToken = token;
+              runner.cancel();
+            },
+          },
+          t('ui.analysis.stop'),
+        ),
+      ),
+    );
+    try {
+      const source = await job.load();
+      if (token !== runToken) return;
+      const result = await runner.run('analyze', { bytes: source.bytes, name: source.name }, {});
+      if (token !== runToken) return;
+      const found = result.find((o) => o.type === 'analysis');
+      clear(analysis);
+      if (!found || found.type !== 'analysis') return;
+      if (job.cut) {
+        analysis.append(
+          h(
+            'p',
+            { class: 'note note-warn' },
+            t('ui.analysis.truncated', { size: formatSize(job.cut) }),
+          ),
+        );
+      }
+      analysis.append(
+        renderAnalysis(
+          found.result,
+          {
+            highlight: selectFlags(resultToText(result), flagSettings.regex, flagSettings.pattern),
+            pipe: (id, raw, options) => {
+              setPending(id, raw, options);
+              location.hash = `#/tool/${id}`;
+            },
+          },
+          source,
+        ),
+      );
+    } catch (e) {
+      if (token !== runToken) return;
+      clear(analysis);
+      if (e instanceof CancelledError && stoppedToken === token) {
+        analysis.append(
+          h(
+            'div',
+            { class: 'an-busy' },
+            h('span', null, t('ui.analysis.stopped')),
+            h(
+              'button',
+              { type: 'button', class: 'btn', onclick: () => void runAnalysis() },
+              t('ui.analysis.rerun'),
+            ),
+          ),
+        );
+      } else if (!(e instanceof CancelledError)) {
+        analysis.append(
+          h(
+            'p',
+            { class: 'note note-error', role: 'alert' },
+            t('ui.analysis.failed', { message: e instanceof Error ? e.message : String(e) }),
+          ),
+        );
+      }
+    }
+  }
+
   async function takeFile(f: File) {
     // Detectors only need the start of a big file; the full handle goes to the chosen tool.
     const head = f.size > TRIAGE_READ_LIMIT ? f.slice(0, TRIAGE_READ_LIMIT) : f;
@@ -284,6 +426,7 @@ function renderHome(main: HTMLElement) {
 
   function update() {
     clear(results);
+    stopAnalysis();
     let sample: Sample;
     if (file) {
       const textual = isValidUtf8(file.bytes) && printableRatio(file.bytes) > 0.9;
@@ -300,6 +443,7 @@ function renderHome(main: HTMLElement) {
       if (!text) return;
       sample = sampleFrom(text, utf8Encode(text));
     }
+    if (currentJob()) queueAnalysis();
     const flags = sample.text
       ? [...selectFlags(sample.text, flagSettings.regex, flagSettings.pattern)].slice(0, 5)
       : [];
@@ -409,6 +553,7 @@ function renderHome(main: HTMLElement) {
         h('a', { class: 'side-link', href: '#/resources' }, t('ui.resources.navLink')),
       ),
       drop,
+      analysis,
       results,
       h(
         'div',
@@ -447,4 +592,8 @@ function renderHome(main: HTMLElement) {
       ),
     ),
   );
+  return () => {
+    runToken++;
+    runner.cancel();
+  };
 }

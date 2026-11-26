@@ -36,13 +36,16 @@ if (problems.length) throw new Error(`Tool registry is invalid:\n${problems.join
 
 const order = new Map(CATEGORIES.map((c, i) => [c.id, i]));
 
-export const TOOLS: readonly AnyTool[] = entries
-  .map(([, t]) => t)
+const all = entries.map(([, t]) => t);
+
+/** The tools people see: hidden ones (the home analysis) are reachable by id only. */
+export const TOOLS: readonly AnyTool[] = all
+  .filter((t) => !t.hidden)
   .sort((a, b) => order.get(a.category)! - order.get(b.category)! || a.name.localeCompare(b.name));
 
 setRegisteredTools(TOOLS);
 
-const byId = new Map(TOOLS.map((t) => [t.id, t]));
+const byId = new Map(all.map((t) => [t.id, t]));
 export const getTool = (id: string): AnyTool | undefined => byId.get(id);
 
 export function defaultOptions(tool: AnyTool): Record<string, unknown> {

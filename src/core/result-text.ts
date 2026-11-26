@@ -60,6 +60,12 @@ export function resultToText(result: ToolResult): string {
       case 'sandbox':
         parts.push(o.payload);
         break;
+      case 'analysis':
+        parts.push(
+          ...o.result.findings.map((f) => `${f.kind} ${f.confidence} ${f.title} ${f.detail ?? ''}`),
+          ...o.result.checklist,
+        );
+        break;
     }
   }
   return parts.join('\n');

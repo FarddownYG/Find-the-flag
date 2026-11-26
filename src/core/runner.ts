@@ -136,7 +136,8 @@ export class Runner {
     return this.decoding.promise;
   }
 
-  private cancel(): void {
+  /** Stop the run in progress (its promise rejects with CancelledError) and drop the worker. */
+  cancel(): void {
     if (!this.pending) return;
     this.worker?.terminate();
     this.worker = null;

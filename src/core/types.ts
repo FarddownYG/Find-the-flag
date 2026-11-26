@@ -2,6 +2,7 @@
  * Core contracts. A tool is a pure function: (input, options) -> outputs.
  * The shell builds every widget from these declarations, so a tool never touches the DOM.
  */
+import type { AnalysisResult } from './analyze';
 
 export type Category = 'encoding' | 'crypto' | 'stego' | 'forensics' | 'audio' | 'misc';
 
@@ -198,6 +199,12 @@ export type Output =
    * iframe and nothing runs until the user clicks. See src/ui/xss-sandbox.ts.
    */
   | { type: 'sandbox'; label?: string; payload: string }
+  /**
+   * The verdict of the analysis pipeline (src/core/analyze.ts): findings by confidence, what was
+   * checked. Only the hidden `analyze` tool emits it; the home page draws it as a layered report
+   * (src/ui/analysis-view.ts), explanation first.
+   */
+  | { type: 'analysis'; label?: string; result: AnalysisResult }
   | { type: 'note'; level: 'info' | 'warn' | 'error' | 'success'; text: string };
 
 export type ToolResult = Output[];
@@ -271,6 +278,11 @@ export interface ToolDef<K extends InputKind = InputKind, O extends OptionSpecs 
   category: Category;
   /** One line, shown under the title and in search results. */
   description: string;
+  /**
+   * Runs like any tool (worker, cancel) but is not listed: not in the catalog, the search, the
+   * triage ranking or the generated tool list. The home page's analysis is one.
+   */
+  hidden?: boolean;
   /** Extra search keywords (aliases, tool names people know: "zsteg", "binwalk"...). */
   tags?: string[];
   input: K;

@@ -1578,3 +1578,211 @@ tr.is-hl td:first-child {
     flex-basis: 100%;
   }
 }
+
+/* ---------- home: analysis report ---------- */
+.analysis-slot {
+  margin: 14px 0 0;
+}
+.an-busy {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  color: var(--mute);
+  padding: 8px 12px;
+  border-left: 3px solid var(--line-strong);
+}
+.an {
+  display: grid;
+  gap: 18px;
+  min-width: 0;
+}
+.an-verdict {
+  border-left: 3px solid var(--signal);
+  padding: 4px 0 4px 14px;
+}
+.an-eyebrow {
+  margin: 0;
+  color: var(--faint);
+  font-size: var(--fs-0);
+}
+.an-sentence {
+  margin: 4px 0;
+  font-size: var(--fs-3);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.an-sub {
+  margin: 0;
+  color: var(--mute);
+  font-size: var(--fs-1);
+}
+.an-h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 4px;
+  font-size: var(--fs-2);
+  font-weight: 600;
+}
+.an-h4 {
+  margin: 0 0 4px;
+  font-size: var(--fs-1);
+  font-weight: 600;
+  color: var(--mute);
+}
+.an-count {
+  color: var(--faint);
+  font-weight: 400;
+}
+.an-tier-help {
+  margin: 0 0 8px;
+  color: var(--faint);
+  font-size: var(--fs-1);
+}
+.an-chip {
+  display: inline-block;
+  border: 1px solid var(--line-strong);
+  border-radius: 99px;
+  padding: 1px 9px;
+  font-size: var(--fs-0);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.an-chip-confirmed {
+  color: var(--ok);
+  border-color: var(--ok);
+}
+.an-chip-probable {
+  color: var(--amber);
+  border-color: var(--amber);
+}
+.an-chip-candidate {
+  color: var(--mute);
+  border-color: var(--faint);
+}
+.an-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.an-finding {
+  border: 1px solid var(--line);
+  border-left-width: 3px;
+  border-radius: var(--radius);
+  background: var(--bg);
+  min-width: 0;
+}
+.an-finding-confirmed {
+  border-left-color: var(--ok);
+}
+.an-finding-probable {
+  border-left-color: var(--amber);
+}
+.an-finding-candidate {
+  border-left-color: var(--faint);
+}
+.an-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+.an-summary:focus-visible {
+  outline: 2px solid var(--signal);
+  outline-offset: 1px;
+}
+.an-kind {
+  font-weight: 600;
+}
+.an-title {
+  color: var(--mute);
+  font-size: var(--fs-1);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.an-body {
+  display: grid;
+  gap: 12px;
+  padding: 4px 12px 12px;
+  border-top: 1px solid var(--line);
+}
+.an-body p {
+  margin: 0;
+}
+.an-flag {
+  font-size: var(--fs-2);
+  overflow-wrap: anywhere;
+}
+.an-meta {
+  color: var(--mute);
+  font-size: var(--fs-1);
+  overflow-wrap: anywhere;
+}
+.an-proof-label {
+  margin: 0 0 4px;
+  color: var(--faint);
+  font-size: var(--fs-0);
+}
+.an-proof,
+.an-cmd {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.an-code {
+  margin: 0;
+  padding: 8px 10px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font-size: var(--fs-0);
+  overflow-x: auto;
+}
+.an-cmd .btn {
+  justify-self: start;
+}
+.an-buttons {
+  padding: 0;
+}
+.an-lesson p {
+  max-width: 68ch;
+  line-height: 1.6;
+}
+.an-checks {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--mute);
+  font-size: var(--fs-1);
+  line-height: 1.6;
+}
+.an-rejected {
+  margin-top: 8px;
+  color: var(--mute);
+  font-size: var(--fs-1);
+}
+.an-rejected summary {
+  cursor: pointer;
+}
+.an-writeup {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.an-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--mute);
+  font-size: var(--fs-1);
+}
+@media (max-width: 760px) {
+  .an-sentence {
+    font-size: var(--fs-2);
+  }
+}

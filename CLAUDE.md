@@ -48,12 +48,12 @@ public : un push sur `main` est une publication immédiate et définitive.
 ## AGENCE (mode autonome — état du run)
 
 ```
-ÉTAT: RUNNING | lot 3/5 | sans-gain 0/2 | start 2026-11-25 | fin : les 5 FINI verts OU 5 lots
-FINI: [ ] 1. banc de détection du corpus maison = 100 % des techniques depuis l'ENTRÉE UNIQUE, sans choisir d'outil
-      [ ] 2. fichiers sains (photo/vidéo/PDF normaux) → zéro faux positif « confirmé »
-      [ ] 3. chaque résultat affiche son explication EN HAUT
-      [ ] 4. parcours « dépose un fichier → comprends ce qu'il contient » vérifié sur captures, sans doc
-      [ ] 5. check (type/lint/format/tests/i18n/privacy) + docs:tools sans diff + build + e2e verts
+ÉTAT: RUNNING | lot 4/5 | sans-gain 0/2 | start 2026-11-25 | FINI VERTS à L3 ; L4-L5 = qualité/UX bornée
+FINI: [x] 1. banc du corpus maison = 15/15 (100 %) depuis l'ENTRÉE UNIQUE, sans choisir d'outil (banc + UI auto)
+      [x] 2. fichiers sains (photo/vidéo/PDF) → zéro faux positif « confirmé » (banc 0 FP + captures clean)
+      [x] 3. chaque résultat affiche son explication EN HAUT (page résultats en couches, verdict en tête)
+      [x] 4. parcours « dépose → comprends » vérifié sur captures desktop+mobile (agent tiers : OVERALL PASS)
+      [x] 5. check + docs:tools sans diff + build + e2e 785 passed, verts
 COMMANDES: bench `node scripts/detect-bench.mjs` (créé au lot 1, oracle du taux) · check `npm run check`
            · build `npm run build` · docs `npm run docs:tools` + git diff --exit-code docs/TOOLS.md
            · e2e `CI=true CHROMIUM_PATH=/opt/pw-browsers/chromium npx playwright test --trace off` · captures → scratchpad
@@ -67,8 +67,12 @@ PLAN : L1 corpus+banc · L2 pipeline auto (worker) + anomalies (MP4 mdat non ré
 FAIT: L1 27e2339 corpus maison + banc (baseline 5/15=33 %, 0 FP) — preuve node scripts/detect-bench.mjs
       L2 analyze() complet : parser MP4 (_mp4), moteur anomalies (_anomaly : entropie/zones non réf/post-EOF/
          verdict chiffré), détecteurs image/audio/texte/binaire/crypto → banc 15/15=100 %, 0 FP (MP4-mdat détecté)
-EN COURS: L3 brancher analyze() derrière l'entrée unique (worker, progression, stop) + page résultats en couches.
-  FINI#1 atteint au niveau MOTEUR (banc 100 %) ; reste le câblage UI pour « depuis l'entrée, sans choisir d'outil ».
+      L3 analyze() branché derrière l'entrée (worker, Stop) + page résultats en couches (verdict/comment/
+         cours/étape/refaire/écartés ; confirmé/probable/candidat) + leçons×18 kinds×5 locales. Captures OVERALL PASS.
+LES 5 FINI SONT VERTS dès L3. L4 (migration socle/dedup) + L5 (catalogue+Learn) = lots qualité/UX planifiés du
+  mandat (« app intuitive »), bornés ; je les enchaîne puis STOP après L5. Pas de dérive : chaque lot a une accept. écrite.
+EN COURS: L4 — converger les doublons nommés (PNG _png/_png-surgeon, GZIP ×2, RIFF/WAV ×3) sans régression
+  (banc 15/15 + tests avant/après). Accept : doublons réduits, banc inchangé, gates verts.
 DÉCISIONS: D1 le banc est l'oracle du taux de détection, il ne doit JAMAIS baisser
            D2 fusion main = fast-forward au vert (autorisé explicitement par l'utilisateur, dépôt public)
            D3 « rien trouvé » INTERDIT sans la liste des vérifs faites + anomalies relevées
