@@ -61,7 +61,7 @@ export default defineTool({
     {
       label: 'Text hidden in a bit plane (blue bit 0)',
       input: { sample: 'image-lab-bit0-text.png' },
-      expect: 'Look first: B0 · blue bit 0 (lowest)',
+      expect: 'B0 · blue bit 0 (lowest): Blue bit 0 (lowest):',
     },
     {
       label: 'Colours that differ by one level',
