@@ -1,0 +1,18 @@
+[
+  {
+    "file": "simple-1.zip",
+    "secret": "FTF{zip_stored_1}"
+  },
+  {
+    "file": "simple-2.zip",
+    "secret": "FTF{zip_stored_2}"
+  },
+  {
+    "file": "polyglot-1.png",
+    "secret": "FTF{png_zip_polyglot_1}"
+  },
+  {
+    "file": "polyglot-2.png",
+    "secret": "FTF{png_zip_polyglot_2}"
+  }
+]

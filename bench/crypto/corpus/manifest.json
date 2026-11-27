@@ -1,0 +1,26 @@
+[
+  {
+    "file": "01-base64.txt",
+    "secret": "FTF{base64_layers_1}"
+  },
+  {
+    "file": "02-hex.txt",
+    "secret": "FTF{hex_layer_2}"
+  },
+  {
+    "file": "03-base64-twice.txt",
+    "secret": "FTF{double_base64_3}"
+  },
+  {
+    "file": "04-base32.txt",
+    "secret": "FTF{base32_rfc4648_4}"
+  },
+  {
+    "file": "05-hex-of-base64.txt",
+    "secret": "FTF{mixed_hex_b64_5}"
+  },
+  {
+    "file": "06-rot13.txt",
+    "secret": "FTF{rot13_letters_6}"
+  }
+]

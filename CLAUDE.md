@@ -107,8 +107,15 @@ BANC D'ESSAI (run #23 — chaque outil résout des CTF jamais vus par le chemin 
       8 KO documentés (octets de contrôle / charge trop courte / cadrage groups3) — filtrés des specs
       vertes sans affaiblir d'assertion. Detect-bench 15/15 0 FP inchangé. (2279e19, 8e58a43)
     · Pré-existant réparé : exemple image-lab bit-plane (assertion valide dans les 2 sérialiseurs).
-  RESTE (bornés, un lot/famille, STOP à FINI) : image (LSB/PVD/PIT/EMD/bit-planes/zsteg), audio,
-    PDF, vidéo, archives, crypto. Chaque famille : encodeur indépendant → corpus → e2e → fix borné → RESULTS.md.
+    · IMAGE LSB 5/5 · AUDIO WAV LSB 5/5 · PDF (PNG après %%EOF) 4/4 · ARCHIVES (ZIP + polyglotte) 4/4 ·
+      CRYPTO (base64/hex/base32/mixtes/ROT13) 6/6 — tous par encodeurs indépendants, croise-vérif + e2e.
+      Vérifié : image/audio/pdf/archives/crypto n'ont PAS de trou systémique (le pipeline auto les câble déjà) ;
+      le trou systémique était propre au TEXTE (décodeurs invisibles non appelés) — corrigé.
+  ÉTAT BANC : STOPPED — FINI atteint : Holloway OK + bug systémique texte corrigé ; chaque famille 100 % ou KO
+    documenté ; 0 faux positif ; bancs en CI (bench/**). Totaux : 67 challenges générés, 59 remontés par le
+    chemin utilisateur, 8 KO documentés (variation low-bytes/short, SNOW groups3), 0 FP.
+  BACKLOG (durcissement, non bloquant) : porteurs bruités/photo pour LSB image, variantes d'ordre ; silence/bruit
+    audio ; PDF iTXt/zTXt/chiffré/PJ ; ZIP DEFLATE/ZIP64/padding ; (chiffrements à clé = outils dédiés, hors banc).
   DÉCISIONS banc : D6 un KO documenté (cause + backlog) est permis après 3 fixs, PAS d'affaiblissement
     d'assertion ; D7 secrets fictifs ftf_* uniquement, jamais Root-Me.
 ```

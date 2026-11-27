@@ -44,6 +44,13 @@ réussi quand le secret est retrouvé et remonté par le pipeline.
 
 **Total audio : 5/5 · PDF : 4/4 · 0 faux positif.**
 
+| Outil / schéma                                    | Challenges | Réussis | Échoués | Faux positifs | Statut |
+| ------------------------------------------------- | ---------- | ------- | ------- | ------------- | ------ |
+| Archives (ZIP STORE + polyglotte PNG+ZIP)         | 4          | 4       | 0       | 0             | ✅ OK  |
+| Crypto/encodages (base64/hex/base32/mixtes/ROT13) | 6          | 6       | 0       | 0             | ✅ OK  |
+
+**Total archives : 4/4 · crypto : 6/6 · 0 faux positif.**
+
 ### Détails
 
 **Holloway** — bug réel corrigé. Causes : (1) décodeur absent (le canal glyphe lisait 1 bit/lettre, pas
@@ -94,3 +101,16 @@ Encodeur indépendant (`bench/pdf/encode.mjs`, PDF minimal valide + PNG 8×8 ave
 non lu) : flag `FTF{...}` dans le tEXt du PNG ajouté. L'entrée le remonte pour 4 fixtures. Preuve : croise-vérif
 (ré-extraction indépendante) + e2e d'upload. _Limite_ : une seule technique (PNG clair après EOF, tEXt non
 compressé) — ni PDF chiffré, ni pièce jointe PDF, ni iTXt/zTXt — backlog.
+
+**Archives** — pas de bug : `analyze` carve l'archive ajoutée et lit le flag dans l'entrée contenue.
+Encodeur indépendant (`bench/archives/encode.mjs`, ZIP écrit à la main avec CRC32 maison, code FTF non lu) :
+`flag.txt` = `FTF{...}`, en ZIP STORE seul et en polyglotte PNG+ZIP (ZIP après l'IEND). L'entrée remonte les 4.
+Preuve : croise-vérif (parseur EOCD/central-directory indépendant) + e2e d'upload. _Limite_ : STORE seul, une
+entrée, ZIP juste après l'IEND — ni DEFLATE, ni ZIP64, ni chiffrement, ni padding avant le ZIP — backlog.
+
+**Crypto / encodages** — pas de bug : l'auto-décodage de l'entrée déroule les couches réversibles sans clé.
+Encodeur indépendant (`bench/crypto/encode.mjs`, base32 RFC4648 et ROT13 réimplémentés, code FTF non lu) :
+`FTF{...}` passé par base64, hex, base64², base32, hex(base64), ROT13 — collé comme texte dans l'entrée, qui
+le ramène en clair pour les 6 cas. Preuve : croise-vérif (décodeur inverse indépendant) + e2e de collage.
+_Limite_ : encodages/transpositions réversibles sans clé ; les chiffrements à clé (XOR clé inconnue, AES…) ne
+sont pas visés par ce banc — ils relèvent des outils dédiés, pas de l'auto-décodage.
