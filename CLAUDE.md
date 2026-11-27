@@ -93,4 +93,22 @@ PROPOSÉ (non exécuté, impact / effort / risque) :
      faible / faible / faible
   5. Vue analyse mobile : le hex dump déborde dans son scroll interne (overflow-x à cadrer) —
      faible / faible / faible
+
+BANC D'ESSAI (run #23 — chaque outil résout des CTF jamais vus par le chemin utilisateur réel) :
+  MÉTHODE: encodeur de référence sous bench/<schéma>/ ≠ décodeur FTF sous src/ (auteurs séparés,
+    ne partagent qu'une table-protocole) ; croise-vérif + e2e « colle dans l'entrée d'accueil » ;
+    bench/** en CI ; boucle bornée 3 fixs/outil sinon KO documenté (bench/RESULTS.md) ; 0 faux positif.
+  FAIT (shippé main):
+    · Holloway homoglyphes (bug réel) — 9/9, décodeur + routage texte UTF-8 + anti-normalisation.
+    · FAMILLE TEXTE — bug systémique corrigé : les décodeurs manuels (zero-width decodeAll,
+      whitespace decodeWhitespace) n'étaient JAMAIS appelés par le pipeline auto detectText.
+      hiddenChannelFindings les agrège ; bidiFindings ajoute Trojan Source.
+      Scores (chemin utilisateur) : tags 6/6, zero-width 8/8, bidi 6/6, variation 6/8, SNOW 2/8.
+      8 KO documentés (octets de contrôle / charge trop courte / cadrage groups3) — filtrés des specs
+      vertes sans affaiblir d'assertion. Detect-bench 15/15 0 FP inchangé. (2279e19, 8e58a43)
+    · Pré-existant réparé : exemple image-lab bit-plane (assertion valide dans les 2 sérialiseurs).
+  RESTE (bornés, un lot/famille, STOP à FINI) : image (LSB/PVD/PIT/EMD/bit-planes/zsteg), audio,
+    PDF, vidéo, archives, crypto. Chaque famille : encodeur indépendant → corpus → e2e → fix borné → RESULTS.md.
+  DÉCISIONS banc : D6 un KO documenté (cause + backlog) est permis après 3 fixs, PAS d'affaiblissement
+    d'assertion ; D7 secrets fictifs ftf_* uniquement, jamais Root-Me.
 ```
