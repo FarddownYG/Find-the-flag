@@ -6,3 +6,5 @@ coverage
 playwright-report
 test-results
 wasm/ftf-x86/pkg
+wasm/ftf-zipcrypto/pkg
+wasm/ftf-zipcrypto/target

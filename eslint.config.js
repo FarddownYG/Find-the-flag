@@ -14,6 +14,8 @@ export default tseslint.config(
       'test-results',
       'public/samples',
       'wasm/ftf-x86/pkg',
+      'wasm/ftf-zipcrypto/pkg',
+      'wasm/ftf-zipcrypto/target',
     ],
   },
   js.configs.recommended,
