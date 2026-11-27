@@ -1,0 +1,32 @@
+[
+  {
+    "file": "01-greeting.txt",
+    "secret": "ftf_unicodetags_1",
+    "cover": "Hello there, I hope you are having a wonderful day and a great week ahead."
+  },
+  {
+    "file": "02-short.txt",
+    "secret": "ftf_tags_2",
+    "cover": "See you tomorrow."
+  },
+  {
+    "file": "03-meeting.txt",
+    "secret": "meet me at 9:30 by the old bridge",
+    "cover": "Reminder: the team meeting has moved to Thursday afternoon, please check the calendar invite for details."
+  },
+  {
+    "file": "04-punctuation.txt",
+    "secret": "ftf_unicodetags_4 (flag) [ok]!",
+    "cover": "Thanks so much for the kind words, they really made my day -- talk soon, friends & family!"
+  },
+  {
+    "file": "05-long.txt",
+    "secret": "the quick brown fox jumps over the lazy dog 0123456789 ftf_unicodetags_5",
+    "cover": "The old library at the end of the street opens at nine every morning. Inside, the shelves smell of paper and dust, and the reading room is always quiet."
+  },
+  {
+    "file": "06-newline-cover.txt",
+    "secret": "ftf_unicodetags_6",
+    "cover": "Line one of the note.\nLine two of the note.\nBye!"
+  }
+]

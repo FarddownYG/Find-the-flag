@@ -1,0 +1,42 @@
+[
+  {
+    "file": "01-after-plain.txt",
+    "secret": "ftf_zerowidth_1",
+    "cover": "Hello there, I hope you are having a wonderful day and a great week ahead."
+  },
+  {
+    "file": "02-after-separator.txt",
+    "secret": "ftf_zerowidth_2",
+    "cover": "Reminder: the team meeting has moved to Thursday afternoon."
+  },
+  {
+    "file": "03-before.txt",
+    "secret": "ftf_zerowidth_3",
+    "cover": "Thanks so much for the kind words, talk soon!"
+  },
+  {
+    "file": "04-inside-word.txt",
+    "secret": "ftf_zerowidth_4",
+    "cover": "The old library at the end of the street opens at nine every morning."
+  },
+  {
+    "file": "05-spread-chars.txt",
+    "secret": "ftf_zw_5",
+    "cover": "The quick brown fox jumps over the lazy dog while the sun sets slowly behind the hills."
+  },
+  {
+    "file": "06-spread-separator.txt",
+    "secret": "ftf_zw_6",
+    "cover": "The quick brown fox jumps over the lazy dog while the sun sets slowly behind the hills."
+  },
+  {
+    "file": "07-utf8-secret.txt",
+    "secret": "ftf_zerowidth_é7",
+    "cover": "See you tomorrow, bring the notes."
+  },
+  {
+    "file": "08-multiline.txt",
+    "secret": "meet me at 9:30 by the old bridge",
+    "cover": "Line one of the note.\nLine two of the note.\nBye!"
+  }
+]

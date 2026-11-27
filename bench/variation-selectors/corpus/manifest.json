@@ -1,0 +1,42 @@
+[
+  {
+    "file": "01-emoji.txt",
+    "secret": "ftf_vs_1",
+    "base": "😀"
+  },
+  {
+    "file": "02-letter.txt",
+    "secret": "ftf_vs_2",
+    "base": "A"
+  },
+  {
+    "file": "03-word.txt",
+    "secret": "hidden under a word",
+    "base": "hello"
+  },
+  {
+    "file": "04-sentence.txt",
+    "secret": "ftf_vs_4",
+    "base": "Nothing to see here, just a friendly greeting."
+  },
+  {
+    "file": "05-long.txt",
+    "secret": "ftf_the_quick_brown_fox_jumps_over_the_lazy_dog_1234567890",
+    "base": "👍"
+  },
+  {
+    "file": "06-low-bytes.txt",
+    "secret": "ftf_vs_6",
+    "base": "ok"
+  },
+  {
+    "file": "07-punct.txt",
+    "secret": "meet me at 9:30",
+    "base": "Hi!"
+  },
+  {
+    "file": "08-short.txt",
+    "secret": "ok",
+    "base": "x"
+  }
+]

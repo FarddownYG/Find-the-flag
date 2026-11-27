@@ -1,0 +1,38 @@
+[
+  {
+    "file": "01-inline-rlo.txt",
+    "secret": "ftf_bidi_1",
+    "visual": "1_idib_ftf",
+    "note": "RLO..PDF inside a sentence"
+  },
+  {
+    "file": "02-whole-line.txt",
+    "secret": "ftf_bidi_2",
+    "visual": "2_idib_ftf",
+    "note": "entire file is one RLO run"
+  },
+  {
+    "file": "03-unclosed-rlo.txt",
+    "secret": "ftf_bidi_3",
+    "visual": "3_idib_ftf",
+    "note": "RLO never closed by PDF"
+  },
+  {
+    "file": "04-source-trojan.txt",
+    "secret": "ftf_bidi_4",
+    "visual": "4_idib_ftf",
+    "note": "source-code style, RLO in a comment"
+  },
+  {
+    "file": "05-lro-and-rlo.txt",
+    "secret": "ftf_bidi_5 [ok]",
+    "visual": "]ko[ 5_idib_ftf",
+    "note": "LRO run plus RLO run; secret in the RLO run"
+  },
+  {
+    "file": "06-multiline.txt",
+    "secret": "meet at the old bridge 0930",
+    "visual": "0390 egdirb dlo eht ta teem",
+    "note": "secret on its own line between cover lines"
+  }
+]

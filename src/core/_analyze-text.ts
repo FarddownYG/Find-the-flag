@@ -26,6 +26,8 @@ import {
 import { analyse as textInfo } from '../tools/encoding/_decoders';
 import { autoDecode, recipeName, type Candidate } from '../tools/encoding/auto-decode';
 import { decodeHolloway, hollowayReadable } from '../tools/stego/_holloway';
+import { decodeAll } from '../tools/stego/_zerowidth';
+import { decodeWhitespace } from '../tools/stego/whitespace';
 import { utf8Encode } from '../lib/bytes';
 import type { Finding } from './analyze';
 
@@ -185,6 +187,43 @@ function hollowayFindings(text: string): Finding[] {
   return [];
 }
 
+/** Directional override / embedding / isolate controls — the Trojan-Source reordering set. */
+const BIDI_TEST = /[‪-‮⁦-⁩]/;
+const BIDI_ALL = /[‪-‮⁦-⁩]/g;
+
+/**
+ * Bidi / Trojan Source: explicit directional controls (RLO, LRO, isolates...) reverse how a run is
+ * *displayed* while the bytes stay in logical order, so a secret reads one way on screen and another
+ * in the file. These controls never occur in ordinary left-to-right text, so their mere presence is
+ * the anomaly; we surface the control-stripped logical reading (a recovered flag confirmed, the
+ * cleaned text otherwise probable) so the pipeline reveals what the eye was tricked out of.
+ */
+function bidiFindings(text: string): Finding[] {
+  if (!BIDI_TEST.test(text)) return [];
+  const logical = text.replace(BIDI_ALL, '');
+  const flag = flagIn(logical);
+  if (flag)
+    return [
+      {
+        kind: 'decoded',
+        confidence: 'confirmed',
+        title: flag,
+        detail: 'bidi (Trojan Source)',
+        flag,
+      },
+    ];
+  const reading = logical.replace(/\s+/g, ' ').trim();
+  if (reading.length < 2) return [];
+  return [
+    {
+      kind: 'stego-bidi',
+      confidence: 'probable',
+      title: 'bidi override (Trojan Source)',
+      detail: `directional controls stripped → ${reading.slice(0, 300)}`,
+    },
+  ];
+}
+
 function cipherFinding(text: string): Finding[] {
   const family = rankFamilies(cipherStats(text)).find(
     (f) => !IGNORED_FAMILIES.has(f.id) && f.score >= FAMILY_MIN,
@@ -220,12 +259,53 @@ export async function detectText(bytes: Uint8Array, name?: string): Promise<Find
     ];
   }
 
+  const bidi = bidiFindings(text);
+  if (bidi.some((f) => f.confidence === 'confirmed')) return bidi;
   const holloway = hollowayFindings(text);
-  if (holloway.some((f) => f.confidence === 'confirmed')) return holloway;
+  if (holloway.some((f) => f.confidence === 'confirmed')) return [...holloway, ...bidi];
+  const hidden = hiddenChannelFindings(text);
+  if (hidden.some((f) => f.confidence === 'confirmed')) return [...hidden, ...holloway, ...bidi];
 
   const findings = wordFindings(text);
-  if (findings.some((f) => f.confidence === 'confirmed')) return [...findings, ...holloway];
+  if (findings.some((f) => f.confidence === 'confirmed'))
+    return [...findings, ...holloway, ...hidden, ...bidi];
   if (findings.length === 0) findings.push(...cipherFinding(text));
-  findings.push(...holloway);
+  findings.push(...holloway, ...hidden, ...bidi);
   return findings;
+}
+
+/**
+ * Invisible and whitespace channels: zero-width / Unicode-tag / variation-selector schemes (the
+ * zero-width tool's decodeAll) and SNOW-style trailing whitespace (decodeWhitespace). Each decoder
+ * already scores its reading; we surface a strong, textual reading as a hidden message — a flag
+ * confirmed, otherwise probable — so the auto pipeline finds what the manual tools would.
+ */
+function hiddenChannelFindings(text: string): Finding[] {
+  const readings = [...decodeAll(text), ...decodeWhitespace(text)]
+    .filter((c) => c.score >= 35 && c.text.length > 0)
+    .sort((a, b) => b.score - a.score);
+  const out: Finding[] = [];
+  const seen = new Set<string>();
+  for (const c of readings) {
+    const msg = c.text.replace(/\s+$/, '');
+    const cps = [...msg];
+    if (cps.length < 2 || seen.has(msg)) continue;
+    seen.add(msg);
+    const flag = flagIn(c.text) ?? chainFlag(c.bytes)?.flag;
+    if (flag) {
+      out.push({ kind: 'decoded', confidence: 'confirmed', title: flag, detail: c.scheme, flag });
+    } else {
+      // Unicode-aware readability: mostly printable code points (accents included), no replacement.
+      const ok = cps.filter((ch) => ch >= ' ' && ch !== '�').length >= cps.length * 0.9;
+      if (ok)
+        out.push({
+          kind: 'stego-unicode',
+          confidence: 'probable',
+          title: msg.slice(0, 48),
+          detail: `${c.scheme}: ${msg.slice(0, 300)}`,
+        });
+    }
+    if (out.length >= 4) break;
+  }
+  return out;
 }

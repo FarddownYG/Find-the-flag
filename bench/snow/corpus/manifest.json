@@ -1,0 +1,34 @@
+[
+  {
+    "file": "01-groups3-poem.txt",
+    "secret": "ftf_snow_1"
+  },
+  {
+    "file": "02-groups3-note.txt",
+    "secret": "ftf_snow_2"
+  },
+  {
+    "file": "03-groups3-width80.txt",
+    "secret": "ftf_snow_3"
+  },
+  {
+    "file": "04-groups3-crlf.txt",
+    "secret": "ftf_snow_4"
+  },
+  {
+    "file": "05-binary-poem.txt",
+    "secret": "ftf_snow_5"
+  },
+  {
+    "file": "06-binary-byte-per-line.txt",
+    "secret": "ftf_sn_6"
+  },
+  {
+    "file": "07-groups3-no-final-eol.txt",
+    "secret": "ftf_snow_7"
+  },
+  {
+    "file": "08-groups3-longer-secret.txt",
+    "secret": "ftf_snow_secret_message_8"
+  }
+]

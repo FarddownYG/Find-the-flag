@@ -1,0 +1,4 @@
+const role = "user";
+if (role === "admin‮" ‬) {
+  // ‮ftf_bidi_4‬
+}
