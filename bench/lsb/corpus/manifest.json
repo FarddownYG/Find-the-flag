@@ -1,0 +1,22 @@
+[
+  {
+    "file": "01-standard.png",
+    "secret": "FTF{lsb_hidden_pixels_1}"
+  },
+  {
+    "file": "02-short.png",
+    "secret": "FTF{abcd}"
+  },
+  {
+    "file": "03-long.png",
+    "secret": "FTF{long_flag_content-0123456789_long_flag_content-0123456789_long_flag_content-0123456789_long_flag_content-0123456789_long_flag_content-0123456789_long_flag_content-0123456789_}"
+  },
+  {
+    "file": "04-wide.png",
+    "secret": "FTF{wide_image_lsb_2}"
+  },
+  {
+    "file": "05-small.png",
+    "secret": "FTF{tiny_carrier_3!}"
+  }
+]

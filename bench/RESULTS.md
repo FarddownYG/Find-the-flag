@@ -31,6 +31,12 @@ réussi quand le secret est retrouvé et remonté par le pipeline.
 
 **Total famille texte : 45 générés, 37 remontés par le chemin utilisateur, 8 KO documentés, 0 faux positif.**
 
+| Outil / schéma                              | Challenges | Réussis | Échoués | Faux positifs | Statut |
+| ------------------------------------------- | ---------- | ------- | ------- | ------------- | ------ |
+| LSB image (PNG, RGB plan 0, row-major, MSB) | 5          | 5       | 0       | 0             | ✅ OK  |
+
+**Total famille image : 5 générés, 5 remontés, 0 faux positif.**
+
 ### Détails
 
 **Holloway** — bug réel corrigé. Causes : (1) décodeur absent (le canal glyphe lisait 1 bit/lettre, pas
@@ -60,3 +66,12 @@ logique). Preuve : e2e `e2e/{unicode-tags,zero-width,variation-selectors,snow,bi
 
 Ces 8 fixtures restent dans le corpus (générées, traçables) mais sont filtrées des specs e2e vertes via une
 liste `KO` commentée pointant ici — aucun test n'est affaibli (assertion inchangée), le KO est rendu visible.
+
+**LSB image** — pas de bug : le pipeline auto `detectImage` lance déjà le balayage LSB complet
+(tous canaux × plans × ordre ligne/colonne × MSB/LSB + zones + statistiques chi²/RS) depuis l'entrée
+unique. L'encodeur de référence (`bench/lsb/encode.mjs`, PNG écrit à la main via `node:zlib`, décodeur
+FTF non lu) embarque un flag `FTF{...}` en LSB du plan 0 (R, G, B, row-major, MSB d'abord) ; l'entrée le
+remonte en « confirmé » pour les 5 fixtures. Preuve : croise-vérif `bench/lsb/crossverify.test.ts` (décodeur
+indépendant) + e2e `e2e/lsb-bench.spec.ts` (upload dans l'entrée). _Limite assumée_ : les porteurs sont des
+dégradés lisses (plan 0 à zéro), donc le banc couvre le cas standard, pas encore un porteur bruité/photo réelle
+ni les variantes d'ordre (BGR, colonnes, plans > 0) — backlog.
