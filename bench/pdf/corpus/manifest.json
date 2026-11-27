@@ -1,0 +1,18 @@
+[
+  {
+    "file": "01-appended-png.pdf",
+    "secret": "FTF{pdf_appended_png_1}"
+  },
+  {
+    "file": "02-appended-png.pdf",
+    "secret": "FTF{trailing_png_after_eof_2}"
+  },
+  {
+    "file": "03-appended-png.pdf",
+    "secret": "FTF{polyglot_pdf_png_3}"
+  },
+  {
+    "file": "04-appended-png.pdf",
+    "secret": "FTF{carve_then_read_text_4}"
+  }
+]

@@ -1,0 +1,22 @@
+[
+  {
+    "file": "01-standard.wav",
+    "secret": "FTF{audio_lsb_silence_1}"
+  },
+  {
+    "file": "02-short.wav",
+    "secret": "FTF{abcd}"
+  },
+  {
+    "file": "03-long.wav",
+    "secret": "FTF{long_audio_flag-0123456789_long_audio_flag-0123456789_long_audio_flag-0123456789_long_audio_flag-0123456789_long_audio_flag-0123456789_long_audio_flag-0123456789_long_audio_flag-0123456789_long_audio_}"
+  },
+  {
+    "file": "04-medium.wav",
+    "secret": "FTF{medium_wav_lsb_2}"
+  },
+  {
+    "file": "05-punct.wav",
+    "secret": "FTF{p4ss_w0rd!#$%&_z}"
+  }
+]

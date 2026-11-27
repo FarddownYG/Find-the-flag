@@ -37,6 +37,13 @@ réussi quand le secret est retrouvé et remonté par le pipeline.
 
 **Total famille image : 5 générés, 5 remontés, 0 faux positif.**
 
+| Outil / schéma                               | Challenges | Réussis | Échoués | Faux positifs | Statut |
+| -------------------------------------------- | ---------- | ------- | ------- | ------------- | ------ |
+| LSB audio (WAV PCM 16 bits, bit 0, MSB)      | 5          | 5       | 0       | 0             | ✅ OK  |
+| PDF — PNG+tEXt ajouté après %%EOF (polyglot) | 4          | 4       | 0       | 0             | ✅ OK  |
+
+**Total audio : 5/5 · PDF : 4/4 · 0 faux positif.**
+
 ### Détails
 
 **Holloway** — bug réel corrigé. Causes : (1) décodeur absent (le canal glyphe lisait 1 bit/lettre, pas
@@ -75,3 +82,15 @@ remonte en « confirmé » pour les 5 fixtures. Preuve : croise-vérif `bench/ls
 indépendant) + e2e `e2e/lsb-bench.spec.ts` (upload dans l'entrée). _Limite assumée_ : les porteurs sont des
 dégradés lisses (plan 0 à zéro), donc le banc couvre le cas standard, pas encore un porteur bruité/photo réelle
 ni les variantes d'ordre (BGR, colonnes, plans > 0) — backlog.
+
+**LSB audio** — pas de bug : `detectAudio` lit déjà les échantillons PCM bruts et balaie les plans LSB
+(canaux × bit-order + passe autour de l'onset). Encodeur de référence indépendant (`bench/audio/encode.mjs`,
+WAV 16 bits mono écrit à la main, décodeur FTF non lu) : flag `FTF{...}` en LSB du bit 0, MSB d'abord, sans
+en-tête. L'entrée le remonte en confirmé pour 5 fixtures. Preuve : croise-vérif + e2e d'upload. _Limite_ :
+un seul type de porteuse (ton faible amplitude 8 kHz), pas de silence pur ni de bruit — backlog.
+
+**PDF (fichier ajouté après %%EOF)** — pas de bug : `analyze` carve le PNG ajouté puis lit son chunk tEXt.
+Encodeur indépendant (`bench/pdf/encode.mjs`, PDF minimal valide + PNG 8×8 avec tEXt, concaténés ; code FTF
+non lu) : flag `FTF{...}` dans le tEXt du PNG ajouté. L'entrée le remonte pour 4 fixtures. Preuve : croise-vérif
+(ré-extraction indépendante) + e2e d'upload. _Limite_ : une seule technique (PNG clair après EOF, tEXt non
+compressé) — ni PDF chiffré, ni pièce jointe PDF, ni iTXt/zTXt — backlog.
