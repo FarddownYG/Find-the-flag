@@ -324,13 +324,15 @@ function renderHome(main: HTMLElement): () => void {
         },
       };
     }
-    const text = ta.value.trim();
-    if (text.length < ANALYZE_MIN_TEXT) return null;
+    // Gate on the trimmed length, but analyse the RAW text: boundary special spaces (U+2000…,
+    // U+202F) carry Holloway bits, and trimming would drop them before the decoders run.
+    if (ta.value.trim().length < ANALYZE_MIN_TEXT) return null;
+    const raw = ta.value.replace(/\n$/, '');
     return {
       cut: 0,
       load: () => {
-        const bytes = utf8Encode(text);
-        return Promise.resolve({ bytes, raw: { text } });
+        const bytes = utf8Encode(raw);
+        return Promise.resolve({ bytes, raw: { text: raw } });
       },
     };
   }
@@ -443,9 +445,11 @@ function renderHome(main: HTMLElement): () => void {
         ),
       );
     } else {
-      const text = ta.value.trim();
-      if (!text) return;
-      sample = sampleFrom(text, utf8Encode(text));
+      if (!ta.value.trim()) return;
+      // The RAW pasted text (only a single trailing newline stripped): the detectors and any piped
+      // tool must see the exact string, special spaces and all, not a trimmed copy.
+      const raw = ta.value.replace(/\n$/, '');
+      sample = sampleFrom(raw, utf8Encode(raw));
     }
     if (currentJob()) queueAnalysis();
     const flags = sample.text

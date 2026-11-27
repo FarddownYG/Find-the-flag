@@ -25,6 +25,8 @@ import {
 } from '../tools/crypto/_symbol-words';
 import { analyse as textInfo } from '../tools/encoding/_decoders';
 import { autoDecode, recipeName, type Candidate } from '../tools/encoding/auto-decode';
+import { decodeHolloway, hollowayReadable } from '../tools/stego/_holloway';
+import { utf8Encode } from '../lib/bytes';
 import type { Finding } from './analyze';
 
 /** The project's own flag prefix, handed to the beam search so that it scores FTF{...} as a flag. */
@@ -133,6 +135,56 @@ function wordFindings(text: string): Finding[] {
     : [];
 }
 
+/** A short description of a Holloway carrier count, for the finding detail. */
+function hollowayDetail(d: { homoglyphs: number; specialSpaces: number }): string {
+  return `holloway homoglyph stego (${d.homoglyphs} homoglyphs, ${d.specialSpaces} special spaces)`;
+}
+
+/**
+ * The Holloway homoglyph scheme: lookalike letters and special spaces carry bits read six at a time.
+ * A recovered flag — directly, or by decoding the recovered message one layer further (its charset
+ * is lowercase, so a hidden flag is typically carried as hex or another base) — is confirmed; a
+ * recovered readable sentence is probable.
+ */
+function hollowayFindings(text: string): Finding[] {
+  const d = decodeHolloway(text);
+  if (!d) return [];
+  const message = d.message.replace(/\s+$/, '');
+  if (message.length < 2) return [];
+  const detail = hollowayDetail(d);
+
+  const direct = flagIn(message);
+  if (direct)
+    return [{ kind: 'decoded', confidence: 'confirmed', title: direct, detail, flag: direct }];
+
+  const chain = chainFlag(utf8Encode(message));
+  if (chain)
+    return [
+      {
+        kind: 'decoded',
+        confidence: 'confirmed',
+        title: chain.flag,
+        detail: `${detail} → ${chain.recipe}`,
+        flag: chain.flag,
+      },
+    ];
+
+  // A readable sentence, or a clean decode (no replacement chars) over enough deliberate carriers,
+  // is a hidden message worth surfacing — even when it is a token like `ftf_homoglyph_1` rather
+  // than prose. Coincidental homoglyphs (a stray Greek letter) give too few carriers to pass.
+  const clean = !message.includes('�');
+  if (hollowayReadable(message) || (clean && message.length >= 3 && d.homoglyphs >= 6))
+    return [
+      {
+        kind: 'stego-unicode',
+        confidence: 'probable',
+        title: message.slice(0, 60),
+        detail,
+      },
+    ];
+  return [];
+}
+
 function cipherFinding(text: string): Finding[] {
   const family = rankFamilies(cipherStats(text)).find(
     (f) => !IGNORED_FAMILIES.has(f.id) && f.score >= FAMILY_MIN,
@@ -168,8 +220,12 @@ export async function detectText(bytes: Uint8Array, name?: string): Promise<Find
     ];
   }
 
+  const holloway = hollowayFindings(text);
+  if (holloway.some((f) => f.confidence === 'confirmed')) return holloway;
+
   const findings = wordFindings(text);
-  if (findings.some((f) => f.confidence === 'confirmed')) return findings;
+  if (findings.some((f) => f.confidence === 'confirmed')) return [...findings, ...holloway];
   if (findings.length === 0) findings.push(...cipherFinding(text));
+  findings.push(...holloway);
   return findings;
 }

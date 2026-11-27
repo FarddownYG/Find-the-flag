@@ -21,6 +21,7 @@ import { detectBinary } from './_analyze-binary';
 import { detectCrypto } from './_analyze-crypto';
 import { detectImage } from './_analyze-image';
 import { detectText } from './_analyze-text';
+import { analyse } from '../tools/encoding/_decoders';
 
 export type Confidence = 'confirmed' | 'probable' | 'candidate';
 
@@ -216,8 +217,11 @@ export async function analyze(bytes: Uint8Array, name?: string): Promise<Analysi
     }
   }
 
-  // Specialised detectors, by format and modality.
-  const textLike = printableRatio(bytes.subarray(0, TEXT_SAMPLE)) >= 0.9;
+  // Specialised detectors, by format and modality. "Text" is ASCII-printable OR valid UTF-8 with
+  // few control chars — so Unicode-carried stego (homoglyphs, special spaces) still reaches the
+  // text detectors instead of being mistaken for binary.
+  const head = bytes.subarray(0, TEXT_SAMPLE);
+  const textLike = printableRatio(head) >= 0.9 || analyse(head).textLike;
   if (bytes.length > MAX_DETECT_BYTES) {
     checklist.push('detectors-skipped:too-large');
   } else {

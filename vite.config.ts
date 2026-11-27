@@ -8,7 +8,7 @@ export default defineConfig({
   build: { target: 'es2022', sourcemap: false, assetsInlineLimit: 0 },
   worker: { format: 'es' },
   test: {
-    include: ['src/**/*.test.ts'],
+    include: ['src/**/*.test.ts', 'bench/**/*.test.ts'],
     environment: 'node',
     // Some suites stream tens of MiB or run every reference case: seconds on a quiet machine,
     // more on a shared CI runner. Speed budgets are asserted explicitly where they matter.

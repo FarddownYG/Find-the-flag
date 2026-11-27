@@ -1,8 +1,10 @@
 import { defineTool, select, text, toggle } from '../../core/define';
 import { ToolError } from '../../core/errors';
+import { buildFlagRegex, findFlags } from '../../core/flags';
 import type { Output } from '../../core/types';
 import { toolT } from '../../i18n/tool-text';
 import { utf8Encode } from '../../lib/bytes';
+import { decodeHolloway, hollowayReadable } from './_holloway';
 import { emojiPart } from './_text-analyzer-hidden';
 import { classify, codePointLabel, type Placement } from './_zerowidth';
 import {
@@ -497,6 +499,40 @@ function tables(scan: Scan, data: UnicodeData): Output[] {
   return out;
 }
 
+/**
+ * The Holloway homoglyph scheme (homoglyph letters and special spaces carry bits, read six at a time
+ * as ALPHABET6 indices). Shown as its own "holloway" result: the decoded message, a verdict note,
+ * and the warning that copy-paste through a space-collapsing field drops the special spaces.
+ */
+function hollowayBlocks(input: string): Output[] {
+  const d = decodeHolloway(input);
+  if (!d) return [];
+  const message = d.message.replace(/\s+$/, '');
+  const out: Output[] = [];
+  const flag = findFlags(message, buildFlagRegex(), 1)[0]?.value;
+  const readable = flag !== undefined || hollowayReadable(message);
+  out.push({
+    type: 'note',
+    level: readable ? 'success' : 'info',
+    text: readable ? T('note.hollowayMessage') : T('note.hollowayWeak'),
+  });
+  // Homoglyph letters but no special space at all: the usual sign that a space-collapsing field
+  // (a form, a chat box) ate the space variants on the way here, so the reading may be partial.
+  if (d.homoglyphs > 0 && d.specialSpaces === 0)
+    out.push({ type: 'note', level: 'warn', text: T('note.hollowaySpacesLost') });
+  out.push({ type: 'text', label: T('label.holloway'), value: shown(message) });
+  out.push({
+    type: 'kv',
+    label: T('label.hollowayDetails'),
+    entries: [
+      [T('kv.homoglyphs'), String(d.homoglyphs)],
+      [T('kv.specialSpaces'), String(d.specialSpaces)],
+      [T('kv.bitCount'), String(d.bits)],
+    ],
+  });
+  return out;
+}
+
 function analyse(input: string, data: UnicodeData): Output[] {
   const scan = scanText(input, data);
   if (!scan.cps.length) throw new ToolError(T('error.empty'));
@@ -504,6 +540,7 @@ function analyse(input: string, data: UnicodeData): Output[] {
   const readings = glyphReadings(scan, data);
   const c = scan.counts;
   const out: Output[] = [summary(scan, inv, data)];
+  const holloway = hollowayBlocks(input);
 
   // The verdicts first: what is hidden, or why nothing is.
   const bestGlyph = readings.find((r) => r.readable);
@@ -523,9 +560,17 @@ function analyse(input: string, data: UnicodeData): Output[] {
       text: T('note.glyphMessage', { how: howText(bestGlyph) }),
     });
   else if (c.homoglyph) out.push({ type: 'note', level: 'warn', text: T('note.glyphNone') });
+  out.push(...holloway);
   if (inv.read < inv.carriers.length)
     out.push({ type: 'note', level: 'info', text: T('note.truncated', { read: inv.read }) });
-  if (!inv.carriers.length && !inv.inPlace && !c.homoglyph && !c.control && !c.space) {
+  if (
+    !inv.carriers.length &&
+    !inv.inPlace &&
+    !c.homoglyph &&
+    !c.control &&
+    !c.space &&
+    !holloway.length
+  ) {
     out.push({ type: 'note', level: 'success', text: T('note.nothing') });
   }
 
@@ -678,7 +723,12 @@ function hide(
 const LATIN_CYRILLIC =
   /(?=[\p{L}\p{M}]*\p{Script=Latin})(?=[\p{L}\p{M}]*\p{Script=Cyrillic})[\p{L}\p{M}]+/gu;
 
-function quickLook(whole: string): { invisible: number; tags: boolean; mixed: number } {
+function quickLook(whole: string): {
+  invisible: number;
+  tags: boolean;
+  mixed: number;
+  holloway: number;
+} {
   const head = whole.length > DETECT_SCAN ? whole.slice(0, DETECT_SCAN) : whole;
   const chars = Array.from(head);
   let invisible = 0;
@@ -692,7 +742,16 @@ function quickLook(whole: string): { invisible: number; tags: boolean; mixed: nu
     invisible++;
     if (cp >= 0xe0020 && cp <= 0xe007e) tags = true;
   }
-  return { invisible, tags, mixed: head.match(LATIN_CYRILLIC)?.length ?? 0 };
+  // Holloway homoglyph/space carriers, counted only inside a Latin cover: a page of Cyrillic or CJK
+  // whose letters happen to overlap the homoglyph table is not a swap.
+  let holloway = 0;
+  const d = decodeHolloway(head);
+  if (d) {
+    const carriers = d.homoglyphs + d.specialSpaces;
+    const asciiLetters = (head.match(/[A-Za-z]/g) ?? []).length;
+    if (carriers >= 4 && asciiLetters >= 10 && asciiLetters >= carriers) holloway = carriers;
+  }
+  return { invisible, tags, mixed: head.match(LATIN_CYRILLIC)?.length ?? 0, holloway };
 }
 
 // ---------- the tool ----------
@@ -796,11 +855,16 @@ export default defineTool({
     if (!t) return null;
     const look = quickLook(t);
     const payload = look.invisible >= 8 || look.tags;
-    if (!look.invisible && !look.mixed) return null;
-    const score = Math.max(look.invisible ? (payload ? 0.88 : 0.5) : 0, look.mixed ? 0.75 : 0);
+    if (!look.invisible && !look.mixed && !look.holloway) return null;
+    const score = Math.max(
+      look.invisible ? (payload ? 0.88 : 0.5) : 0,
+      look.mixed ? 0.75 : 0,
+      look.holloway ? (look.holloway >= 8 ? 0.85 : 0.6) : 0,
+    );
     const reasons = [
       look.invisible ? T('detect.invisible', { count: look.invisible }) : '',
       look.mixed ? T('detect.mixed', { count: look.mixed }) : '',
+      look.holloway ? T('detect.holloway', { count: look.holloway }) : '',
     ].filter(Boolean);
     return { score, options: { mode: 'analyse' }, reason: reasons.join(' · ') };
   },

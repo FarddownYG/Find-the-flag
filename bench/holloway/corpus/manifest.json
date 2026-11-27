@@ -1,0 +1,47 @@
+[
+  {
+    "file": "01-tweet-weather.txt",
+    "secret": "ftf_homoglyph_1",
+    "cover": "Just landed in town and the weather is lovely, so I am heading out for a long walk by the river!"
+  },
+  {
+    "file": "02-paragraph.txt",
+    "secret": "secret message",
+    "cover": "The old library at the end of the street opens at nine every morning. Inside, the shelves smell of paper and dust, and the reading room is always quiet. People come to borrow novels, to study for exams, or just to sit by the window and watch the rain run down the glass. Nobody hurries here, and that is exactly why so many of us keep coming back."
+  },
+  {
+    "file": "03-multispace.txt",
+    "secret": "hidden in plain sight",
+    "cover": "Meeting  notes:   we   talked   about   the   roadmap,  the   budget,  and   the   next   release   date   for   the   team.   Nothing   else   to   report   today."
+  },
+  {
+    "file": "04-punctuation.txt",
+    "secret": "meet me at 9:30",
+    "cover": "Wow -- (really?) it's \"amazing\" [and] #blessed; see you soon, friends & family! Thanks for all the love, the support, and the kind words today."
+  },
+  {
+    "file": "05-flag-url.txt",
+    "secret": "ftf_stego-2",
+    "cover": "New post is up on the blog today, read it when you have a minute and tell me what you think about the ending, I would love to hear your honest opinion."
+  },
+  {
+    "file": "06-short-tweet.txt",
+    "secret": "ok",
+    "cover": "Coffee first, then everything else."
+  },
+  {
+    "file": "07-lines.txt",
+    "secret": "two lines of cover",
+    "cover": "Line one of the cover text goes here with a few words.\nLine two follows right after, also with plenty of ordinary words in it.\n\nLast line, after a blank one, closes the note."
+  },
+  {
+    "file": "08-numbers.txt",
+    "secret": "a.b/c%d_e-f?g",
+    "cover": "Order 4521 shipped on 2026-03-14 to 12 Baker Street, flat 7. Expect delivery between 10 and 12, and call 555-0142 if the courier is late."
+  },
+  {
+    "file": "09-long-flag.txt",
+    "secret": "ftf_the_quick_brown_fox_jumps_over_the_lazy_dog_1234567890",
+    "cover": "The old library at the end of the street opens at nine every morning. Inside, the shelves smell of paper and dust, and the reading room is always quiet. People come to borrow novels, to study for exams, or just to sit by the window and watch the rain run down the glass. Nobody hurries here, and that is exactly why so many of us keep coming back. The old library at the end of the street opens at nine every morning. Inside, the shelves smell of paper and dust, and the reading room is always quiet. People come to borrow novels, to study for exams, or just to sit by the window and watch the rain run down the glass. Nobody hurries here, and that is exactly why so many of us keep coming back."
+  }
+]
