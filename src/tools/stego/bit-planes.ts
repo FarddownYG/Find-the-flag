@@ -8,6 +8,7 @@ import {
   channelImage,
   equalize,
   fitImage,
+  hasAlpha,
   mapRgb,
   planeStats,
   randomColormap,
@@ -15,7 +16,7 @@ import {
 
 const T = toolT('bit-planes');
 
-const CHANNELS = [
+export const CHANNELS = [
   { id: 'r', letter: 'R', name: () => T('channel.r'), index: 0 },
   { id: 'g', letter: 'G', name: () => T('channel.g'), index: 1 },
   { id: 'b', letter: 'B', name: () => T('channel.b'), index: 2 },
@@ -26,13 +27,8 @@ const PLANE_SIDE = 512;
 const ONE_SIDE = 4096;
 const FILTER_SIDE = 1024;
 
-const hasAlpha = (img: RgbaImage) => {
-  for (let i = 3; i < img.data.length; i += 4) if (img.data[i] !== 255) return true;
-  return false;
-};
-
 /** "Green bit 0 (lowest)": the channel name, the bit and a hint for the two ends. */
-const planeName = (channel: string, bit: number) =>
+export const planeName = (channel: string, bit: number) =>
   bit === 0
     ? T('label.planeLowest', { channel, bit })
     : bit === 7

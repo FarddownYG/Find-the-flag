@@ -60,6 +60,21 @@ export function resultToText(result: ToolResult): string {
       case 'sandbox':
         parts.push(o.payload);
         break;
+      case 'gallery': {
+        const names = new Map(o.groups.flatMap((g) => g.items).map((i) => [i.id, i.label]));
+        if (o.lookFirst?.length) {
+          parts.push(`Look first: ${o.lookFirst.map((id) => names.get(id) ?? id).join(', ')}`);
+        }
+        for (const g of o.groups) {
+          parts.push(g.title);
+          for (const item of g.items) {
+            parts.push(
+              `${item.suspect ? '* ' : ''}${item.label} [image ${item.image.width}x${item.image.height}]${item.note ? ` ${item.note}` : ''}`,
+            );
+          }
+        }
+        break;
+      }
       case 'analysis':
         parts.push(
           ...o.result.findings.map((f) => `${f.kind} ${f.confidence} ${f.title} ${f.detail ?? ''}`),

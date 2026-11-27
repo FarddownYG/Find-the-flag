@@ -11,6 +11,7 @@ import { flagSettings } from './settings';
 import { mapBlock } from './map';
 import { sandboxBlock } from './xss-sandbox';
 import { renderAnalysis } from './analysis-view';
+import { renderGallery } from './gallery';
 
 export interface OutputContext {
   /** Open another tool with this data as its input (and, when given, these option values). */
@@ -734,6 +735,8 @@ export function renderResult(result: ToolResult, ctx: OutputContext): HTMLElemen
         return sandboxBlock(o);
       case 'analysis':
         return renderAnalysis(o.result, ctx);
+      case 'gallery':
+        return renderGallery(o, ctx);
     }
   });
 }

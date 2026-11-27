@@ -22,6 +22,20 @@ export function fitImage(img: RgbaImage, maxSide: number): { image: RgbaImage; s
   return { image: { width: w, height: h, data }, scaled: true };
 }
 
+/** True when some pixel is not fully opaque. */
+export function hasAlpha(img: RgbaImage): boolean {
+  for (let i = 3; i < img.data.length; i += 4) if (img.data[i] !== 255) return true;
+  return false;
+}
+
+/** Nearest-neighbour shrink so that the picture has at most `maxPixels` pixels. */
+export function fitPixels(img: RgbaImage, maxPixels: number): RgbaImage {
+  const n = img.width * img.height;
+  if (n <= maxPixels) return img;
+  const side = Math.max(1, Math.floor(Math.max(img.width, img.height) * Math.sqrt(maxPixels / n)));
+  return fitImage(img, side).image;
+}
+
 /** Black and white picture of one bit of one channel (0 = R ... 3 = A). */
 export function bitPlaneImage(img: RgbaImage, channel: number, bit: number): RgbaImage {
   const n = img.width * img.height;

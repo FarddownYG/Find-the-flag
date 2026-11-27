@@ -52,7 +52,7 @@ const MAX_ZONES = 4;
 const MAX_ZONE_COMBOS = 1500;
 const MAX_ANOMALY_ROWS = 12;
 
-interface Hit {
+export interface Hit {
   kind: HitKind;
   params: LsbParams;
   /** Larger is better within a kind. */
@@ -105,7 +105,7 @@ function classify(b: Uint8Array, params: LsbParams): Hit | null {
   }
 }
 
-function scan(img: RgbaImage): { hits: Hit[]; tried: number } {
+export function scan(img: RgbaImage): { hits: Hit[]; tried: number } {
   const opaque = (() => {
     for (let i = 3; i < img.data.length; i += 4) if (img.data[i] !== 255) return false;
     return true;
@@ -190,7 +190,7 @@ function scanZones(img: RgbaImage): ZoneScan {
   return result;
 }
 
-const hitLabel = (h: Hit) =>
+export const hitLabel = (h: Hit) =>
   h.zone ? `${paramsLabel(h.params)}, ${h.zone}` : paramsLabel(h.params);
 
 /** "12:hello" cut to the 12 bytes after the colon; null when the stream has no such prefix. */

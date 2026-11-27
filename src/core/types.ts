@@ -217,7 +217,30 @@ export type Output =
    * (src/ui/analysis-view.ts), explanation first.
    */
   | { type: 'analysis'; label?: string; result: AnalysisResult }
+  /**
+   * Many pictures of one input, grouped (bit planes, colour remaps, filters...). The page draws
+   * a lazy thumbnail grid with a full-screen viewer (zoom, pan, pixel inspector, PNG downloads);
+   * `lookFirst` lists the ids of the items worth opening first. Keep the total pixel count
+   * bounded: the images cross the worker boundary by structured clone.
+   */
+  | {
+      type: 'gallery';
+      label?: string;
+      groups: { title: string; items: GalleryItem[] }[];
+      lookFirst?: string[];
+    }
   | { type: 'note'; level: 'info' | 'warn' | 'error' | 'success'; text: string };
+
+/** One picture of a gallery. `id` is unique across the whole gallery. */
+export interface GalleryItem {
+  id: string;
+  label: string;
+  image: RgbaImage;
+  /** Shown under the picture in the viewer (why it is here, what to look for). */
+  note?: string;
+  /** The tool's triage found this one worth a look. */
+  suspect?: boolean;
+}
 
 export type ToolResult = Output[];
 
