@@ -20,9 +20,9 @@ réussi quand le secret est retrouvé et remonté par le pipeline.
 
 ## Score
 
-| Outil / schéma | Challenges | Réussis | Échoués | Faux positifs | Statut |
-| --- | --- | --- | --- | --- | --- |
-| Holloway (homoglyphes, « Twitter Secret Messages ») | 9 | 9 | 0 | 0 | ✅ OK |
+| Outil / schéma                                      | Challenges | Réussis | Échoués | Faux positifs | Statut |
+| --------------------------------------------------- | ---------- | ------- | ------- | ------------- | ------ |
+| Holloway (homoglyphes, « Twitter Secret Messages ») | 9          | 9       | 0       | 0             | ✅ OK  |
 
 ### Détails
 
