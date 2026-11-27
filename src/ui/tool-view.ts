@@ -29,6 +29,7 @@ import { clear, copyText, debounce, h } from './dom';
 import { glyphSvg } from './glyph';
 import { dragSettled, renderResult } from './outputs';
 import { flagSettings } from './settings';
+import { holdFile } from './unload-guard';
 
 type PasteAs = 'text' | 'hex' | 'base64';
 
@@ -63,6 +64,13 @@ interface ToolState {
 }
 
 const memory = new Map<string, ToolState>();
+const fileGuard = Symbol('tool-file');
+/** Ask before a close/reload only while some tool still holds a loaded file. */
+const syncUnloadGuard = (): void =>
+  holdFile(
+    fileGuard,
+    [...memory.values()].some((s) => s.file !== null),
+  );
 const runner = new Runner();
 
 /** Set by triage / "Send to…" right before navigating to a tool. */
@@ -149,6 +157,7 @@ export function renderTool(
       state.text = raw.text ?? '';
       state.pasteAs = 'text';
     }
+    syncUnloadGuard();
   }
 
   function currentRaw(): RawInput | null {
@@ -319,6 +328,7 @@ export function renderTool(
       }
       if (seq !== inputSeq) return; // another input was chosen while the sample loaded
       state.file = null;
+      syncUnloadGuard();
       state.values = values;
       state.text = text;
       state.pasteAs = pasteAs;
@@ -836,6 +846,7 @@ export function renderTool(
               onclick: () => (
                 leaveDemo(true),
                 (state.file = null),
+                syncUnloadGuard(),
                 (prepared = null),
                 (inputSeq += 1),
                 runner.release(),

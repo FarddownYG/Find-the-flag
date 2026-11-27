@@ -117,11 +117,84 @@ function flatten(group: string, prefix: string, value: unknown, out: Entry[], de
   if (text !== '') out.push({ group, key: prefix, value: text });
 }
 
-function gpsFromTags(gps: Record<string, unknown>, which: 'Latitude' | 'Longitude'): number | null {
-  const fromTags = toDecimal(gps[`GPS${which}`], gps[`GPS${which}Ref`]);
-  if (fromTags) return fromTags.value;
-  const direct = gps[which.toLowerCase()];
-  return typeof direct === 'number' && Number.isFinite(direct) ? direct : null;
+interface GpsFix {
+  lat: number;
+  lon: number;
+  /** Where it was read: the GPS IFD, or an XMP/EXIF-namespace packet. */
+  where: 'gps' | 'xmp';
+  /** The raw latitude/longitude as stored, for the "redo it by hand" note. */
+  rawLat: string;
+  rawLon: string;
+  altitude?: string;
+  time?: string;
+}
+
+const rawText = (v: unknown, ref: unknown): string => {
+  const r = typeof ref === 'string' ? ref : '';
+  if (Array.isArray(v)) {
+    const [d, m, sec] = v as unknown[];
+    return `${String(d)}° ${String(m ?? 0)}′ ${String(sec ?? 0)}″ ${r}`.trim();
+  }
+  return `${String(v)} ${r}`.trim();
+};
+
+/** "35/1" (XMP rational) or a plain number. */
+const asNumber = (v: unknown): number | null => {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  if (typeof v !== 'string') return null;
+  const m = v.trim().match(/^(-?\d+(?:\.\d+)?)(?:\/(\d+(?:\.\d+)?))?$/);
+  if (!m) return null;
+  const n = m[2] === undefined ? Number(m[1]) : Number(m[1]) / Number(m[2]);
+  return Number.isFinite(n) ? n : null;
+};
+
+function gpsAltitude(g: Record<string, unknown>): string | undefined {
+  const n = asNumber(g.GPSAltitude);
+  if (n === null) return undefined;
+  const ref = g.GPSAltitudeRef;
+  const below = ref === 1 || ref === '1' || (isRecord(ref) && Object.values(ref).includes(1));
+  return `${Math.round((below ? -n : n) * 100) / 100} m`;
+}
+
+function gpsTime(g: Record<string, unknown>): string | undefined {
+  const stamp = g.GPSTimeStamp;
+  const date = typeof g.GPSDateStamp === 'string' ? g.GPSDateStamp.replace(/:/g, '-') : '';
+  if (Array.isArray(stamp) && stamp.length >= 3) {
+    const [hh, mm, ss] = (stamp as unknown[]).map((x) => Math.floor(Number(x)));
+    const clock = [hh, mm, ss].map((x) => String(x).padStart(2, '0')).join(':');
+    return `${date ? `${date} ` : ''}${clock} UTC`;
+  }
+  if (typeof stamp === 'string' && stamp) return stamp;
+  return date || undefined;
+}
+
+function gpsFix(groups: Record<string, Record<string, unknown>>): GpsFix | null {
+  // The GPS IFD first, then XMP (its exif: namespace lands in the "exif" group of the reader).
+  for (const where of ['gps', 'xmp', 'exif'] as const) {
+    const g = groups[where];
+    if (!g) continue;
+    const la = toDecimal(g.GPSLatitude, g.GPSLatitudeRef);
+    const lo = toDecimal(g.GPSLongitude, g.GPSLongitudeRef);
+    let lat = la?.value ?? null;
+    let lon = lo?.value ?? null;
+    if (where === 'gps') {
+      if (lat === null && typeof g.latitude === 'number' && Number.isFinite(g.latitude))
+        lat = g.latitude;
+      if (lon === null && typeof g.longitude === 'number' && Number.isFinite(g.longitude))
+        lon = g.longitude;
+    }
+    if (lat === null || lon === null) continue;
+    return {
+      lat,
+      lon,
+      where: where === 'gps' ? 'gps' : 'xmp',
+      rawLat: rawText(g.GPSLatitude, g.GPSLatitudeRef),
+      rawLon: rawText(g.GPSLongitude, g.GPSLongitudeRef),
+      altitude: gpsAltitude(g),
+      time: gpsTime(g),
+    };
+  }
+  return null;
 }
 
 function xmpPackets(bytes: Uint8Array): string[] {
@@ -147,10 +220,21 @@ function thumbnailInfo(data: Uint8Array): string {
 const kvOf = (label: string, entries: [string, string][]): Output[] =>
   entries.length ? [{ type: 'kv', label, entries }] : [];
 
-/** A map for a usable position (not 0, 0, which is what an empty fix looks like). */
-const mapOf = (lat: number | null, lon: number | null): Output[] =>
-  lat !== null && lon !== null && positionProblem(lat, lon) === null
-    ? [{ type: 'map', label: T('label.gpsMap'), lat, lon, zoom: 16 }]
+/** The Localisation block. A doubtful position (0, 0 or off the globe) is shown with its problem, never hidden. */
+const mapOf = (fix: GpsFix | null): Output[] =>
+  fix
+    ? [
+        {
+          type: 'map',
+          label: T('label.gpsMap'),
+          lat: fix.lat,
+          lon: fix.lon,
+          zoom: 16,
+          problem: positionProblem(fix.lat, fix.lon) ?? undefined,
+          altitude: fix.altitude,
+          time: fix.time,
+        },
+      ]
     : [];
 
 function analysePdf(bytes: Uint8Array): Output[] {
@@ -294,9 +378,9 @@ export default defineTool({
     const tagOf = (e: Entry) => e.key.split('.').pop() ?? e.key;
 
     // ---- GPS
-    const gps = groups.gps;
-    const lat = gps ? gpsFromTags(gps, 'Latitude') : null;
-    const lon = gps ? gpsFromTags(gps, 'Longitude') : null;
+    const fix = gpsFix(groups);
+    const lat = fix?.lat ?? null;
+    const lon = fix?.lon ?? null;
     const gpsEntries: [string, string][] = [];
     if (lat !== null && lon !== null) {
       // Degrees/minutes/seconds and the map links are on the map block below.
@@ -312,6 +396,9 @@ export default defineTool({
     ]);
     gpsEntries.push(...pick((e) => e.group === 'gps' && !skipGps.has(tagOf(e))));
 
+    // ---- the Localisation block comes first when there is a position
+    out.push(...mapOf(fix));
+
     // ---- notes first
     if (parseError && !png && !jpeg && !gif) {
       out.push({
@@ -325,6 +412,19 @@ export default defineTool({
         type: 'note',
         level: 'info',
         text: T('note.gps', { lat: lat.toFixed(6), lon: lon!.toFixed(6) }),
+      });
+    }
+    if (fix) {
+      out.push({
+        type: 'note',
+        level: 'info',
+        text: T('note.gpsTrace', {
+          where: T(fix.where === 'gps' ? 'gpsWhere.ifd' : 'gpsWhere.xmp'),
+          lat: fix.rawLat,
+          lon: fix.rawLon,
+          dlat: fix.lat.toFixed(6),
+          dlon: fix.lon.toFixed(6),
+        }),
       });
     }
     const messageHits = entries.filter((e) => MESSAGE_FIELDS.includes(tagOf(e)) && e.value.trim());
@@ -354,7 +454,6 @@ export default defineTool({
         ),
       ),
       ...kvOf('GPS', gpsEntries),
-      ...mapOf(lat, lon),
       ...kvOf(
         T('label.software'),
         pick((e) => TEXT_FIELDS.has(tagOf(e))),

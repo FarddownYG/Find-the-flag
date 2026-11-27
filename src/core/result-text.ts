@@ -7,7 +7,7 @@ export function mapLinks(lat: number, lon: number) {
   const lo = lon.toFixed(6);
   return {
     google: `https://www.google.com/maps/search/?api=1&query=${la},${lo}`,
-    osm: `https://www.openstreetmap.org/?mlat=${la}&mlon=${lo}#map=16/${la}/${lo}`,
+    osm: `https://www.openstreetmap.org/?mlat=${la}&mlon=${lo}#map=17/${la}/${lo}`,
   };
 }
 

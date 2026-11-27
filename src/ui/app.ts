@@ -13,6 +13,7 @@ import { renderResources } from './resources';
 import { search } from './search';
 import { flagSettings } from './settings';
 import { renderTool, setPending } from './tool-view';
+import { holdFile } from './unload-guard';
 
 export function mountApp(root: HTMLElement): void {
   const main = h('main', { class: 'main', id: 'main', tabindex: '-1' });
@@ -259,6 +260,7 @@ function rank(sample: Sample) {
 }
 
 function renderHome(main: HTMLElement): () => void {
+  const guard = Symbol('home-file');
   let file: { bytes: Uint8Array; name: string; handle: File } | null = null;
   const results = h('div', { class: 'triage-results', 'aria-live': 'polite' });
   const fileInput = h('input', {
@@ -278,6 +280,7 @@ function renderHome(main: HTMLElement): () => void {
     'aria-label': t('ui.home.inputLabel'),
     oninput: debounce(() => {
       file = null;
+      holdFile(guard, false);
       update();
     }, 120),
   });
@@ -420,6 +423,7 @@ function renderHome(main: HTMLElement): () => void {
     // Detectors only need the start of a big file; the full handle goes to the chosen tool.
     const head = f.size > TRIAGE_READ_LIMIT ? f.slice(0, TRIAGE_READ_LIMIT) : f;
     file = { bytes: new Uint8Array(await head.arrayBuffer()), name: f.name, handle: f };
+    holdFile(guard, true);
     ta.value = '';
     update();
   }
@@ -595,5 +599,6 @@ function renderHome(main: HTMLElement): () => void {
   return () => {
     runToken++;
     runner.cancel();
+    holdFile(guard, false);
   };
 }

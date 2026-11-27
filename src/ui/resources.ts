@@ -15,6 +15,7 @@ import {
   type ResourceKind,
 } from '../resources/data';
 import { clear, debounce, h } from './dom';
+import { externalLink } from './links';
 
 const catLabel = (c: ResourceCategory): string => t(`ui.resources.cat.${c}`);
 const kindLabel = (k: ResourceKind): string => t(`ui.resources.kind.${k}`);
@@ -33,11 +34,13 @@ function entryCard(r: Resource): HTMLElement {
   return h(
     'li',
     { class: 'res-card' },
-    h(
-      'a',
-      { class: 'res-link', href: r.url, target: '_blank', rel: 'noopener noreferrer' },
-      h('span', { class: 'res-name' }, r.name),
-      h('span', { class: `res-kind res-kind-${r.kind}` }, kindLabel(r.kind)),
+    externalLink(
+      r.url,
+      [
+        h('span', { class: 'res-name' }, r.name),
+        h('span', { class: `res-kind res-kind-${r.kind}` }, kindLabel(r.kind)),
+      ],
+      { class: 'res-link' },
     ),
     h('p', { class: 'res-desc' }, r.description),
   );
@@ -133,16 +136,7 @@ export function renderResources(main: HTMLElement): void {
       h('p', { class: 'res-attribution' }, [
         t('ui.resources.attribution'),
         ' ',
-        h(
-          'a',
-          {
-            class: 'res-src',
-            href: RESOURCE_SOURCE_URL,
-            target: '_blank',
-            rel: 'noopener noreferrer',
-          },
-          RESOURCE_SOURCE,
-        ),
+        externalLink(RESOURCE_SOURCE_URL, RESOURCE_SOURCE, { class: 'res-src' }),
       ]),
       h(
         'div',

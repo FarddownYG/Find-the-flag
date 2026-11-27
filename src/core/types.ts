@@ -165,7 +165,19 @@ export type Output =
    * A location. Coordinates and map links render with no network access; the interactive map
    * only loads OpenStreetMap tiles after the user clicks "Show map".
    */
-  | { type: 'map'; label?: string; lat: number; lon: number; zoom?: number }
+  | {
+      type: 'map';
+      label?: string;
+      lat: number;
+      lon: number;
+      zoom?: number;
+      /** 'zero' = 0, 0 (an empty fix); 'range' = off the globe. Set when the position is doubtful. */
+      problem?: 'zero' | 'range';
+      /** Already formatted, e.g. "33 m". */
+      altitude?: string;
+      /** Already formatted GPS date/time. */
+      time?: string;
+    }
   /**
    * Buttons that set option values and re-run the tool ("Apply this order", "Use height 480").
    * This is how a tool proposes a fix the user can accept in one click. With `open`, the button

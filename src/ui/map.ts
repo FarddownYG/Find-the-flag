@@ -1,7 +1,8 @@
 import { mapLinks } from '../core/result-text';
 import type { Output } from '../core/types';
 import { t } from '../i18n';
-import { h } from './dom';
+import { copyText, h } from './dom';
+import { externalLink } from './links';
 
 const TILES = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
 
@@ -64,40 +65,63 @@ export function mapBlock(o: Extract<Output, { type: 'map' }>): HTMLElement {
     t('ui.map.show'),
   );
   const notice = h('span', { class: 'fine' }, t('ui.map.notice'));
+  const decimal = `${o.lat.toFixed(6)}, ${o.lon.toFixed(6)}`;
+  const dmsText = `${dms(o.lat, 'N', 'S')}  ${dms(o.lon, 'E', 'W')}`;
+  const row = (label: string, value: string) => {
+    const copy: HTMLButtonElement = h(
+      'button',
+      { type: 'button', class: 'btn btn-ghost', onclick: () => void copyText(value, copy) },
+      t('ui.out.copy'),
+    );
+    return h(
+      'p',
+      { class: 'map-row' },
+      h('span', { class: 'fine' }, label),
+      h('span', { class: 'map-coords' }, value),
+      copy,
+    );
+  };
+  // A position off the globe is shown as found, with no way to open it anywhere.
+  const usable = o.problem !== 'range';
   return h(
     'section',
     { class: 'out out-map', 'data-lat': o.lat, 'data-lon': o.lon },
     h(
       'div',
       { class: 'out-head' },
-      h('span', { class: 'out-label' }, o.label ?? t('ui.map.location')),
-      h('span', { class: 'out-meta' }, `${o.lat.toFixed(6)}, ${o.lon.toFixed(6)}`),
+      h('span', { class: 'out-label' }, o.label ?? t('ui.map.localisation')),
+      h('span', { class: 'out-meta' }, decimal),
     ),
     h(
       'div',
       { class: 'map-info' },
-      h('p', { class: 'map-coords' }, `${dms(o.lat, 'N', 'S')}  ${dms(o.lon, 'E', 'W')}`),
-      h(
-        'p',
-        { class: 'map-links' },
-        h(
-          'a',
-          {
-            href: links.google,
-            target: '_blank',
-            rel: 'noopener noreferrer',
-            class: 'btn btn-ghost',
-          },
-          t('ui.map.google'),
-        ),
-        h(
-          'a',
-          { href: links.osm, target: '_blank', rel: 'noopener noreferrer', class: 'btn btn-ghost' },
-          t('ui.map.osm'),
-        ),
-        show,
-      ),
-      notice,
+      o.problem
+        ? h('p', { class: 'map-warn' }, t(o.problem === 'zero' ? 'ui.map.fake' : 'ui.map.invalid'))
+        : null,
+      row(t('ui.map.decimal'), decimal),
+      usable ? row(t('ui.map.dms'), dmsText) : null,
+      o.altitude
+        ? h(
+            'p',
+            { class: 'map-row' },
+            h('span', { class: 'fine' }, t('ui.map.altitude')),
+            o.altitude,
+          )
+        : null,
+      o.time
+        ? h('p', { class: 'map-row' }, h('span', { class: 'fine' }, t('ui.map.time')), o.time)
+        : null,
+      usable
+        ? h(
+            'p',
+            { class: 'map-links' },
+            externalLink(links.google, t('ui.map.google'), { class: 'btn btn-ghost' }),
+            externalLink(links.osm, t('ui.map.osm'), { class: 'btn btn-ghost' }),
+            show,
+          )
+        : null,
+      usable ? h('p', { class: 'fine' }, t('ui.map.privacy')) : null,
+      usable ? notice : null,
     ),
     holder,
   );

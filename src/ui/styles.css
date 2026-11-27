@@ -1149,6 +1149,32 @@ tr.is-hl td:first-child {
   white-space: nowrap;
 }
 
+/* ---------- external links ---------- */
+.ext-icon {
+  display: inline-block;
+  margin-inline-start: 0.3em;
+  vertical-align: -0.1em;
+}
+.ext-icon svg {
+  width: 0.9em;
+  height: 0.9em;
+}
+.map-row {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.map-row .fine {
+  min-width: 7ch;
+}
+.map-warn {
+  margin: 0;
+  color: var(--warn, inherit);
+  font-weight: 600;
+}
+
 /* ---------- filters, pictures, maps ---------- */
 .out-filter {
   width: 14ch;

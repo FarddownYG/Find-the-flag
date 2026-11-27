@@ -63,7 +63,7 @@ describe('EXIF / metadata', () => {
   it('puts the GPS position on a map', async () => {
     const out = await run(sample('stego-exif.jpg'));
     const map = out.find((o) => o.type === 'map');
-    expect(map).toMatchObject({ type: 'map', label: 'GPS position' });
+    expect(map).toMatchObject({ type: 'map', label: 'Localisation' });
     if (map?.type !== 'map') throw new Error('no map');
     expect(map.lat).toBeCloseTo(48.8584, 6);
     expect(map.lon).toBeCloseTo(2.2945, 6);
@@ -211,5 +211,63 @@ describe('EXIF / metadata: PDF cross-link', () => {
     expect(last?.type === 'note' && last.text).toBe(
       'To see every object, earlier revision, script and embedded file, and the decoded streams, open the file in the PDF analyzer.',
     );
+  });
+
+  describe('Localisation block', () => {
+    /** A JPEG whose only metadata is an XMP packet with a position (invented coordinates). */
+    const xmpJpeg = (lat: string, lon: string, extra = '') => {
+      const xmp = `<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description xmlns:exif="http://ns.adobe.com/exif/1.0/" exif:GPSLatitude="${lat}" exif:GPSLongitude="${lon}" ${extra}/></rdf:RDF></x:xmpmeta>`;
+      const body = concatBytes(latin1Encode('http://ns.adobe.com/xap/1.0/\0'), utf8Encode(xmp));
+      const len = body.length + 2;
+      return concatBytes(
+        new Uint8Array([0xff, 0xd8, 0xff, 0xe1, len >> 8, len & 255]),
+        body,
+        new Uint8Array([0xff, 0xd9]),
+      );
+    };
+    const mapOut = (out: Output[]) => out.find((o) => o.type === 'map');
+
+    it('comes first, with the DMS to decimal trace, for an EXIF position', async () => {
+      const out = await run(sample('stego-exif.jpg'));
+      expect(out[0]?.type).toBe('map');
+      const trace = resultToText(out);
+      expect(trace).toContain('How this was found');
+      expect(trace).toContain('GPS block of the EXIF data');
+      expect(trace).toContain('48° 51′ 30.24″ N');
+      expect(trace).toContain('48.858400, 2.294500');
+      const map = mapOut(out);
+      expect(map?.type === 'map' && map.problem).toBeFalsy();
+    });
+
+    it('finds a position that lives only in XMP, with altitude and time', async () => {
+      const out = await run(
+        xmpJpeg(
+          '10,30.000N',
+          '20,15.000W',
+          'exif:GPSAltitude="35/1" exif:GPSTimeStamp="2024-03-15T10:29:41Z"',
+        ),
+      );
+      const map = mapOut(out);
+      if (map?.type !== 'map') throw new Error('no map');
+      expect(map.lat).toBeCloseTo(10.5, 6);
+      expect(map.lon).toBeCloseTo(-20.25, 6);
+      expect(map.altitude).toBe('35 m');
+      expect(map.time).toBe('2024-03-15T10:29:41Z');
+      expect(resultToText(out)).toContain('XMP packet');
+    });
+
+    it('flags 0, 0 as a probable fake but still shows it', async () => {
+      const map = mapOut(await run(xmpJpeg('0,0.000N', '0,0.000E')));
+      expect(map).toMatchObject({ type: 'map', lat: 0, lon: 0, problem: 'zero' });
+    });
+
+    it('flags a latitude of 123 as out of range', async () => {
+      const map = mapOut(await run(xmpJpeg('123,0.000N', '10,0.000E')));
+      expect(map).toMatchObject({ type: 'map', lat: 123, problem: 'range' });
+    });
+
+    it('has no Localisation block on a photo without GPS', async () => {
+      expect(mapOut(await run(sample('stego-text-chunk.png')))).toBeUndefined();
+    });
   });
 });
