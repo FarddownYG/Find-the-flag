@@ -92,9 +92,23 @@ export function loaded(): Uint8Array {
     ifd0: [[0x010e, ascii('Lab sample picture')]],
     exif: [[0x9286, comment('ASCII', utf8Encode(META_COMMENT))]],
   });
-  const zip = zipSync({ 'note.txt': utf8Encode(TRAILING_NOTE) });
+  // Fixed mtime so the ZIP bytes are deterministic: fflate otherwise stamps the current time, which
+  // makes the appended-archive strings (and this fixture's string count) vary between runs.
+  const zip = zipSync({ 'note.txt': [utf8Encode(TRAILING_NOTE), { mtime: 1577836800000 }] });
+  // Several distinct tEXt chunks so the strings table reliably exceeds its cap (the "show every
+  // line" test needs more than a dozen strings, independent of run-to-run byte noise).
   return concatBytes(
-    pngWith(pngBytes(img), pngChunk('eXIf', exif), tEXt('Comment', TEXT_CHUNK)),
+    pngWith(
+      pngBytes(img),
+      pngChunk('eXIf', exif),
+      tEXt('Comment', TEXT_CHUNK),
+      tEXt('Title', 'Loaded sample picture'),
+      tEXt('Author', 'Find The Flag samples'),
+      tEXt('Software', 'ftf image lab fixture'),
+      tEXt('Source', 'generated, not a real file'),
+      tEXt('Warning', 'nothing secret here'),
+      tEXt('Copyright', 'public sample set'),
+    ),
     zip,
   );
 }
